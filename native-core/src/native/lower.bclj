@@ -1613,6 +1613,68 @@
    source-type core/NativeId] (U String Nil)
   (index-first-text index source-type "name"))
 
+(defn union-member-group-items
+  [index SourceIndexV0
+   source-union core/NativeId] (Vec core/NativeId)
+  (let [groups (U core/NativeId Nil) (index-first-object index source-union "members")]
+    (if (nil? groups) [] (index-sequence-items index groups))))
+
+(defn source-union-for-member
+  [index SourceIndexV0
+   module-name String
+   member-name String] (U core/NativeId Nil)
+  (let [unions (Vec core/NativeId) (vec (concat (index-form-ids index "defunion")
+               (index-form-ids index "deferror")))]
+    (loop [position Int 0]
+      (if (>= position (count unions))
+        nil
+        (let [source-union core/NativeId (nth unions position)
+              groups (Vec core/NativeId) (union-member-group-items index source-union)]
+          (if (and (= module-name (source-module-name index source-union))
+                (some?
+                  (some
+                    (fn [group core/NativeId] Bool
+                      (= member-name (fact-text index group "name")))
+                    groups)))
+            source-union
+            (recur (+ position 1))))))))
+
+(defn source-union-for-type-member
+  [index SourceIndexV0
+   source-type core/NativeId] (U core/NativeId Nil)
+  (let [kind (U String Nil) (source-type-kind index source-type)
+        spelling (U String Nil) (source-type-spelling index source-type)]
+    (if (or (not (or (= "type-prim" kind) (= "prim" kind)))
+          (nil? spelling))
+      nil
+      (let [resolved ResolvedSourceNameV0
+            (resolve-source-name index (source-module-name index source-type)
+              spelling)]
+        (if (resolvedsourcenamev0-visible resolved)
+          (source-union-for-member index
+            (resolvedsourcenamev0-module-name resolved)
+            (resolvedsourcenamev0-local-name resolved))
+          nil)))))
+
+(defn common-source-union
+  [index SourceIndexV0
+   source-types (Vec core/NativeId)] (U core/NativeId Nil)
+  (if (= 0 (count source-types))
+    nil
+    (let [first-union (U core/NativeId Nil)
+          (source-union-for-type-member index (nth source-types 0))]
+      (if (nil? first-union)
+        nil
+        (loop [position Int 1]
+          (if (>= position (count source-types))
+            first-union
+            (let [candidate (U core/NativeId Nil)
+                  (source-union-for-type-member index
+                    (nth source-types position))]
+              (if (and (some? candidate) (same-id? first-union candidate))
+                (recur (+ position 1))
+                nil))))))))
+
 (defn source-any-type?
   [index SourceIndexV0
    source-type (U core/NativeId Nil)] Bool
@@ -2036,9 +2098,22 @@
             resolutions (Vec TypeResolutionV0) (mapv
               (fn [argument core/NativeId] TypeResolutionV0
                 (resolve-source-type index argument))
-              arguments)]
-        (application-resolution source-type "U"
-          (sourceindexv0-record-keys index) resolutions))
+              arguments)
+            source-union (U core/NativeId Nil)
+            (common-source-union index arguments)]
+        (if (nil? source-union)
+          (application-resolution source-type "U"
+            (sourceindexv0-record-keys index) resolutions)
+          (let [module-name String (source-module-name index source-union)
+                name String (fact-text index source-union "name")]
+            (->TypeResolutionV0
+              (source-type-id (str module-name "/" name))
+              (resolution-definitions resolutions)
+              (resolution-diagnostics resolutions)
+              (every?
+                (fn [resolution TypeResolutionV0] Bool
+                  (typeresolutionv0-valid resolution))
+                resolutions)))))
 
       (= "type-fn" kind)
       (let [parameters-node (U core/NativeId Nil) (index-first-object index source-type "params")
@@ -2273,12 +2348,6 @@
           (recur (+ position 1)
             (append-type-def definitions definition)
             (conj resolutions settled)))))))
-
-(defn union-member-group-items
-  [index SourceIndexV0
-   source-union core/NativeId] (Vec core/NativeId)
-  (let [groups (U core/NativeId Nil) (index-first-object index source-union "members")]
-    (if (nil? groups) [] (index-sequence-items index groups))))
 
 (defn resolve-source-union
   [index SourceIndexV0
@@ -4211,26 +4280,6 @@
         (source-type-id
           (str (resolvedsourcenamev0-module-name resolved) "/"
             (subs local-name 2 (count local-name))))))))
-
-(defn source-union-for-member
-  [index SourceIndexV0
-   module-name String
-   member-name String] (U core/NativeId Nil)
-  (let [unions (Vec core/NativeId) (vec (concat (index-form-ids index "defunion")
-               (index-form-ids index "deferror")))]
-    (loop [position Int 0]
-      (if (>= position (count unions))
-        nil
-        (let [source-union core/NativeId (nth unions position)
-              groups (Vec core/NativeId) (union-member-group-items index source-union)]
-          (if (and (= module-name (source-module-name index source-union))
-                (some?
-                  (some
-                    (fn [group core/NativeId] Bool
-                      (= member-name (fact-text index group "name")))
-                    groups)))
-            source-union
-            (recur (+ position 1))))))))
 
 (defn union-member-constructor
   [env BodyEnvV0

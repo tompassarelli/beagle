@@ -1,0 +1,21 @@
+#lang beagle
+(ns native.type-closure-payloadless)
+
+(defunion ViewsAction
+  ViewsOverview
+  (ViewsHost [(host String)])
+  ViewsRefresh
+  (ViewsModule [(module String)])
+  ViewsJson
+  (ViewsPath [(path String)])
+  ViewsHelp)
+
+(defn preserve-action [action ViewsAction] ViewsAction
+  (match action
+    [(ViewsOverview) (->ViewsOverview)]
+    [(ViewsHost host) (->ViewsHost host)]
+    [(ViewsRefresh) (->ViewsRefresh)]
+    [(ViewsModule module) (->ViewsModule module)]
+    [(ViewsJson) (->ViewsJson)]
+    [(ViewsPath path) (->ViewsPath path)]
+    [(ViewsHelp) (->ViewsHelp)]))
