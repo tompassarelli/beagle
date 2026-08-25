@@ -1,0 +1,391 @@
+#lang beagle/js
+(ns beagle.nix-schema-path
+  (:require [beagle.datum-reader :as reader]
+            [clojure.string :as str]))
+
+(js/export
+  (defrecord SourceDocument
+    [source-id String
+     text String]))
+
+(js/export
+  (defrecord OptionPathOccurrence
+    [source-id String
+     path String
+     offset Int]))
+
+(js/export
+  (defunion OptionPathExtraction
+    (OptionPaths [occurrences (Vec OptionPathOccurrence)])
+    (OptionPathError
+      [source-id String
+       offset Int
+       message String])))
+
+(js/export
+  (defrecord RemovedPathUse
+    [path String
+     occurrences (Vec OptionPathOccurrence)]))
+
+(js/export
+  (defrecord PathSuggestion
+    [path String
+     distance Int]))
+
+(defrecord SourceStackEntry
+  [kind Keyword
+   items Int
+   prefix String
+   ignored Bool
+   pending-path String?
+   pending-offset Int])
+
+(defn event-opening? [kind Keyword] Bool
+  (or (= kind :list/open)
+      (= kind :vector/open)
+      (= kind :map/open)
+      (= kind :set/open)))
+
+(defn event-closing? [kind Keyword] Bool
+  (or (= kind :list/close)
+      (= kind :vector/close)
+      (= kind :map/close)
+      (= kind :set/close)))
+
+(defn event-prefix? [kind Keyword] Bool
+  (or (= kind :quote)
+      (= kind :quasiquote)
+      (= kind :unquote)
+      (= kind :unquote-splicing)))
+
+(defn map-stack-entry? [entry SourceStackEntry] Bool
+  (= (sourcestackentry-kind entry) :map/open))
+
+(defn string-prefix?
+  [value String
+   prefix String] Bool
+  (and (>= (count value) (count prefix))
+       (= prefix (subs value 0 (count prefix)))))
+
+(defn path-at-or-under?
+  [path String
+   root String] Bool
+  (and (> (count root) 0)
+       (or (= path root)
+           (and (> (count path) (count root))
+                (string-prefix? path root)
+                (= "." (subs path (count root) (inc (count root))))))))
+
+(defn ignored-path?
+  [path String
+   ignored-roots (Vec String)] Bool
+  (loop [remaining (Vec String) ignored-roots]
+    (if (empty? remaining)
+      false
+      (if (path-at-or-under? path (first remaining))
+        true
+        (recur (rest remaining))))))
+
+(defn keyword-path
+  [prefix String
+   event reader/ReaderEvent] String?
+  (let [value String (reader/readerevent-value event)]
+    (if (or (not= (reader/readerevent-kind event) :keyword)
+            (<= (count value) 1))
+      nil
+      (let [segment String (subs value 1 (count value))]
+        (cond
+          (> (count prefix) 0) (str prefix "." segment)
+          (str/includes? segment ".") segment
+          :else nil)))))
+
+(defn occurrence-from-entry
+  [document SourceDocument
+   entry SourceStackEntry] OptionPathOccurrence?
+  (let [path String? (sourcestackentry-pending-path entry)]
+    (if (nil? path)
+      nil
+      (->OptionPathOccurrence
+        (sourcedocument-source-id document)
+        path
+        (sourcestackentry-pending-offset entry)))))
+
+(defn append-entry-occurrence
+  [document SourceDocument
+   entry SourceStackEntry
+   ignored-roots (Vec String)
+   occurrences (Vec OptionPathOccurrence)] (Vec OptionPathOccurrence)
+  (let [occurrence OptionPathOccurrence? (occurrence-from-entry document entry)]
+    (if (nil? occurrence)
+      occurrences
+      (if (or (sourcestackentry-ignored entry)
+              (ignored-path?
+                (optionpathoccurrence-path occurrence)
+                ignored-roots))
+        occurrences
+        (conj occurrences occurrence)))))
+
+(defn entry-value-ignored?
+  [entry SourceStackEntry
+   ignored-roots (Vec String)] Bool
+  (let [path String? (sourcestackentry-pending-path entry)]
+    (or (sourcestackentry-ignored entry)
+        (and (some? path) (ignored-path? path ignored-roots)))))
+
+(defn completed-map-item [entry SourceStackEntry] SourceStackEntry
+  (->SourceStackEntry
+    (sourcestackentry-kind entry)
+    (inc (sourcestackentry-items entry))
+    (sourcestackentry-prefix entry)
+    (sourcestackentry-ignored entry)
+    nil
+    -1))
+
+(defn complete-parent-container [stack (Vec SourceStackEntry)] (Vec SourceStackEntry)
+  (if (empty? stack)
+    stack
+    (let [index Int (dec (count stack))
+          parent SourceStackEntry (nth stack index)]
+      (if (map-stack-entry? parent)
+        (assoc stack index (completed-map-item parent))
+        stack))))
+
+(defn consume-map-atom
+  [document SourceDocument
+   ignored-roots (Vec String)
+   entry SourceStackEntry
+   event reader/ReaderEvent
+   occurrences (Vec OptionPathOccurrence)] (Vec OptionPathOccurrence)
+  (if (= (mod (sourcestackentry-items entry) 2) 0)
+    occurrences
+    (append-entry-occurrence document entry ignored-roots occurrences)))
+
+(defn map-entry-after-atom
+  [entry SourceStackEntry
+   event reader/ReaderEvent] SourceStackEntry
+  (if (= (mod (sourcestackentry-items entry) 2) 0)
+    (->SourceStackEntry
+      (sourcestackentry-kind entry)
+      (inc (sourcestackentry-items entry))
+      (sourcestackentry-prefix entry)
+      (sourcestackentry-ignored entry)
+      (keyword-path (sourcestackentry-prefix entry) event)
+      (reader/readerevent-offset event))
+    (completed-map-item entry)))
+
+(defn scan-option-path-events
+  [document SourceDocument
+   ignored-roots (Vec String)
+   events (Vec reader/ReaderEvent)] OptionPathExtraction
+  (loop [remaining (Vec reader/ReaderEvent) events
+         stack (Vec SourceStackEntry) []
+         occurrences (Vec OptionPathOccurrence) []]
+    (if (empty? remaining)
+      (if (empty? stack)
+        (->OptionPaths occurrences)
+        (->OptionPathError
+          (sourcedocument-source-id document)
+          (count (sourcedocument-text document))
+          "unterminated source container"))
+      (let [event reader/ReaderEvent (first remaining)
+            kind Keyword (reader/readerevent-kind event)]
+        (cond
+          (= kind :metadata)
+          (->OptionPathError
+            (sourcedocument-source-id document)
+            (reader/readerevent-offset event)
+            "metadata forms are not supported by option-path extraction")
+
+          (event-prefix? kind)
+          (recur (rest remaining) stack occurrences)
+
+          (event-opening? kind)
+          (if (empty? stack)
+            (recur
+              (rest remaining)
+              (conj stack (->SourceStackEntry kind 0 "" false nil -1))
+              occurrences)
+            (let [parent SourceStackEntry (peek stack)
+                  parent-map Bool (map-stack-entry? parent)
+                  value-position Bool (and parent-map (= (mod (sourcestackentry-items parent) 2) 1))
+                  value-ignored Bool (if value-position
+                    (entry-value-ignored? parent ignored-roots)
+                    (sourcestackentry-ignored parent))
+                  child-prefix String (if (and value-position
+                           (= kind :map/open)
+                           (some? (sourcestackentry-pending-path parent)))
+                    (or (sourcestackentry-pending-path parent) "")
+                    "")
+                  next-occurrences (Vec OptionPathOccurrence) (if (and value-position (not= kind :map/open))
+                    (append-entry-occurrence
+                      document parent ignored-roots occurrences)
+                    occurrences)]
+              (recur
+                (rest remaining)
+                (conj stack
+                  (->SourceStackEntry kind 0 child-prefix value-ignored nil -1))
+                next-occurrences)))
+
+          (event-closing? kind)
+          (if (empty? stack)
+            (->OptionPathError
+              (sourcedocument-source-id document)
+              (reader/readerevent-offset event)
+              "unexpected source container close")
+            (let [entry SourceStackEntry (peek stack)]
+              (if (and (map-stack-entry? entry)
+                       (not= (mod (sourcestackentry-items entry) 2) 0))
+                (->OptionPathError
+                  (sourcedocument-source-id document)
+                  (reader/readerevent-offset event)
+                  "map requires an even number of forms")
+                (recur
+                  (rest remaining)
+                  (complete-parent-container (pop stack))
+                  occurrences))))
+
+          :else
+          (if (empty? stack)
+            (recur (rest remaining) stack occurrences)
+            (let [index Int (dec (count stack))
+                  entry SourceStackEntry (nth stack index)]
+              (if (map-stack-entry? entry)
+                (recur
+                  (rest remaining)
+                  (assoc stack index (map-entry-after-atom entry event))
+                  (consume-map-atom
+                    document ignored-roots entry event occurrences))
+                (recur (rest remaining) stack occurrences)))))))))
+
+(js/export
+  (defn extract-nix-option-paths
+    [document SourceDocument
+     ignored-roots (Vec String)] OptionPathExtraction
+    (let [read reader/DatumRead (reader/read-events (sourcedocument-text document))
+          error String? (reader/datumread-error read)]
+      (if (some? error)
+      (->OptionPathError
+        (sourcedocument-source-id document)
+        (reader/datumread-error-offset read)
+        (or error "invalid Beagle source"))
+      (scan-option-path-events
+        document ignored-roots (reader/datumread-events read))))))
+
+(defn occurrences-for-path
+  [path String
+   occurrences (Vec OptionPathOccurrence)] (Vec OptionPathOccurrence)
+  (loop [remaining (Vec OptionPathOccurrence) occurrences
+         matches (Vec OptionPathOccurrence) []]
+    (if (empty? remaining)
+      matches
+      (let [occurrence OptionPathOccurrence (first remaining)]
+        (recur
+          (rest remaining)
+          (if (= path (optionpathoccurrence-path occurrence))
+            (conj matches occurrence)
+            matches))))))
+
+(js/export
+  (defn removed-path-uses
+    [removed-paths (Vec String)
+     occurrences (Vec OptionPathOccurrence)] (Vec RemovedPathUse)
+    (loop [remaining (Vec String) removed-paths
+           uses (Vec RemovedPathUse) []]
+      (if (empty? remaining)
+      uses
+      (let [path String (first remaining)
+            matches (Vec OptionPathOccurrence) (occurrences-for-path path occurrences)]
+        (recur
+          (rest remaining)
+          (if (empty? matches)
+            uses
+            (conj uses (->RemovedPathUse path matches)))))))))
+
+(defn integer-row [last-value Int] (Vec Int)
+  (loop [value Int 0
+         row (Vec Int) []]
+    (if (> value last-value)
+      row
+      (recur (inc value) (conj row value)))))
+
+(js/export
+  (defn levenshtein-distance
+    [left String
+     right String] Int
+    (let [left-length Int (count left)
+          right-length Int (count right)]
+      (cond
+      (= left-length 0) right-length
+      (= right-length 0) left-length
+      :else
+      (loop [left-index Int 1
+             previous (Vec Int) (integer-row right-length)]
+        (if (> left-index left-length)
+          (nth previous right-length)
+          (let [current (Vec Int) (loop [right-index Int 1
+                                         row (Vec Int) [left-index]]
+                                    (if (> right-index right-length)
+                    row
+                    (let [cost Int (if (= (subs left (dec left-index) left-index)
+                                 (subs right (dec right-index) right-index))
+                            0
+                            1)
+                          insertion Int (inc (nth row (dec right-index)))
+                          deletion Int (inc (nth previous right-index))
+                          substitution Int (+ cost (nth previous (dec right-index)))]
+                      (recur
+                        (inc right-index)
+                        (conj row (min insertion deletion substitution))))))]
+            (recur (inc left-index) current))))))))
+
+(defn suggestion-before?
+  [left PathSuggestion
+   right PathSuggestion] Bool
+  (or (< (pathsuggestion-distance left) (pathsuggestion-distance right))
+      (and (= (pathsuggestion-distance left) (pathsuggestion-distance right))
+           (< (compare (pathsuggestion-path left)
+                       (pathsuggestion-path right))
+              0))))
+
+(defn insert-suggestion
+  [ranked (Vec PathSuggestion)
+   suggestion PathSuggestion] (Vec PathSuggestion)
+  (loop [remaining (Vec PathSuggestion) ranked
+         result (Vec PathSuggestion) []
+         inserted Bool false]
+    (if (empty? remaining)
+      (if inserted result (conj result suggestion))
+      (let [current PathSuggestion (first remaining)]
+        (if (and (not inserted) (suggestion-before? suggestion current))
+          (recur remaining (conj result suggestion) true)
+          (recur (rest remaining) (conj result current) inserted))))))
+
+(defn first-suggestions
+  [ranked (Vec PathSuggestion)
+   limit Int] (Vec PathSuggestion)
+  (loop [remaining (Vec PathSuggestion) ranked
+         result (Vec PathSuggestion) []]
+    (if (or (empty? remaining) (>= (count result) limit))
+      result
+      (recur (rest remaining) (conj result (first remaining))))))
+
+(js/export
+  (defn rank-path-suggestions
+    [target String
+     candidates (Vec String)
+     limit Int] (Vec PathSuggestion)
+    (if (<= limit 0)
+    []
+    (let [ranked (Vec PathSuggestion) (loop [remaining (Vec String) candidates
+                                             result (Vec PathSuggestion) []]
+                                        (if (empty? remaining)
+              result
+              (let [candidate String (first remaining)]
+                (recur
+                  (rest remaining)
+                  (insert-suggestion
+                    result
+                    (->PathSuggestion
+                      candidate
+                      (levenshtein-distance target candidate)))))))]
+      (first-suggestions ranked limit)))))

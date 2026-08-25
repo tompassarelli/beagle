@@ -1,0 +1,819 @@
+#lang beagle/js
+(ns native.json)
+
+(js/export
+  (defunion JsonEvent
+  (JsonObjectStart [offset Int])
+  (JsonObjectEnd [offset Int])
+  (JsonArrayStart [offset Int])
+  (JsonArrayEnd [offset Int])
+  (JsonKey
+    [offset Int
+     value String])
+  (JsonString
+    [offset Int
+     value String])
+  (JsonNumber
+    [offset Int
+     lexeme String])
+  (JsonBoolean
+    [offset Int
+     value Bool])
+    (JsonNull [offset Int])))
+
+(js/export
+  (defunion JsonDecodeResult
+    (JsonDecoded [events (Vec JsonEvent)])
+    (JsonDecodeError
+      [offset Int
+       message String])))
+
+(js/export
+  (defunion JsonEncodeResult
+    (JsonEncoded [text String])
+    (JsonEncodeError
+      [event-index Int
+       message String])))
+
+(defunion StringScan
+  (StringScanned
+    [value String
+     next-offset Int])
+  (StringRejected
+    [offset Int
+     message String]))
+
+(defunion NumberScan
+  (NumberScanned
+    [lexeme String
+     next-offset Int])
+  (NumberRejected
+    [offset Int
+     message String]))
+
+(defunion ParseExpectation
+  (ParseValue [token Bool])
+  (ParseObjectKeyFirst [token Bool])
+  (ParseObjectKeyNext [token Bool])
+  (ParseColon [token Bool])
+  (ParseObjectCommaOrEnd [token Bool])
+  (ParseArrayValueFirst [token Bool])
+  (ParseArrayValueNext [token Bool])
+  (ParseArrayCommaOrEnd [token Bool])
+  (ParseEnd [token Bool]))
+
+(defunion EncodeExpectation
+  (EncodeValue [token Bool])
+  (EncodeObjectKeyFirst [token Bool])
+  (EncodeObjectKeyNext [token Bool])
+  (EncodeObjectValue [token Bool])
+  (EncodeArrayValueFirst [token Bool])
+  (EncodeArrayValueNext [token Bool])
+  (EncodeDone [token Bool]))
+
+(defunion EncodeStep
+  (ValueEncoded
+    [fragment String
+     expectation EncodeExpectation
+     continuations (Vec EncodeExpectation)])
+  (ValueEncodeRejected [message String]))
+
+(defn ascii-whitespace? [byte Int] Bool
+  (or (= byte 32) (= byte 9) (= byte 10) (= byte 13)))
+
+(defn skip-whitespace
+  [bytes (Vec Int)
+   start Int] Int
+  (loop [offset Int start]
+    (if (and (< offset (count bytes))
+             (ascii-whitespace? (nth bytes offset)))
+      (recur (+ offset 1))
+      offset)))
+
+(defn decimal-digit? [byte Int] Bool
+  (and (>= byte 48) (<= byte 57)))
+
+(defn nonzero-decimal-digit? [byte Int] Bool
+  (and (>= byte 49) (<= byte 57)))
+
+(defn hex-value [byte Int] Int
+  (cond
+    (and (>= byte 48) (<= byte 57)) (- byte 48)
+    (and (>= byte 65) (<= byte 70)) (+ 10 (- byte 65))
+    (and (>= byte 97) (<= byte 102)) (+ 10 (- byte 97))
+    :else -1))
+
+(defn read-hex4
+  [bytes (Vec Int)
+   start Int] Int
+  (if (> (+ start 4) (count bytes))
+    -1
+    (let [a Int (hex-value (nth bytes start))
+          b Int (hex-value (nth bytes (+ start 1)))
+          c Int (hex-value (nth bytes (+ start 2)))
+          d Int (hex-value (nth bytes (+ start 3)))]
+      (if (or (< a 0) (< b 0) (< c 0) (< d 0))
+        -1
+        (+ (* a 4096) (* b 256) (* c 16) d)))))
+
+(defn append-codepoint
+  [bytes (Vec Int)
+   point Int] (Vec Int)
+  (cond
+    (<= point 127)
+    (conj bytes point)
+
+    (<= point 2047)
+    (conj (conj bytes (+ 192 (quot point 64)))
+      (+ 128 (mod point 64)))
+
+    (<= point 65535)
+    (conj (conj (conj bytes (+ 224 (quot point 4096)))
+            (+ 128 (mod (quot point 64) 64)))
+      (+ 128 (mod point 64)))
+
+    :else
+    (conj (conj (conj (conj bytes (+ 240 (quot point 262144)))
+                   (+ 128 (mod (quot point 4096) 64)))
+            (+ 128 (mod (quot point 64) 64)))
+      (+ 128 (mod point 64)))))
+
+(defn scan-string
+  [bytes (Vec Int)
+   start Int] StringScan
+  (loop [offset Int start
+         result (Vec Int) []]
+    (if (>= offset (count bytes))
+      (->StringRejected offset "unterminated string")
+      (let [byte Int (nth bytes offset)]
+        (cond
+          (= byte 34)
+          (->StringScanned (utf8-decode result) (+ offset 1))
+
+          (< byte 32)
+          (->StringRejected offset "unescaped control character in string")
+
+          (not= byte 92)
+          (recur (+ offset 1) (conj result byte))
+
+          (>= (+ offset 1) (count bytes))
+          (->StringRejected offset "unterminated string escape")
+
+          :else
+          (let [escaped Int (nth bytes (+ offset 1))]
+            (cond
+              (= escaped 34) (recur (+ offset 2) (conj result 34))
+              (= escaped 92) (recur (+ offset 2) (conj result 92))
+              (= escaped 47) (recur (+ offset 2) (conj result 47))
+              (= escaped 98) (recur (+ offset 2) (conj result 8))
+              (= escaped 102) (recur (+ offset 2) (conj result 12))
+              (= escaped 110) (recur (+ offset 2) (conj result 10))
+              (= escaped 114) (recur (+ offset 2) (conj result 13))
+              (= escaped 116) (recur (+ offset 2) (conj result 9))
+
+              (= escaped 117)
+              (let [unit Int (read-hex4 bytes (+ offset 2))]
+                (cond
+                  (< unit 0)
+                  (->StringRejected (+ offset 2)
+                    "invalid four-digit Unicode escape")
+
+                  (and (>= unit 55296) (<= unit 56319))
+                  (if (or (> (+ offset 12) (count bytes))
+                          (not= 92 (nth bytes (+ offset 6)))
+                          (not= 117 (nth bytes (+ offset 7))))
+                    (->StringRejected offset
+                      "high surrogate is not followed by a low surrogate")
+                    (let [low Int (read-hex4 bytes (+ offset 8))]
+                      (if (or (< low 56320) (> low 57343))
+                        (->StringRejected (+ offset 8)
+                          "high surrogate is not followed by a low surrogate")
+                        (recur (+ offset 12)
+                          (append-codepoint result
+                            (+ 65536 (* (- unit 55296) 1024)
+                              (- low 56320)))))))
+
+                  (and (>= unit 56320) (<= unit 57343))
+                  (->StringRejected offset "unpaired low surrogate")
+
+                  :else
+                  (recur (+ offset 6) (append-codepoint result unit))))
+
+              :else
+              (->StringRejected (+ offset 1) "invalid string escape"))))))))
+
+(defn scan-digits
+  [bytes (Vec Int)
+   start Int] Int
+  (loop [offset Int start]
+    (if (and (< offset (count bytes))
+             (decimal-digit? (nth bytes offset)))
+      (recur (+ offset 1))
+      offset)))
+
+(defn scan-number
+  [bytes (Vec Int)
+   start Int] NumberScan
+  (let [length Int (count bytes)
+        integer-start Int (if (and (< start length) (= 45 (nth bytes start)))
+          (+ start 1)
+          start)]
+    (cond
+      (>= integer-start length)
+      (->NumberRejected integer-start "number requires an integer part")
+
+      (= 48 (nth bytes integer-start))
+      (if (and (< (+ integer-start 1) length)
+               (decimal-digit? (nth bytes (+ integer-start 1))))
+        (->NumberRejected (+ integer-start 1)
+          "leading zero is not allowed in a number")
+        (let [fraction-mark Int (+ integer-start 1)]
+          (loop [offset Int fraction-mark]
+            (let [fraction-end Int (if (and (< offset length) (= 46 (nth bytes offset)))
+                    (scan-digits bytes (+ offset 1))
+                    offset)]
+              (if (and (< offset length) (= 46 (nth bytes offset))
+                       (= fraction-end (+ offset 1)))
+                (->NumberRejected (+ offset 1)
+                  "fraction requires at least one digit")
+                (let [exponent-mark Int fraction-end]
+                  (if (and (< exponent-mark length)
+                           (or (= 101 (nth bytes exponent-mark))
+                               (= 69 (nth bytes exponent-mark))))
+                    (let [digits-start Int (if (and (< (+ exponent-mark 1) length)
+                                   (or (= 43 (nth bytes (+ exponent-mark 1)))
+                                       (= 45 (nth bytes (+ exponent-mark 1)))))
+                            (+ exponent-mark 2)
+                            (+ exponent-mark 1))
+                          exponent-end Int (scan-digits bytes digits-start)]
+                      (if (= digits-start exponent-end)
+                        (->NumberRejected digits-start
+                          "exponent requires at least one digit")
+                        (->NumberScanned
+                          (utf8-decode (subvec bytes start exponent-end))
+                          exponent-end)))
+                    (->NumberScanned
+                      (utf8-decode (subvec bytes start fraction-end))
+                      fraction-end))))))))
+
+      (nonzero-decimal-digit? (nth bytes integer-start))
+      (let [integer-end Int (scan-digits bytes (+ integer-start 1))
+            fraction-end Int (if (and (< integer-end length) (= 46 (nth bytes integer-end)))
+              (scan-digits bytes (+ integer-end 1))
+              integer-end)]
+        (if (and (< integer-end length) (= 46 (nth bytes integer-end))
+                 (= fraction-end (+ integer-end 1)))
+          (->NumberRejected (+ integer-end 1)
+            "fraction requires at least one digit")
+          (let [exponent-mark Int fraction-end]
+            (if (and (< exponent-mark length)
+                     (or (= 101 (nth bytes exponent-mark))
+                         (= 69 (nth bytes exponent-mark))))
+              (let [digits-start Int (if (and (< (+ exponent-mark 1) length)
+                             (or (= 43 (nth bytes (+ exponent-mark 1)))
+                                 (= 45 (nth bytes (+ exponent-mark 1)))))
+                      (+ exponent-mark 2)
+                      (+ exponent-mark 1))
+                    exponent-end Int (scan-digits bytes digits-start)]
+                (if (= digits-start exponent-end)
+                  (->NumberRejected digits-start
+                    "exponent requires at least one digit")
+                  (->NumberScanned
+                    (utf8-decode (subvec bytes start exponent-end))
+                    exponent-end)))
+              (->NumberScanned
+                (utf8-decode (subvec bytes start fraction-end))
+                fraction-end)))))
+
+      :else
+      (->NumberRejected integer-start "number requires an integer part"))))
+
+(defn bytes-match?
+  [bytes (Vec Int)
+   start Int
+   expected (Vec Int)] Bool
+  (if (> (+ start (count expected)) (count bytes))
+    false
+    (loop [offset Int 0]
+      (if (>= offset (count expected))
+        true
+        (if (= (nth bytes (+ start offset)) (nth expected offset))
+          (recur (+ offset 1))
+          false)))))
+
+(defn value-delimiter? [byte Int] Bool
+  (or (ascii-whitespace? byte) (= byte 44) (= byte 93) (= byte 125)))
+
+(defn token-ends?
+  [bytes (Vec Int)
+   offset Int] Bool
+  (or (>= offset (count bytes)) (value-delimiter? (nth bytes offset))))
+
+(js/export
+  (defn decode [text String] JsonDecodeResult
+  (let [bytes (Vec Int) (utf8-encode text)
+        empty-events (Vec JsonEvent) []]
+    (loop [offset Int 0
+           events (TransientVec JsonEvent) (transient empty-events)
+           expectation ParseExpectation (->ParseValue true)
+           continuations (Vec ParseExpectation) [(->ParseEnd true)]]
+      (let [at Int (skip-whitespace bytes offset)]
+        (match expectation
+          [(ParseValue token)
+           (if (>= at (count bytes))
+             (do
+               (persistent! events)
+               (->JsonDecodeError at "expected a JSON value"))
+             (let [byte Int (nth bytes at)]
+               (cond
+                 (= byte 123)
+                 (recur (+ at 1) (conj! events (->JsonObjectStart at))
+                   (->ParseObjectKeyFirst true) continuations)
+
+                 (= byte 91)
+                 (recur (+ at 1) (conj! events (->JsonArrayStart at))
+                   (->ParseArrayValueFirst true) continuations)
+
+                 (= byte 34)
+                 (match (scan-string bytes (+ at 1))
+                   [(StringScanned value next-offset)
+                    (recur next-offset
+                      (conj! events (->JsonString at value))
+                      (peek continuations) (pop continuations))]
+                   [(StringRejected error-offset message)
+                    (do
+                      (persistent! events)
+                      (->JsonDecodeError error-offset message))])
+
+                 (or (= byte 45) (decimal-digit? byte))
+                 (match (scan-number bytes at)
+                   [(NumberScanned lexeme next-offset)
+                    (recur next-offset
+                      (conj! events (->JsonNumber at lexeme))
+                      (peek continuations) (pop continuations))]
+                   [(NumberRejected error-offset message)
+                    (do
+                      (persistent! events)
+                      (->JsonDecodeError error-offset message))])
+
+                 (bytes-match? bytes at [116 114 117 101])
+                 (if (token-ends? bytes (+ at 4))
+                   (recur (+ at 4)
+                     (conj! events (->JsonBoolean at true))
+                     (peek continuations) (pop continuations))
+                   (do
+                     (persistent! events)
+                     (->JsonDecodeError (+ at 4) "invalid token after true")))
+
+                 (bytes-match? bytes at [102 97 108 115 101])
+                 (if (token-ends? bytes (+ at 5))
+                   (recur (+ at 5)
+                     (conj! events (->JsonBoolean at false))
+                     (peek continuations) (pop continuations))
+                   (do
+                     (persistent! events)
+                     (->JsonDecodeError (+ at 5) "invalid token after false")))
+
+                 (bytes-match? bytes at [110 117 108 108])
+                 (if (token-ends? bytes (+ at 4))
+                   (recur (+ at 4) (conj! events (->JsonNull at))
+                     (peek continuations) (pop continuations))
+                   (do
+                     (persistent! events)
+                     (->JsonDecodeError (+ at 4) "invalid token after null")))
+
+                 :else
+                 (do
+                   (persistent! events)
+                   (->JsonDecodeError at "expected a JSON value")))))]
+
+          [(ParseObjectKeyFirst token)
+           (cond
+             (>= at (count bytes))
+             (do
+               (persistent! events)
+               (->JsonDecodeError at "unterminated object"))
+
+             (= 125 (nth bytes at))
+             (recur (+ at 1) (conj! events (->JsonObjectEnd at))
+               (peek continuations) (pop continuations))
+
+             (= 34 (nth bytes at))
+             (match (scan-string bytes (+ at 1))
+               [(StringScanned value next-offset)
+                (recur next-offset (conj! events (->JsonKey at value))
+                  (->ParseColon true) continuations)]
+               [(StringRejected error-offset message)
+                (do
+                  (persistent! events)
+                  (->JsonDecodeError error-offset message))])
+
+             :else
+             (do
+               (persistent! events)
+               (->JsonDecodeError at "object key must be a string")))]
+
+          [(ParseObjectKeyNext token)
+           (if (and (< at (count bytes)) (= 34 (nth bytes at)))
+             (match (scan-string bytes (+ at 1))
+               [(StringScanned value next-offset)
+                (recur next-offset (conj! events (->JsonKey at value))
+                  (->ParseColon true) continuations)]
+               [(StringRejected error-offset message)
+                (do
+                  (persistent! events)
+                  (->JsonDecodeError error-offset message))])
+             (do
+               (persistent! events)
+               (->JsonDecodeError at "object key must be a string")))]
+
+          [(ParseColon token)
+           (if (and (< at (count bytes)) (= 58 (nth bytes at)))
+             (recur (+ at 1) events (->ParseValue true)
+               (conj continuations (->ParseObjectCommaOrEnd true)))
+             (do
+               (persistent! events)
+               (->JsonDecodeError at "expected ':' after object key")))]
+
+          [(ParseObjectCommaOrEnd token)
+           (cond
+             (>= at (count bytes))
+             (do
+               (persistent! events)
+               (->JsonDecodeError at "unterminated object"))
+
+             (= 44 (nth bytes at))
+             (recur (+ at 1) events (->ParseObjectKeyNext true)
+               continuations)
+
+             (= 125 (nth bytes at))
+             (recur (+ at 1) (conj! events (->JsonObjectEnd at))
+               (peek continuations) (pop continuations))
+
+             :else
+             (do
+               (persistent! events)
+               (->JsonDecodeError at "expected ',' or '}' after object value")))]
+
+          [(ParseArrayValueFirst token)
+           (if (and (< at (count bytes)) (= 93 (nth bytes at)))
+             (recur (+ at 1) (conj! events (->JsonArrayEnd at))
+               (peek continuations) (pop continuations))
+             (recur at events (->ParseValue true)
+               (conj continuations (->ParseArrayCommaOrEnd true))))]
+
+          [(ParseArrayValueNext token)
+           (recur at events (->ParseValue true)
+             (conj continuations (->ParseArrayCommaOrEnd true)))]
+
+          [(ParseArrayCommaOrEnd token)
+           (cond
+             (>= at (count bytes))
+             (do
+               (persistent! events)
+               (->JsonDecodeError at "unterminated array"))
+
+             (= 44 (nth bytes at))
+             (recur (+ at 1) events (->ParseArrayValueNext true)
+               continuations)
+
+             (= 93 (nth bytes at))
+             (recur (+ at 1) (conj! events (->JsonArrayEnd at))
+               (peek continuations) (pop continuations))
+
+             :else
+             (do
+               (persistent! events)
+               (->JsonDecodeError at "expected ',' or ']' after array value")))]
+
+          [(ParseEnd token)
+           (if (= at (count bytes))
+             (->JsonDecoded (persistent! events))
+             (do
+               (persistent! events)
+               (->JsonDecodeError at "unexpected data after JSON value")))]))))))
+
+(defn append-two
+  [bytes (Vec Int)
+   first Int
+   second Int] (Vec Int)
+  (conj (conj bytes first) second))
+
+(defn append-six
+  [bytes (Vec Int)
+   a Int
+   b Int
+   c Int
+   d Int
+   e Int
+   f Int] (Vec Int)
+  (conj (conj (conj (conj (conj (conj bytes a) b) c) d) e) f))
+
+(defn hex-ascii [nibble Int] Int
+  (if (< nibble 10) (+ 48 nibble) (+ 87 nibble)))
+
+(js/export
+  (defn encode-string [value String] String
+    (let [source (Vec Int) (utf8-encode value)]
+      (loop [offset Int 0
+             result (Vec Int) [34]]
+        (if (>= offset (count source))
+          (utf8-decode (conj result 34))
+          (let [byte Int (nth source offset)]
+            (cond
+              (= byte 34) (recur (+ offset 1) (append-two result 92 34))
+              (= byte 92) (recur (+ offset 1) (append-two result 92 92))
+              (= byte 8) (recur (+ offset 1) (append-two result 92 98))
+              (= byte 12) (recur (+ offset 1) (append-two result 92 102))
+              (= byte 10) (recur (+ offset 1) (append-two result 92 110))
+              (= byte 13) (recur (+ offset 1) (append-two result 92 114))
+              (= byte 9) (recur (+ offset 1) (append-two result 92 116))
+              (< byte 32)
+              (recur (+ offset 1)
+                (append-six result 92 117 48 48
+                  (hex-ascii (quot byte 16))
+                  (hex-ascii (mod byte 16))))
+              :else
+              (recur (+ offset 1) (conj result byte)))))))))
+
+(defn number-lexeme? [lexeme String] Bool
+  (let [bytes (Vec Int) (utf8-encode lexeme)]
+    (match (scan-number bytes 0)
+      [(NumberScanned parsed next-offset)
+       (= next-offset (count bytes))]
+      [(NumberRejected offset message) false])))
+
+(defn encode-value-step
+  [event JsonEvent
+   prefix String
+   continuation EncodeExpectation
+   continuations (Vec EncodeExpectation)] EncodeStep
+  (match event
+    [(JsonObjectStart offset)
+     (->ValueEncoded (str prefix "{") (->EncodeObjectKeyFirst true)
+       (conj continuations continuation))]
+    [(JsonArrayStart offset)
+     (->ValueEncoded (str prefix "[") (->EncodeArrayValueFirst true)
+       (conj continuations continuation))]
+    [(JsonString offset value)
+     (->ValueEncoded (str prefix (encode-string value))
+       continuation continuations)]
+    [(JsonNumber offset lexeme)
+     (if (number-lexeme? lexeme)
+       (->ValueEncoded (str prefix lexeme) continuation continuations)
+       (->ValueEncodeRejected "number event has an invalid JSON lexeme"))]
+    [(JsonBoolean offset value)
+     (->ValueEncoded (str prefix (if value "true" "false"))
+       continuation continuations)]
+    [(JsonNull offset)
+     (->ValueEncoded (str prefix "null") continuation continuations)]
+    [(JsonObjectEnd offset)
+     (->ValueEncodeRejected "unexpected object end event")]
+    [(JsonArrayEnd offset)
+     (->ValueEncodeRejected "unexpected array end event")]
+    [(JsonKey offset value)
+     (->ValueEncodeRejected "unexpected object key event")]))
+
+(js/export
+  (defn encode [events (Vec JsonEvent)] JsonEncodeResult
+  (loop [index Int 0
+         result String ""
+         expectation EncodeExpectation (->EncodeValue true)
+         continuations (Vec EncodeExpectation) [(->EncodeDone true)]]
+    (match expectation
+      [(EncodeValue token)
+       (if (>= index (count events))
+         (->JsonEncodeError index "expected a JSON value event")
+         (match (encode-value-step (nth events index) ""
+                  (peek continuations) (pop continuations))
+           [(ValueEncoded fragment next-expectation next-continuations)
+            (recur (+ index 1) (str result fragment)
+              next-expectation next-continuations)]
+           [(ValueEncodeRejected message)
+            (->JsonEncodeError index message)]))]
+
+      [(EncodeObjectKeyFirst token)
+       (if (>= index (count events))
+         (->JsonEncodeError index "unterminated object event sequence")
+         (match (nth events index)
+           [(JsonObjectEnd offset)
+            (recur (+ index 1) (str result "}")
+              (peek continuations) (pop continuations))]
+           [(JsonKey offset value)
+            (recur (+ index 1) (str result (encode-string value) ":")
+              (->EncodeObjectValue true) continuations)]
+           [(JsonObjectStart offset)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]
+           [(JsonArrayStart offset)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]
+           [(JsonArrayEnd offset)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]
+           [(JsonString offset value)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]
+           [(JsonNumber offset lexeme)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]
+           [(JsonBoolean offset value)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]
+           [(JsonNull offset)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]))]
+
+      [(EncodeObjectKeyNext token)
+       (if (>= index (count events))
+         (->JsonEncodeError index "unterminated object event sequence")
+         (match (nth events index)
+           [(JsonObjectEnd offset)
+            (recur (+ index 1) (str result "}")
+              (peek continuations) (pop continuations))]
+           [(JsonKey offset value)
+            (recur (+ index 1) (str result "," (encode-string value) ":")
+              (->EncodeObjectValue true) continuations)]
+           [(JsonObjectStart offset)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]
+           [(JsonArrayStart offset)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]
+           [(JsonArrayEnd offset)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]
+           [(JsonString offset value)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]
+           [(JsonNumber offset lexeme)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]
+           [(JsonBoolean offset value)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]
+           [(JsonNull offset)
+            (->JsonEncodeError index
+              "object expects a key or object end event")]))]
+
+      [(EncodeObjectValue token)
+       (if (>= index (count events))
+         (->JsonEncodeError index "object key has no value event")
+         (match (encode-value-step (nth events index) ""
+                  (->EncodeObjectKeyNext true) continuations)
+           [(ValueEncoded fragment next-expectation next-continuations)
+            (recur (+ index 1) (str result fragment)
+              next-expectation next-continuations)]
+           [(ValueEncodeRejected message)
+            (->JsonEncodeError index message)]))]
+
+      [(EncodeArrayValueFirst token)
+       (if (>= index (count events))
+         (->JsonEncodeError index "unterminated array event sequence")
+         (let [event JsonEvent (nth events index)]
+           (match event
+             [(JsonArrayEnd offset)
+              (recur (+ index 1) (str result "]")
+                (peek continuations) (pop continuations))]
+             [(JsonObjectStart offset)
+              (match (encode-value-step event ""
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonObjectEnd offset)
+              (match (encode-value-step event ""
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonArrayStart offset)
+              (match (encode-value-step event ""
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonKey offset value)
+              (match (encode-value-step event ""
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonString offset value)
+              (match (encode-value-step event ""
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonNumber offset lexeme)
+              (match (encode-value-step event ""
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonBoolean offset value)
+              (match (encode-value-step event ""
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonNull offset)
+              (match (encode-value-step event ""
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])])))]
+
+      [(EncodeArrayValueNext token)
+       (if (>= index (count events))
+         (->JsonEncodeError index "unterminated array event sequence")
+         (let [event JsonEvent (nth events index)]
+           (match event
+             [(JsonArrayEnd offset)
+              (recur (+ index 1) (str result "]")
+                (peek continuations) (pop continuations))]
+             [(JsonObjectStart offset)
+              (match (encode-value-step event ","
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonObjectEnd offset)
+              (match (encode-value-step event ","
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonArrayStart offset)
+              (match (encode-value-step event ","
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonKey offset value)
+              (match (encode-value-step event ","
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonString offset value)
+              (match (encode-value-step event ","
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonNumber offset lexeme)
+              (match (encode-value-step event ","
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonBoolean offset value)
+              (match (encode-value-step event ","
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])]
+             [(JsonNull offset)
+              (match (encode-value-step event ","
+                       (->EncodeArrayValueNext true) continuations)
+                [(ValueEncoded fragment next-expectation next-continuations)
+                 (recur (+ index 1) (str result fragment)
+                   next-expectation next-continuations)]
+                [(ValueEncodeRejected message)
+                 (->JsonEncodeError index message)])])))]
+
+      [(EncodeDone token)
+       (if (= index (count events))
+         (->JsonEncoded result)
+         (->JsonEncodeError index "unexpected event after complete JSON value"))]))))
