@@ -1879,7 +1879,9 @@
     (hash-set (hash-set table prefix binding) namespace binding)))
 
 (define (build-js-public-esm-member-table prog)
-  (for/fold ([table (hasheq)])
+  ;; Keys are freshly allocated (qualifier . member) pairs at both insertion
+  ;; and lookup, so this table must compare pairs by value rather than identity.
+  (for/fold ([table (hash)])
             ([import (in-list (program-imported-module-interfaces prog))])
     (define interface (module-import-interface import))
     (define prefix (module-import-prefix import))

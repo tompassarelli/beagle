@@ -36,7 +36,8 @@
       (fixture-provider "same-basename/host/notifications.bjs" 'host.notifications))]
     [(string-suffix? name ".bclj")
      (list (fixture-provider "clj-prov.bclj" 'export-xmodule.clj-prov))]
-    [(string=? name "public-esm-consumer.bjs")
+    [(member name '("public-esm-consumer.bjs"
+                    "public-esm-qualified-consumer.bjs"))
      (list
       (fixture-provider "public-esm-names.bjs"
                         'export-xmodule.public-esm-names))]
@@ -182,6 +183,14 @@
    js)
   (check-regexp-match #rx"send_message\\(wire__name\\(text\\)\\)" js))
 
+(test-case "qualified JS imports use authored public ESM names"
+  (define js
+    (emit-program (fixture-program "public-esm-qualified-consumer.bjs")))
+  (check-regexp-match
+   #rx"names\\[\"send-message\"\\]\\(names\\[\"wire_name\"\\]\\(text\\)\\)"
+   js)
+  (check-false (regexp-match? #rx"names[.]send_message" js)))
+
 (test-case "a correct call to a js/export'd function still checks"
   (check-not-exn (lambda () (check-file "ok.bjs"))))
 
@@ -203,7 +212,7 @@
 ;; the syntactically invalid `p/scale(x, 2.0)`.
 (test-case "a qualified call to an imported export emits a member access"
   (define js (emit-program (fixture-program "consumer.bjs")))
-  (check-regexp-match #rx"p[.]scale\\(" js)
+  (check-regexp-match #rx"p\\[\"scale\"\\]\\(" js)
   (check-false (regexp-match? #rx"p/scale" js)))
 
 (test-case "a local binding cannot capture a qualified import alias"
@@ -214,8 +223,8 @@
     js "import * as $beagle$import$p from './provider.js';"))
   (check-true (string-contains? js "function go(p)"))
   (check-true
-   (string-contains? js "return $beagle$import$p.scale(p, 2.0);"))
-  (check-false (string-contains? js "return p.scale(p, 2.0);")))
+   (string-contains? js "return $beagle$import$p[\"scale\"](p, 2.0);"))
+  (check-false (string-contains? js "return p[\"scale\"](p, 2.0);")))
 
 (test-case "js/export'd definitions reach the query surface"
   (define out
@@ -232,7 +241,7 @@
 ;; this emitted silently wrong code rather than failing the build.
 (test-case "a qualified reference to an imported export emits a member access"
   (define js (emit-program (fixture-program "refconsumer.bjs")))
-  (check-regexp-match #rx"p[.]cell[.]value" js)
+  (check-regexp-match #rx"p\\[\"cell\"\\][.]value" js)
   (check-false (regexp-match? #rx"p/cell" js)))
 
 ;; `js/export` prefixes the string "export " onto what the inner form emits, so

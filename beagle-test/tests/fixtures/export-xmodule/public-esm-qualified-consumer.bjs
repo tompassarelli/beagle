@@ -1,0 +1,8 @@
+#lang beagle/js
+
+(ns export-xmodule.public-esm-qualified-consumer
+  (:require [export-xmodule.public-esm-names :as names]))
+
+(js/export
+  (defn relay [text String] String
+    (names/send-message (names/wire_name text))))
