@@ -1647,8 +1647,7 @@
     (if (or (not (or (= "type-prim" kind) (= "prim" kind)))
           (nil? spelling))
       nil
-      (let [resolved ResolvedSourceNameV0
-            (resolve-source-name index (source-module-name index source-type)
+      (let [resolved ResolvedSourceNameV0 (resolve-source-name index (source-module-name index source-type)
               spelling)]
         (if (resolvedsourcenamev0-visible resolved) resolved nil)))))
 
@@ -1659,8 +1658,7 @@
          identities (Map String Bool) {}]
     (if (>= position (count source-types))
       identities
-      (let [member (U ResolvedSourceNameV0 Nil)
-            (resolved-source-union-member index (nth source-types position))]
+      (let [member (U ResolvedSourceNameV0 Nil) (resolved-source-union-member index (nth source-types position))]
         (if (nil? member)
           nil
           (recur (+ position 1)
@@ -1670,14 +1668,12 @@
   [index SourceIndexV0
    source-union core/NativeId] (U (Map String Bool) Nil)
   (let [module-name String (source-module-name index source-union)
-        members (Vec core/NativeId)
-        (union-member-group-items index source-union)]
+        members (Vec core/NativeId) (union-member-group-items index source-union)]
     (loop [position Int 0
            identities (Map String Bool) {}]
       (if (>= position (count members))
         identities
-        (let [resolved ResolvedSourceNameV0
-              (resolve-source-name index module-name
+        (let [resolved ResolvedSourceNameV0 (resolve-source-name index module-name
                 (fact-text index (nth members position) "name"))
               key String (resolved-source-key resolved)]
           (if (not (resolvedsourcenamev0-visible resolved))
@@ -1691,10 +1687,8 @@
    source-types (Vec core/NativeId)] (U core/NativeId Nil)
   (if (= 0 (count source-types))
     nil
-    (let [projected (U (Map String Bool) Nil)
-          (projected-union-member-identities index source-types)
-          unions (Vec core/NativeId)
-          (vec (concat (index-form-ids index "defunion")
+    (let [projected (U (Map String Bool) Nil) (projected-union-member-identities index source-types)
+          unions (Vec core/NativeId) (vec (concat (index-form-ids index "defunion")
                  (index-form-ids index "deferror")))]
       (if (nil? projected)
         nil
@@ -1703,8 +1697,7 @@
           (if (>= position (count unions))
             (if (= 1 (count matches)) (nth matches 0) nil)
             (let [candidate core/NativeId (nth unions position)
-                  declared (U (Map String Bool) Nil)
-                  (declared-union-member-identities index candidate)]
+                  declared (U (Map String Bool) Nil) (declared-union-member-identities index candidate)]
               (recur (+ position 1)
                 (if (and (some? declared) (= projected declared))
                   (conj matches candidate)
@@ -2134,8 +2127,7 @@
               (fn [argument core/NativeId] TypeResolutionV0
                 (resolve-source-type index argument))
               arguments)
-            source-union (U core/NativeId Nil)
-            (common-source-union index arguments)]
+            source-union (U core/NativeId Nil) (common-source-union index arguments)]
         (if (nil? source-union)
           (application-resolution source-type "U"
             (sourceindexv0-record-keys index) resolutions)
@@ -4119,8 +4111,7 @@
 (defn select-transient-loop-states
   [selection TransientLoopStateSelectionV0
    candidate (Vec LoopStateV0)] TransientLoopStateSelectionV0
-  (let [selected (U (Vec LoopStateV0) Nil)
-          (transientloopstateselectionv0-selected selection)]
+  (let [selected (U (Vec LoopStateV0) Nil) (transientloopstateselectionv0-selected selection)]
     (->TransientLoopStateSelectionV0
       (if (nil? selected) candidate selected)
       (and (transientloopstateselectionv0-compatible selection)
@@ -4133,8 +4124,7 @@
    fallback (Vec LoopStateV0)
    form-name String] BodyStateV0
   (if (transientloopstateselectionv0-compatible selection)
-    (let [selected (U (Vec LoopStateV0) Nil)
-            (transientloopstateselectionv0-selected selection)]
+    (let [selected (U (Vec LoopStateV0) Nil) (transientloopstateselectionv0-selected selection)]
       (with state [:loop-states (if (nil? selected) fallback selected)]))
     (state-fail state
       (str "TODO-NATIVE-TRANSIENT-LOOP-OWNERSHIP: live " form-name
@@ -14403,8 +14393,7 @@
                        result-type (U core/NativeId Nil) nil
                        arms (Vec LogicArmV0) []
                        uniform Bool true
-                       loop-selection TransientLoopStateSelectionV0
-                       (->TransientLoopStateSelectionV0 nil true)]
+                       loop-selection TransientLoopStateSelectionV0 (->TransientLoopStateSelectionV0 nil true)]
                   (if (>= position (count clauses))
                     (let [settled BodyStateV0 (settle-transient-loop-states
                             current loop-selection outer-loop-states "match")]
@@ -14459,8 +14448,7 @@
                                   expected))
                               body-state BodyStateV0 (exprresultv0-state body)
                               body-live Bool (not (exprresultv0-terminated body))
-                              next-loop-selection TransientLoopStateSelectionV0
-                              (if body-live
+                              next-loop-selection TransientLoopStateSelectionV0 (if body-live
                                 (select-transient-loop-states loop-selection
                                   (bodystatev0-loop-states body-state))
                                 loop-selection)]
@@ -16045,14 +16033,12 @@
           (loop [position Int 0
                  current BodyStateV0 state
                  arms (Vec LogicArmV0) []
-                 loop-selection TransientLoopStateSelectionV0
-                 (->TransientLoopStateSelectionV0 nil true)]
+                 loop-selection TransientLoopStateSelectionV0 (->TransientLoopStateSelectionV0 nil true)]
             (if (>= position (count clauses))
               (let [arm-start Int (count (bodystatev0-blocks current))
                     implicit ExprResultV0 (nil-constant-result types current owner "cond-nil")
                     implicit-state BodyStateV0 (exprresultv0-state implicit)
-                    final-selection TransientLoopStateSelectionV0
-                    (select-transient-loop-states loop-selection
+                    final-selection TransientLoopStateSelectionV0 (select-transient-loop-states loop-selection
                       (bodystatev0-loop-states implicit-state))]
                 (if (state-blocked? implicit-state)
                   (dead-result implicit-state)
@@ -16090,8 +16076,7 @@
                           body-expected)
                         body-state BodyStateV0 (exprresultv0-state body)
                         body-live Bool (not (exprresultv0-terminated body))
-                        final-selection TransientLoopStateSelectionV0
-                        (if body-live
+                        final-selection TransientLoopStateSelectionV0 (if body-live
                           (select-transient-loop-states loop-selection
                             (bodystatev0-loop-states body-state))
                           loop-selection)]
@@ -16174,8 +16159,7 @@
                                   (count (bodystatev0-blocks after-body))
                                   (exprresultv0-type-id body)))
                               arms)
-                            next-loop-selection TransientLoopStateSelectionV0
-                            (if body-live
+                            next-loop-selection TransientLoopStateSelectionV0 (if body-live
                               (select-transient-loop-states loop-selection
                                 (bodystatev0-loop-states body-state))
                               loop-selection)
@@ -22031,8 +22015,7 @@
         digest String (stages/content-digest encoding)
         resolutions-valid Bool (typing-resolutions-valid? record-resolutions function-resolutions)
         known-types (Vec core/NativeId) (core/type-ids types)
-        type-witnesses (Vec core/TypeShapeReferenceWitnessV0)
-        (type-reference-witnesses types known-types)
+        type-witnesses (Vec core/TypeShapeReferenceWitnessV0) (type-reference-witnesses types known-types)
         types-closed Bool (type-reference-witnesses-closed? type-witnesses)
         clean Bool (term-graph-clean? terms)
         valid Bool (and resolutions-valid types-closed clean)
