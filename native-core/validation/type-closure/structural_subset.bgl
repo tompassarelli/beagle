@@ -1,0 +1,12 @@
+#lang beagle
+(ns native.type-closure-structural-subset)
+
+(defrecord SubsetLeft [(value String)])
+(defrecord SubsetRight [(value String)])
+(defrecord SubsetOutside [(value String)])
+
+(defunion SubsetParent SubsetLeft SubsetRight SubsetOutside)
+
+(defn preserve-subset
+  [value (U SubsetLeft SubsetRight)] (U SubsetLeft SubsetRight)
+  value)

@@ -10,6 +10,7 @@ provider="$here/provider.bgl"
 consumer="$here/consumer.bgl"
 payloadless="$here/payloadless.bgl"
 declared_duplicate="$here/declared_duplicate.bgl"
+structural_subset="$here/structural_subset.bgl"
 bundle="$scratch/source.bundle.json"
 consumer_ast="$scratch/consumer.ast.json"
 consumer_interface="$scratch/consumer.interface.sha256"
@@ -22,12 +23,17 @@ payloadless_facts="$scratch/payloadless.facts.manifest"
 declared_duplicate_ast="$scratch/declared-duplicate.ast.json"
 declared_duplicate_interface="$scratch/declared-duplicate.interface.sha256"
 declared_duplicate_facts="$scratch/declared-duplicate.facts.manifest"
+structural_subset_ast="$scratch/structural-subset.ast.json"
+structural_subset_interface="$scratch/structural-subset.interface.sha256"
+structural_subset_facts="$scratch/structural-subset.facts.manifest"
 compiled="$scratch/compiled"
 
 "$repo/bin/beagle" check --agent \
-  "$provider" "$consumer" "$payloadless" "$declared_duplicate"
+  "$provider" "$consumer" "$payloadless" "$declared_duplicate" \
+  "$structural_subset"
 "$repo/bin/beagle-ast" --bundle -- \
-  "$provider" "$consumer" "$payloadless" "$declared_duplicate" >"$bundle"
+  "$provider" "$consumer" "$payloadless" "$declared_duplicate" \
+  "$structural_subset" >"$bundle"
 
 bb -e '
   (require (quote [cheshire.core :as json]))
@@ -48,7 +54,9 @@ bb -e '
         payloadless (select "native.type-closure-payloadless")
         provider (select "native.type-closure-provider")
         declared-duplicate
-        (select "native.type-closure-declared-duplicate")]
+        (select "native.type-closure-declared-duplicate")
+        structural-subset
+        (select "native.type-closure-structural-subset")]
     (spit (nth *command-line-args* 1)
       (json/generate-string (get consumer "program")))
     (spit (nth *command-line-args* 2)
@@ -64,11 +72,16 @@ bb -e '
     (spit (nth *command-line-args* 7)
       (json/generate-string (get declared-duplicate "program")))
     (spit (nth *command-line-args* 8)
-      (str (get declared-duplicate "interfaceSha256") "\n")))' \
+      (str (get declared-duplicate "interfaceSha256") "\n"))
+    (spit (nth *command-line-args* 9)
+      (json/generate-string (get structural-subset "program")))
+    (spit (nth *command-line-args* 10)
+      (str (get structural-subset "interfaceSha256") "\n")))' \
   "$bundle" "$consumer_ast" "$consumer_interface" \
   "$payloadless_ast" "$payloadless_interface" \
   "$provider_ast" "$provider_interface" \
-  "$declared_duplicate_ast" "$declared_duplicate_interface"
+  "$declared_duplicate_ast" "$declared_duplicate_interface" \
+  "$structural_subset_ast" "$structural_subset_interface"
 
 consumer_path="native-core/validation/type-closure/consumer.bgl"
 interface_sha256="$(<"$consumer_interface")"
@@ -95,6 +108,14 @@ bb "$repo/native-core/bin/source-facts.clj" \
   --interface-sha256 \
     "$declared_duplicate_path=$declared_duplicate_interface_sha256" \
   --output "$declared_duplicate_facts" --include-defs
+
+structural_subset_path="native-core/validation/type-closure/structural_subset.bgl"
+structural_subset_interface_sha256="$(<"$structural_subset_interface")"
+bb "$repo/native-core/bin/source-facts.clj" \
+  --input "$structural_subset_ast=$structural_subset_path" \
+  --interface-sha256 \
+    "$structural_subset_path=$structural_subset_interface_sha256" \
+  --output "$structural_subset_facts" --include-defs
 
 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bclj" \
@@ -172,6 +193,60 @@ bb -cp "$compiled" -e '
                     (core/typedef-shape definition)))
         (throw (ex-info "declared-duplicate union did not remain structural"
                  {:resolution resolution})))))' "$declared_duplicate_facts"
+
+# This fixture is fact-only; its structural result must not enter lower-typed-stage.
+bb -cp "$compiled" -e '
+  (require (quote [native.core :as core])
+           (quote [native.lower :as lower])
+           (quote [native.slice :as slice])
+           (quote [native.stages :as stages]))
+  (let [rows (slice/read-fact-manifest (first *command-line-args*))
+        source
+        (slice/source-program rows "native.type-closure-structural-subset"
+          "native-core/validation/type-closure/structural_subset.bgl")
+        index
+        (lower/build-source-index (stages/sourcestagev1-terms source)
+          (stages/sourcestagev1-modules source))
+        parent
+        (some
+          (fn [candidate]
+            (if (= "SubsetParent" (lower/fact-text index candidate "name"))
+              candidate
+              nil))
+          (lower/index-form-ids index "defunion"))
+        union-types (lower/index-form-ids index "type-union")
+        structural-union
+        (some
+          (fn [source-type]
+            (let [names
+                  (set
+                    (mapv
+                      (fn [member]
+                        (lower/source-type-spelling index member))
+                      (lower/source-type-arguments index source-type)))]
+              (if (= #{"SubsetLeft" "SubsetRight"} names)
+                source-type
+                nil)))
+          union-types)]
+    (when-not (and (some? parent) (some? structural-union))
+      (throw (ex-info "structural-subset fixture was not projected"
+               {:parent parent :union-types union-types})))
+    (let [arguments (lower/source-type-arguments index structural-union)
+          resolution (lower/resolve-source-type index structural-union)
+          type-id (lower/typeresolutionv0-type-id resolution)
+          definition
+          (lower/lookup-type
+            (lower/typeresolutionv0-definitions resolution) type-id)]
+      (when-not (and (= 3
+                       (count
+                         (lower/union-member-group-items index parent)))
+                  (nil? (lower/common-source-union index arguments))
+                  (lower/typeresolutionv0-valid resolution)
+                  (some? definition)
+                  (instance? native.core.UnionType
+                    (core/typedef-shape definition)))
+        (throw (ex-info "proper subset did not remain structural"
+                 {:resolution resolution})))))' "$structural_subset_facts"
 
 bb -cp "$compiled" -e '
   (require (quote [native.core :as core])
@@ -263,6 +338,25 @@ bb -cp "$compiled" -e '
                         (lower/source-type-arguments index source-type)))]
                 (if (= expected names) source-type nil)))
             union-types))
+        structural-union-identified
+        (fn [expected]
+          (some
+            (fn [source-type]
+              (let [identities
+                    (set
+                      (mapv
+                        (fn [member]
+                          (let [spelling
+                                (lower/source-type-spelling index member)]
+                            (if (nil? spelling)
+                              ""
+                              (lower/resolved-source-key
+                                (lower/resolve-source-name index
+                                  (lower/source-module-name index member)
+                                  spelling)))))
+                        (lower/source-type-arguments index source-type)))]
+                (if (= expected identities) source-type nil)))
+            union-types))
         structural-resolution?
         (fn [source-type]
           (let [resolution (lower/resolve-source-type index source-type)
@@ -278,11 +372,10 @@ bb -cp "$compiled" -e '
         (structural-union-named #{"OverlapLeft" "OverlapRight"})
         ambiguous-union
         (structural-union-named #{"AmbiguousLeft" "AmbiguousRight"})
-        action-subset-union
-        (structural-union-named #{"ViewsOverview" "ViewsHost"})
         cross-module-union
-        (structural-union-named
-          #{"provider/CrossLeft" "provider/CrossRight"})
+        (structural-union-identified
+          #{"native.type-closure-provider/CrossLeft"
+            "native.type-closure-provider/CrossRight"})
         error-union
         (structural-union-named #{"ClosureMissing" "ClosureDenied"})]
     (when-not (> (count structural-unions) 0)
@@ -309,12 +402,6 @@ bb -cp "$compiled" -e '
       (when-not (nil? (lower/common-source-union index proper-subset))
         (throw (ex-info "proper structural subset widened to its parent union"
                  {:members proper-subset}))))
-    (when-not (and (some? action-subset-union)
-                (nil? (lower/common-source-union index
-                        (lower/source-type-arguments index action-subset-union)))
-                (structural-resolution? action-subset-union))
-      (throw (ex-info "proper subset did not retain a structural type identity"
-               {:source-type action-subset-union})))
     (when-not (some? overlap-union)
       (throw (ex-info "overlapping-parent structural union was not projected"
                {:union-types union-types})))

@@ -32,10 +32,6 @@
   [value (U OverlapLeft OverlapRight)] (U OverlapLeft OverlapRight)
   value)
 
-(defn preserve-action-subset
-  [value (U ViewsOverview ViewsHost)] (U ViewsOverview ViewsHost)
-  value)
-
 (defrecord AmbiguousLeft [(value String)])
 (defrecord AmbiguousRight [(value String)])
 
