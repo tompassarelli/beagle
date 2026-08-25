@@ -4,4 +4,4 @@
 
 (js/export
   (defunion ResultB
-    (DirectoryNamesRejected [(errno Int)])))
+    (DirectoryNamesRejected [errno Int])))

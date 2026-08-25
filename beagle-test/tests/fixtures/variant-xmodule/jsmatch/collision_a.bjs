@@ -4,4 +4,4 @@
 
 (js/export
   (defunion ResultA
-    (DirectoryNamesRejected [(reason String)])))
+    (DirectoryNamesRejected [reason String])))

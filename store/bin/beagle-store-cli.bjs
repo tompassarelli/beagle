@@ -178,7 +178,9 @@
                 text
                 (str "@" text))))
 
-(defn render-term [bridge Any value Any] String
+(defn render-term
+  [bridge Any
+   value Any] String
   (let [tag String (host-get value 0)]
     (cond
       (= tag "string") (host-get value 1)
@@ -193,10 +195,14 @@
            (render-term bridge (host-get value 3)) "]")
       :else (.fail bridge (str "unknown Term tag " tag)))))
 
-(defn render-row [bridge Any row Any] String
+(defn render-row
+  [bridge Any
+   row Any] String
   (str "[" (apply str
                    (map-indexed
-                    (fn [index Int value Any] String
+                    (fn
+                      [index Int
+                       value Any] String
                       (str (if (= index 0) "" " ")
                            (render-term bridge value)))
                     row)) "]"))
@@ -209,7 +215,9 @@
   (when-not (= expected (count arguments))
     (.fail bridge usage)))
 
-(defn scan-pattern [bridge Any arguments (Vec String)] Any
+(defn scan-pattern
+  [bridge Any
+   arguments (Vec String)] Any
   (let [pattern Any (js-obj)]
     (when-not (= "_" (nth arguments 0))
       (aset pattern "t1" (parse-term bridge (nth arguments 0))))

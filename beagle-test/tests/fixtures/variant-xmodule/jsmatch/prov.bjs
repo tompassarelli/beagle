@@ -4,5 +4,5 @@
 
 (js/export
   (defunion InventoryParseResult
-    (ParsedInventory [(action String)])
+    (ParsedInventory [action String])
     (InventoryHelp)))
