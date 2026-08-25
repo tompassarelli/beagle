@@ -2,3 +2,6 @@
 (ns native.type-closure-provider)
 
 (defrecord External [(value Int)])
+
+(defrecord CrossLeft [(value String)])
+(defrecord CrossRight [(value String)])

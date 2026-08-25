@@ -13,6 +13,8 @@ bundle="$scratch/source.bundle.json"
 consumer_ast="$scratch/consumer.ast.json"
 consumer_interface="$scratch/consumer.interface.sha256"
 consumer_facts="$scratch/consumer.facts.manifest"
+provider_ast="$scratch/provider.ast.json"
+provider_interface="$scratch/provider.interface.sha256"
 payloadless_ast="$scratch/payloadless.ast.json"
 payloadless_interface="$scratch/payloadless.interface.sha256"
 payloadless_facts="$scratch/payloadless.facts.manifest"
@@ -38,7 +40,8 @@ bb -e '
                        {:namespace namespace :matches (count matches)})))
             (nth matches 0)))
         consumer (select "native.type-closure-consumer")
-        payloadless (select "native.type-closure-payloadless")]
+        payloadless (select "native.type-closure-payloadless")
+        provider (select "native.type-closure-provider")]
     (spit (nth *command-line-args* 1)
       (json/generate-string (get consumer "program")))
     (spit (nth *command-line-args* 2)
@@ -46,9 +49,14 @@ bb -e '
     (spit (nth *command-line-args* 3)
       (json/generate-string (get payloadless "program")))
     (spit (nth *command-line-args* 4)
-      (str (get payloadless "interfaceSha256") "\n")))' \
+      (str (get payloadless "interfaceSha256") "\n"))
+    (spit (nth *command-line-args* 5)
+      (json/generate-string (get provider "program")))
+    (spit (nth *command-line-args* 6)
+      (str (get provider "interfaceSha256") "\n")))' \
   "$bundle" "$consumer_ast" "$consumer_interface" \
-  "$payloadless_ast" "$payloadless_interface"
+  "$payloadless_ast" "$payloadless_interface" \
+  "$provider_ast" "$provider_interface"
 
 consumer_path="native-core/validation/type-closure/consumer.bgl"
 interface_sha256="$(<"$consumer_interface")"
@@ -59,8 +67,12 @@ bb "$repo/native-core/bin/source-facts.clj" \
 
 payloadless_path="native-core/validation/type-closure/payloadless.bgl"
 payloadless_interface_sha256="$(<"$payloadless_interface")"
+provider_path="native-core/validation/type-closure/provider.bgl"
+provider_interface_sha256="$(<"$provider_interface")"
 bb "$repo/native-core/bin/source-facts.clj" \
+  --input "$provider_ast=$provider_path" \
   --input "$payloadless_ast=$payloadless_path" \
+  --interface-sha256 "$provider_path=$provider_interface_sha256" \
   --interface-sha256 "$payloadless_path=$payloadless_interface_sha256" \
   --output "$payloadless_facts" --include-defs
 
@@ -153,7 +165,42 @@ bb -cp "$compiled" -e '
                    (lower/source-type-kind index source-type))
               (= 7 (count
                      (lower/source-type-arguments index source-type)))))
-          inferred-types)]
+          inferred-types)
+        union-types (lower/index-form-ids index "type-union")
+        structural-union-named
+        (fn [expected]
+          (some
+            (fn [source-type]
+              (let [names
+                    (set
+                      (mapv
+                        (fn [member]
+                          (lower/source-type-spelling index member))
+                        (lower/source-type-arguments index source-type)))]
+                (if (= expected names) source-type nil)))
+            union-types))
+        structural-resolution?
+        (fn [source-type]
+          (let [resolution (lower/resolve-source-type index source-type)
+                type-id (lower/typeresolutionv0-type-id resolution)
+                definition
+                (lower/lookup-type
+                  (lower/typeresolutionv0-definitions resolution) type-id)]
+            (and (lower/typeresolutionv0-valid resolution)
+              (some? definition)
+              (instance? native.core.UnionType
+                (core/typedef-shape definition)))))
+        overlap-union
+        (structural-union-named #{"OverlapLeft" "OverlapRight"})
+        ambiguous-union
+        (structural-union-named #{"AmbiguousLeft" "AmbiguousRight"})
+        action-subset-union
+        (structural-union-named #{"ViewsOverview" "ViewsHost"})
+        cross-module-union
+        (structural-union-named
+          #{"provider/CrossLeft" "provider/CrossRight"})
+        error-union
+        (structural-union-named #{"ClosureMissing" "ClosureDenied"})]
     (when-not (> (count structural-unions) 0)
       (throw (ex-info
                "fixture no longer projects a seven-member inferred structural union"
@@ -178,6 +225,54 @@ bb -cp "$compiled" -e '
       (when-not (nil? (lower/common-source-union index proper-subset))
         (throw (ex-info "proper structural subset widened to its parent union"
                  {:members proper-subset}))))
+    (when-not (and (some? action-subset-union)
+                (nil? (lower/common-source-union index
+                        (lower/source-type-arguments index action-subset-union)))
+                (structural-resolution? action-subset-union))
+      (throw (ex-info "proper subset did not retain a structural type identity"
+               {:source-type action-subset-union})))
+    (when-not (some? overlap-union)
+      (throw (ex-info "overlapping-parent structural union was not projected"
+               {:union-types union-types})))
+    (let [overlap-parent
+          (lower/common-source-union index
+            (lower/source-type-arguments index overlap-union))]
+      (when-not (and (some? overlap-parent)
+                  (= "OverlapExact"
+                    (lower/fact-text index overlap-parent "name"))
+                  (core/native-id=
+                    (lower/source-type-id
+                      "native.type-closure-payloadless/OverlapExact")
+                    (lower/typeresolutionv0-type-id
+                      (lower/resolve-source-type index overlap-union))))
+        (throw (ex-info "unique exact parent was not selected"
+                 {:resolved overlap-parent}))))
+    (when-not (some? ambiguous-union)
+      (throw (ex-info "ambiguous-parent structural union was not projected"
+               {:union-types union-types})))
+    (when-not (and
+                (nil? (lower/common-source-union index
+                        (lower/source-type-arguments index ambiguous-union)))
+                (structural-resolution? ambiguous-union))
+      (throw (ex-info "ambiguous structural union selected a nominal parent"
+               {:source-type ambiguous-union})))
+    (when-not (and (some? cross-module-union)
+                (nil? (lower/common-source-union index
+                        (lower/source-type-arguments index cross-module-union)))
+                (structural-resolution? cross-module-union))
+      (throw (ex-info "same-local cross-module members matched a local parent"
+               {:source-type cross-module-union})))
+    (when-not (some? error-union)
+      (throw (ex-info "throwable structural union was not projected"
+               {:union-types union-types})))
+    (let [error-parent
+          (lower/common-source-union index
+            (lower/source-type-arguments index error-union))]
+      (when-not (and (some? error-parent)
+                  (= "ClosureProblem"
+                    (lower/fact-text index error-parent "name")))
+        (throw (ex-info "complete throwable union did not normalize"
+                 {:resolved error-parent}))))
     (let [configuration ["profile=3"]
           frozen (lower/sourcefreezeacceptedv0-frozen
                    (lower/freeze-source-stage source "type-closure-v0"

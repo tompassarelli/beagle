@@ -1,5 +1,6 @@
 #lang beagle
-(ns native.type-closure-payloadless)
+(ns native.type-closure-payloadless
+  (:require [native.type-closure-provider :as provider]))
 
 (defunion ViewsAction
   ViewsOverview
@@ -19,3 +20,45 @@
     [(ViewsJson) (->ViewsJson)]
     [(ViewsPath path) (->ViewsPath path)]
     [(ViewsHelp) (->ViewsHelp)]))
+
+(defrecord OverlapLeft [(value String)])
+(defrecord OverlapRight [(value String)])
+(defrecord OverlapExtra [(value String)])
+
+(defunion OverlapBroad OverlapLeft OverlapRight OverlapExtra)
+(defunion OverlapExact OverlapLeft OverlapRight)
+
+(defn preserve-overlap
+  [value (U OverlapLeft OverlapRight)] (U OverlapLeft OverlapRight)
+  value)
+
+(defn preserve-action-subset
+  [value (U ViewsOverview ViewsHost)] (U ViewsOverview ViewsHost)
+  value)
+
+(defrecord AmbiguousLeft [(value String)])
+(defrecord AmbiguousRight [(value String)])
+
+(defunion AmbiguousOne AmbiguousLeft AmbiguousRight)
+(defunion AmbiguousTwo AmbiguousLeft AmbiguousRight)
+
+(defn preserve-ambiguous
+  [value (U AmbiguousLeft AmbiguousRight)] (U AmbiguousLeft AmbiguousRight)
+  value)
+
+(defrecord CrossLeft [(value String)])
+(defrecord CrossRight [(value String)])
+
+(defunion LocalCrossPair CrossLeft CrossRight)
+
+(defn preserve-imported-cross
+  [value (U provider/CrossLeft provider/CrossRight)]
+  (U provider/CrossLeft provider/CrossRight)
+  value)
+
+(defunion :throwable ClosureProblem ClosureMissing ClosureDenied)
+
+(defn preserve-closure-problem
+  [value (U ClosureMissing ClosureDenied)]
+  (U ClosureMissing ClosureDenied)
+  value)
