@@ -178,6 +178,16 @@ cat >"$gate" <<'CLJ'
                     reference-parameter-carrier-resolution]
         (lower/resolve-functions index))
       indexed-resolutions (lower/resolve-functions index)
+      scaled-functions (vec (take 512 (cycle functions)))
+      scaled-index (assoc index :form-ids
+                     (assoc (lower/sourceindexv0-form-ids index)
+                       "defn" scaled-functions))
+      serial-scaled-operation
+      #(with-redefs [lower/ordered-native-mapv mapv]
+         (lower/resolve-functions scaled-index))
+      ordered-scaled-operation #(lower/resolve-functions scaled-index)
+      serial-scaled-resolutions (serial-scaled-operation)
+      ordered-scaled-resolutions (ordered-scaled-operation)
       base-index (assoc index :callee-names {} :call-targets {}
                    :calls-by-function {})
       reference-operation
@@ -190,6 +200,8 @@ cat >"$gate" <<'CLJ'
          (mapv (fn [query] (lower/index-has-callee? rebuilt query)) queries))
       reference-ns (best-ns 5 reference-operation)
       indexed-ns (best-ns 5 indexed-operation)
+      serial-resolution-ns (best-ns 1 serial-scaled-operation)
+      ordered-resolution-ns (best-ns 1 ordered-scaled-operation)
       early (lower/->FunctionTargetV0 2 (first functions))
       late (lower/->FunctionTargetV0 7 (last functions))]
   (require! (= 31 (count queries)) "gate no longer covers all 31 prelude queries")
@@ -203,10 +215,14 @@ cat >"$gate" <<'CLJ'
     "indexed carrier result, definitions, diagnostics, or order differ")
   (require! (= reference-resolutions indexed-resolutions)
     "indexed function resolutions or diagnostic order differ")
+  (require! (= serial-scaled-resolutions ordered-scaled-resolutions)
+    "ordered parallel resolution changed type facts, diagnostics, or source order")
   (require! (= early (lower/earlier-function-target early late))
     "binding/name conflict did not retain the lower source ordinal")
   (require! (< (* 3 indexed-ns) reference-ns)
     "construction-inclusive index path was not at least 3x faster")
+  (require! (< ordered-resolution-ns serial-resolution-ns)
+    "ordered parallel signature resolution did not beat the serial reference")
   (println "facts" (lower/index-facts index))
   (println "calls" (count calls))
   (println "functions" (count functions))
@@ -216,9 +232,15 @@ cat >"$gate" <<'CLJ'
   (println "all-calls-by-function-order-equal" true)
   (println "all-carrier-results-diagnostics-equal" true)
   (println "all-function-resolutions-diagnostics-equal" true)
+  (println "scaled-function-resolutions" (count scaled-functions))
+  (println "all-parallel-resolutions-diagnostics-order-equal" true)
   (println "reference-ns" reference-ns)
   (println "index-construction-plus-lookups-ns" indexed-ns)
-  (println "speedup" (double (/ reference-ns indexed-ns))))
+  (println "call-index-speedup" (double (/ reference-ns indexed-ns)))
+  (println "serial-resolution-ns" serial-resolution-ns)
+  (println "ordered-parallel-resolution-ns" ordered-resolution-ns)
+  (println "resolution-speedup"
+    (double (/ serial-resolution-ns ordered-resolution-ns))))
 CLJ
 
 report="$scratch/report.txt"
@@ -230,5 +252,6 @@ grep -Fxq "all-31-callee-answers-equal true" "$report"
 grep -Fxq "all-calls-by-function-order-equal true" "$report"
 grep -Fxq "all-carrier-results-diagnostics-equal true" "$report"
 grep -Fxq "all-function-resolutions-diagnostics-equal true" "$report"
+grep -Fxq "all-parallel-resolutions-diagnostics-order-equal true" "$report"
 
 echo "typing_prelude_call_index_gate.sh: production-path identity and scaling PASS"

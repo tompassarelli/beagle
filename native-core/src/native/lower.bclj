@@ -5338,6 +5338,8 @@
     (core/->TypeDef (lower-id "function-type" parts) "Function"
       (core/->FunctionType parameter-types rest-type return-type))))
 
+(declare ordered-native-mapv)
+
 (defn resolve-closure-spec
   [index SourceIndexV0
    globals (Vec GlobalBindingV0)
@@ -5405,7 +5407,7 @@
 (defn resolve-closure-specs
   [index SourceIndexV0
    globals (Vec GlobalBindingV0)] (Vec ClosureSpecV0)
-  (mapv
+  (ordered-native-mapv
     (fn [source core/NativeId] ClosureSpecV0
       (resolve-closure-spec index globals source))
     (vec (concat (index-form-ids index "fn")
@@ -20298,7 +20300,7 @@
 (defn resolve-functions [index SourceIndexV0] (Vec FunctionResolutionV0)
   (vec
     (concat
-      (mapv
+      (ordered-native-mapv
         (fn [source-function core/NativeId] FunctionResolutionV0
           (resolve-function index source-function))
         (index-form-ids index "defn"))
