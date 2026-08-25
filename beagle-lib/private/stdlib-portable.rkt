@@ -25,8 +25,15 @@
    'last       (poly-fn '(A) (list (type-app 'Vec (list (tv 'A)))) (tv 'A))
    'rest       (fn-of '(Any) 'Any)
    'next       (fn-of '(Any) 'Any)
-   'nth        (poly-fn '(A) (list (type-app 'Vec (list (tv 'A))) (p 'Int))
-                        (tv 'A) #:rest (p 'Any))
+   'nth        (poly-fn
+                '(A)
+                (list
+                 (type-union
+                  (list (type-app 'Vec (list (tv 'A)))
+                        (type-app 'List (list (tv 'A)))))
+                 (p 'Int))
+                (tv 'A)
+                #:rest (p 'Any))
    'get        (fn-of '(Any Any) 'Any #:rest 'Any)
    'get-in     (fn-of '(Any Any) 'Any #:rest 'Any)
    'count      (fn-of '(Any) 'Int)

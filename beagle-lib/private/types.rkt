@@ -1101,6 +1101,13 @@
     [(type-var? expected)
      (unless (hash-has-key? bindings (type-var-name expected))
        (hash-set! bindings (type-var-name expected) actual))]
+    [(type-union? expected)
+     (define matching
+       (for/first ([alternative (in-list (type-union-alts expected))]
+                   #:when (type-compatible? actual alternative))
+         alternative))
+     (when matching
+       (infer-type-var-bindings matching actual bindings invariant-context?))]
     [(and (type-fn? expected) (type-fn? actual))
      (when (= (length (type-fn-params expected)) (length (type-fn-params actual)))
        (for ([ep (in-list (type-fn-params expected))]

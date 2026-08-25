@@ -1091,6 +1091,14 @@
        (check-prog/target target
                           '(defn total [(v (Vec Int))] Int (+ (nth v 0) 1)))))))
 
+(test-case "js: nth preserves List elements for direct and rest bindings"
+  (check-not-exn
+   (lambda ()
+     (check-prog/target
+      'js
+      '(defn direct [(values (List Int))] Int (+ 1 (nth values 0)))
+      '(defn variadic [& (values (List Int))] Int (+ (nth values 0) 1))))))
+
 ;; inc/dec declare a Number operand, the same precondition + - * / declare.
 ;; Only the binary operators reached the strict operand check, so (inc x) used
 ;; to accept an Any that (+ x 1) rejected.
