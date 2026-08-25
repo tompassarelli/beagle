@@ -276,6 +276,6 @@
 
 (define JS-NO-EMIT
   (set-subtract (list->set (hash-keys STDLIB-PORTABLE))
-                JS-TRANSLATED))
+                (set-add JS-TRANSLATED (q 'bgl 'sha256-utf8))))
 
 (provide JS-MEMBER-CONTRACTS JS-NO-EMIT STDLIB-JS)

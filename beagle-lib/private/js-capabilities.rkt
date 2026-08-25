@@ -35,6 +35,7 @@
        'and 'or
        'throw 'ex-info 'ex-message 'ex-data
        'name 'keyword 'subs 're-find 're-pattern 're-matches 're-seq 're-groups
+       'utf8-encode 'utf8-decode 'sha256-bytes
        'atom 'deref 'reset! 'swap! 'add-watch 'remove-watch 'compare-and-set!
        'mapv 'filterv 'get 'update 'merge 'dissoc
        'subvec 'pop 'peek 'take 'drop

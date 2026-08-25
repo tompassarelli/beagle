@@ -355,6 +355,9 @@
     [(name) (if (= n 1) (runtime-call "name" args) #f)]
     [(keyword) (if (= n 1) (runtime-call "keyword" args) #f)]
     [(symbol) (if (= n 1) (runtime-call "symbol" args) #f)]
+    [(utf8-encode) (if (= n 1) (runtime-call "utf8_encode" args) #f)]
+    [(utf8-decode) (if (= n 1) (runtime-call "utf8_decode" args) #f)]
+    [(sha256-bytes) (if (= n 1) (runtime-call "sha256_bytes" args) #f)]
     [(integer?) (if (= n 1) (format "Number.isInteger(~a)" (emit-expr (car args))) #f)]
     [(subs) (cond
               [(= n 2) (format "~a.substring(~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
@@ -2003,7 +2006,7 @@
     (define SPLITTABLE-BC '("equiv" "hash" "contains" "distinct_equiv"))
     (define used-bc
       (sort (remove-duplicates
-             (regexp-match* #px"[$][$]bc[$]([a-z_]+)" body #:match-select cadr))
+             (regexp-match* #px"[$][$]bc[$]([a-z0-9_]+)" body #:match-select cadr))
             string<?))
     (define needs-v (unbox (bc-needs-v?)))
     (define runtime-import
@@ -3260,6 +3263,11 @@
              (eq? (qualified-ref-name fn-sym) 'promote)
              (= 1 (length args)))
         (emit-expr (car args))]
+       [(and (qualified-ref? fn-sym)
+             (eq? (qualified-ref-qualifier fn-sym) 'bgl)
+             (eq? (qualified-ref-name fn-sym) 'sha256-utf8)
+             (= 1 (length args)))
+        (runtime-call "sha256_utf8" args)]
        ;; Value-equality family routes to the runtime $$bc$equiv (Clojure =
        ;; semantics: structural, recursive over vectors/sets/maps/records).
        ;; `identical?` deliberately does NOT come here — it is reference

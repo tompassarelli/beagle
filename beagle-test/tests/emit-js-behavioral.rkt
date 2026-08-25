@@ -142,6 +142,44 @@
      "main();"
      "Hello, world!")
 
+   (check-js-output "portable byte primitives are strict and byte-exact"
+     (list
+      '(defn decode-text [(bytes (Vec Int))] String
+         (utf8-decode bytes))
+      '(defn encode-text [(text String)] (Vec Int)
+         (utf8-encode text))
+      '(defn digest-bytes [(bytes (Vec Int))] String
+         (sha256-bytes bytes))
+      '(defn digest-text [(text String)] String
+         (bgl/sha256-utf8 text))
+      '(defn decode-rejected? [(bytes (Vec Int))] Bool
+         (try
+           (do (utf8-decode bytes) false)
+           (catch js/Error error true))))
+     (string-append
+      "console.log(JSON.stringify([\n"
+      "  decode_text([65,195,169,240,159,152,128]) === 'Aé😀',\n"
+      "  JSON.stringify(encode_text('Aé😀')) === '[65,195,169,240,159,152,128]',\n"
+      "  decode_text([239,187,191,65]).charCodeAt(0) === 0xFEFF,\n"
+      "  decode_text([101,204,129]) === 'e\\u0301',\n"
+      "  decode_text([101,204,129]) !== 'é',\n"
+      "  digest_bytes([]) === 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',\n"
+      "  digest_bytes([97,98,99]) === 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad',\n"
+      "  digest_text('λ💥') === digest_bytes(encode_text('λ💥'))\n"
+      "]));\n"
+      "const invalid = [[128],[194],[226,130],[240,159,152],\n"
+      "  [192,128],[224,128,128],[240,128,128,128],\n"
+      "  [237,160,128],[244,144,128,128],[226,40,161],\n"
+      "  [65,128],[-1],[256],[1.5]];\n"
+      "console.log(JSON.stringify(invalid.map(decode_rejected_p)));\n"
+      "let encodeFailed = false; try { encode_text('\\uD800'); } catch (_) { encodeFailed = true; }\n"
+      "let digestFailed = false; try { digest_bytes([0, 256]); } catch (_) { digestFailed = true; }\n"
+      "console.log(JSON.stringify([encodeFailed, digestFailed]));")
+     (string-append
+      "[true,true,true,true,true,true,true,true]\n"
+      "[true,true,true,true,true,true,true,true,true,true,true,true,true,true]\n"
+      "[true,true]"))
+
    (check-js-behavior "keyword, symbol, nil, and declared scalar identity"
      (list
       `(def literal-keyword Keyword :alpha/item)
