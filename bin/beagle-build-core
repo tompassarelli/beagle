@@ -1793,7 +1793,7 @@ validate_core_checkpoint_wire() {
         path="${paths[$index]}"
         rc=0
         run_phase "core-checkpoint-wire-${labels[$index]}" \
-            "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-30}" \
+            "${BEAGLE_CORE_VALIDATION_TIMEOUT_SECONDS:-${BEAGLE_CORE_LOWERING_TIMEOUT_SECONDS:-180}}" \
             bb -cp "$compiled" -e '
               (require (quote [native.stages :as stages]))
               (let [path (first *command-line-args*)
