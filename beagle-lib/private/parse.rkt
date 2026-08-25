@@ -3077,14 +3077,17 @@
                (parse-expr (or (stx-ref item-subs 2) constraint-datum)))))
 
 ;; A union's enclosing sequence contains complete member declarations. A
-;; fielded member is exactly `(Name [fields...])`; no parser path may recover a
-;; member from a prefix and silently ignore or repartition trailing metadata.
+;; declared member is exactly `(Name)` or `(Name [fields...])`; no parser path
+;; may recover a member from a prefix and silently ignore or repartition
+;; trailing metadata.  The explicit nullary spelling distinguishes a
+;; payloadless variant from a bare Name that refers to a pre-declared record.
 (define (union-member-declaration? datum)
   (or (symbol? datum)
       (and (list? datum)
-           (= (length datum) 2)
+           (memq (length datum) '(1 2))
            (symbol? (car datum))
-           (bracketed? (cadr datum)))))
+           (or (= (length datum) 1)
+               (bracketed? (cadr datum))))))
 
 (define (union-member-error-details member-stx datum)
   (source-error-details member-stx datum))
@@ -3098,6 +3101,7 @@
       "Invalid union member declaration: ~a\n\n"
       "Each member must be one complete form:\n"
       "  Name\n"
+      "  (Name)\n"
       "  (Name [(field Type) (field Type validator) ...])")
      #:details (union-member-error-details member datum)
      (binding-datum->src datum)))
@@ -3107,11 +3111,13 @@
   (reject-reserved-type-name! name (format "~a member" where))
   (define fields
     (if fielded?
-        (let ([member-subs (stx-subs member)])
-          (parameterize ([current-type-vars
-                          (append type-vars (current-type-vars))])
-            (parse-record-fields
-             (or (stx-ref member-subs 1) (cadr datum)))))
+        (if (= (length datum) 1)
+            '()
+            (let ([member-subs (stx-subs member)])
+              (parameterize ([current-type-vars
+                              (append type-vars (current-type-vars))])
+                (parse-record-fields
+                 (or (stx-ref member-subs 1) (cadr datum))))))
         '()))
   (values name fields fielded?))
 

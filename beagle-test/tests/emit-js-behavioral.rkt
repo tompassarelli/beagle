@@ -369,6 +369,22 @@ console.assert(threw, 'frozen record should reject mutation');
      "console.log(shape_size(Circle(5))); console.log(shape_size(Square(3)));"
      "5\n3")
 
+   (check-js-output "explicit nullary defunion variants construct and match"
+     (list `(js/export
+             (defunion HostMkdirResult
+               (HostMkdirOk)
+               (HostMkdirError ,(br '(errno Int)))))
+           `(defn make-mkdir-ok ,(br) HostMkdirResult
+              (->HostMkdirOk))
+           `(defn mkdir-code ,(br '(result HostMkdirResult)) Int
+              (match result
+                ,(br '(HostMkdirOk) 0)
+                ,(br '(HostMkdirError errno) 'errno))))
+     (string-append
+      "console.log(mkdir_code(make_mkdir_ok()));\n"
+      "console.log(mkdir_code(HostMkdirError(17)));")
+     "0\n17")
+
    ;; --- seam 1: reserved-word field/property positions ----------------------
    ;; A record field named for a JS reserved word must round-trip through its
    ;; generated accessor. Pre-fix the accessor is emitted as `cfg_delete$` but
