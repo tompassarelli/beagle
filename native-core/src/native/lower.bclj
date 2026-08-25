@@ -2406,12 +2406,44 @@
                   (core/->TypeVariant (variant-id owner member) member payload))))))]
     (core/->TypeDef (source-type-id owner) name (core/->UnionType variants))))
 
+(defn source-union-payloadless-member-types
+  [index SourceIndexV0
+   source-union core/NativeId] (Vec core/TypeDef)
+  (let [module-name String (source-module-name index source-union)
+        groups (Vec core/NativeId) (union-member-group-items index source-union)]
+    (loop [position Int 0
+           definitions (Vec core/TypeDef) []]
+      (if (>= position (count groups))
+        definitions
+        (let [group core/NativeId (nth groups position)
+              member String (fact-text index group "name")
+              inline Bool (= "true" (fact-text index group "inline"))]
+          (if inline
+            (recur (+ position 1) definitions)
+            (let [owner String (str module-name "/" member)]
+              (recur (+ position 1)
+                (append-type-def definitions
+                  (core/->TypeDef (source-type-id owner) member
+                    (core/->UnionType
+                      [(core/->TypeVariant
+                         (variant-id owner "unit") member nil)])))))))))))
+
 (defn source-union-types [index SourceIndexV0] (Vec core/TypeDef)
-  (mapv
-    (fn [source-union core/NativeId] core/TypeDef
-      (resolve-source-union index source-union))
-    (vec (concat (index-form-ids index "defunion")
-           (index-form-ids index "deferror")))))
+  (let [source-unions (Vec core/NativeId) (vec (concat
+          (index-form-ids index "defunion")
+          (index-form-ids index "deferror")))
+        union-types (Vec core/TypeDef) (mapv
+          (fn [source-union core/NativeId] core/TypeDef
+            (resolve-source-union index source-union))
+          source-unions)]
+    (loop [position Int 0
+           definitions (Vec core/TypeDef) union-types]
+      (if (>= position (count source-unions))
+        definitions
+        (recur (+ position 1)
+          (append-type-defs definitions
+            (source-union-payloadless-member-types index
+              (nth source-unions position))))))))
 
 (defn parameter-target-at
   [index SourceIndexV0

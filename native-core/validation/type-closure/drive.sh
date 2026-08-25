@@ -194,8 +194,6 @@ bb -cp "$compiled" -e '
         (throw (ex-info "declared-duplicate union did not remain structural"
                  {:resolution resolution})))))' "$declared_duplicate_facts"
 
-# Native Core has no standalone TypeDefs for payloadless tags in structural
-# subsets, so this checked/fact-only fixture must not enter lower-typed-stage.
 bb -cp "$compiled" -e '
   (require (quote [native.core :as core])
            (quote [native.lower :as lower])
@@ -228,7 +226,8 @@ bb -cp "$compiled" -e '
               (if (= #{"SubsetLeft" "SubsetRight"} names)
                 source-type
                 nil)))
-          union-types)]
+          union-types)
+        configuration ["profile=3"]]
     (when-not (and (some? parent) (some? structural-union))
       (throw (ex-info "structural-subset fixture was not projected"
                {:parent parent :union-types union-types})))
@@ -247,7 +246,37 @@ bb -cp "$compiled" -e '
                   (instance? native.core.UnionType
                     (core/typedef-shape definition)))
         (throw (ex-info "proper subset did not remain structural"
-                 {:resolution resolution})))))' "$structural_subset_facts"
+                 {:resolution resolution}))))
+    (let [frozen (lower/sourcefreezeacceptedv0-frozen
+                   (lower/freeze-source-stage source "type-closure-v0"
+                     configuration))
+          result (lower/lower-typed-stage frozen "type-closure-v0"
+                   configuration)]
+      (when-not (instance? native.lower.TypingAcceptedV0 result)
+        (throw (ex-info "payloadless structural subset was rejected"
+                 {:result result})))
+      (let [types (lower/typedslicev0-types
+                    (lower/typingacceptedv0-slice result))
+            subset-id (lower/typeresolutionv0-type-id
+                        (lower/resolve-source-type index structural-union))
+            subset-definition (lower/lookup-type types subset-id)
+            left-definition
+            (lower/lookup-type types
+              (lower/source-type-id
+                "native.type-closure-structural-subset/SubsetLeft"))
+            right-definition
+            (lower/lookup-type types
+              (lower/source-type-id
+                "native.type-closure-structural-subset/SubsetRight"))]
+        (when-not (and (some? subset-definition)
+                    (instance? native.core.UnionType
+                      (core/typedef-shape subset-definition))
+                    (some? left-definition)
+                    (some? right-definition))
+          (throw (ex-info "payloadless structural subset did not close"
+                   {:subset subset-definition
+                    :left left-definition
+                    :right right-definition}))))))' "$structural_subset_facts"
 
 bb -cp "$compiled" -e '
   (require (quote [native.core :as core])
@@ -537,4 +566,4 @@ bb -cp "$compiled" -e '
                     :diagnostics closure-diagnostics}))))))' \
   "$payloadless_facts"
 
-echo "type-closure: payloadless nominal union normalized and imported missing TypeDef rejected PASS"
+echo "type-closure: payloadless nominal and structural unions closed and imported missing TypeDef rejected PASS"
