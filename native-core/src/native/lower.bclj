@@ -1619,6 +1619,26 @@
   (let [groups (U core/NativeId Nil) (index-first-object index source-union "members")]
     (if (nil? groups) [] (index-sequence-items index groups))))
 
+(defn source-union-for-member
+  [index SourceIndexV0
+   module-name String
+   member-name String] (U core/NativeId Nil)
+  (let [unions (Vec core/NativeId) (vec (concat (index-form-ids index "defunion")
+               (index-form-ids index "deferror")))]
+    (loop [position Int 0]
+      (if (>= position (count unions))
+        nil
+        (let [source-union core/NativeId (nth unions position)
+              groups (Vec core/NativeId) (union-member-group-items index source-union)]
+          (if (and (= module-name (source-module-name index source-union))
+                (some?
+                  (some
+                    (fn [group core/NativeId] Bool
+                      (= member-name (fact-text index group "name")))
+                    groups)))
+            source-union
+            (recur (+ position 1))))))))
+
 (defn resolved-source-union-member
   [index SourceIndexV0
    source-type core/NativeId] (U ResolvedSourceNameV0 Nil)
@@ -1666,27 +1686,6 @@
               nil
               (recur (+ position 1) (assoc identities key true)))))))))
 
-(defn unique-source-union-for-member
-  [index SourceIndexV0
-   module-name String
-   member-name String] (U core/NativeId Nil)
-  (let [key String (str module-name "/" member-name)
-        unions (Vec core/NativeId)
-        (vec (concat (index-form-ids index "defunion")
-               (index-form-ids index "deferror")))]
-    (loop [position Int 0
-           match (U core/NativeId Nil) nil]
-      (if (>= position (count unions))
-        match
-        (let [candidate core/NativeId (nth unions position)
-              declared (U (Map String Bool) Nil)
-              (declared-union-member-identities index candidate)]
-          (if (and (some? declared) (= true (get declared key)))
-            (if (nil? match)
-              (recur (+ position 1) candidate)
-              nil)
-            (recur (+ position 1) match)))))))
-
 (defn common-source-union
   [index SourceIndexV0
    source-types (Vec core/NativeId)] (U core/NativeId Nil)
@@ -1700,17 +1699,16 @@
       (if (nil? projected)
         nil
         (loop [position Int 0
-               match (U core/NativeId Nil) nil]
+               matches (Vec core/NativeId) []]
           (if (>= position (count unions))
-            match
+            (if (= 1 (count matches)) (nth matches 0) nil)
             (let [candidate core/NativeId (nth unions position)
                   declared (U (Map String Bool) Nil)
                   (declared-union-member-identities index candidate)]
-              (if (and (some? declared) (= projected declared))
-                (if (nil? match)
-                  (recur (+ position 1) candidate)
-                  nil)
-                (recur (+ position 1) match)))))))))
+              (recur (+ position 1)
+                (if (and (some? declared) (= projected declared))
+                  (conj matches candidate)
+                  matches)))))))))
 
 (defn source-any-type?
   [index SourceIndexV0
@@ -4327,7 +4325,7 @@
       nil
       (let [member String (subs name 2 (count name))
             index SourceIndexV0 (bodyenvv0-index env)
-            source-union (U core/NativeId Nil) (unique-source-union-for-member index
+            source-union (U core/NativeId Nil) (source-union-for-member index
               (resolvedsourcenamev0-module-name resolved) member)]
         (if (nil? source-union)
           nil
@@ -4402,7 +4400,7 @@
       nil
       (let [member String (subs name 2 (count name))
             index SourceIndexV0 (bodyenvv0-index env)
-            source-union (U core/NativeId Nil) (unique-source-union-for-member index
+            source-union (U core/NativeId Nil) (source-union-for-member index
               (resolvedsourcenamev0-module-name resolved) member)]
         (if (nil? source-union)
           nil
@@ -19808,7 +19806,7 @@
                             member-name String (if (and (> (count callee) 2)
                                   (= "->" (subs callee 0 2)))
                               (subs callee 2 (count callee)) "")
-                            source-union (U core/NativeId Nil) (unique-source-union-for-member index
+                            source-union (U core/NativeId Nil) (source-union-for-member index
                               (resolvedsourcenamev0-module-name resolved-callee)
                               member-name)]
                         (if (nil? source-union)

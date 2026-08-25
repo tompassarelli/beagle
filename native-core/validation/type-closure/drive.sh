@@ -9,6 +9,7 @@ trap 'rm -rf "${scratch:?}"' EXIT
 provider="$here/provider.bgl"
 consumer="$here/consumer.bgl"
 payloadless="$here/payloadless.bgl"
+declared_duplicate="$here/declared_duplicate.bgl"
 bundle="$scratch/source.bundle.json"
 consumer_ast="$scratch/consumer.ast.json"
 consumer_interface="$scratch/consumer.interface.sha256"
@@ -18,11 +19,15 @@ provider_interface="$scratch/provider.interface.sha256"
 payloadless_ast="$scratch/payloadless.ast.json"
 payloadless_interface="$scratch/payloadless.interface.sha256"
 payloadless_facts="$scratch/payloadless.facts.manifest"
+declared_duplicate_ast="$scratch/declared-duplicate.ast.json"
+declared_duplicate_interface="$scratch/declared-duplicate.interface.sha256"
+declared_duplicate_facts="$scratch/declared-duplicate.facts.manifest"
 compiled="$scratch/compiled"
 
-"$repo/bin/beagle" check --agent "$provider" "$consumer" "$payloadless"
+"$repo/bin/beagle" check --agent \
+  "$provider" "$consumer" "$payloadless" "$declared_duplicate"
 "$repo/bin/beagle-ast" --bundle -- \
-  "$provider" "$consumer" "$payloadless" >"$bundle"
+  "$provider" "$consumer" "$payloadless" "$declared_duplicate" >"$bundle"
 
 bb -e '
   (require (quote [cheshire.core :as json]))
@@ -41,7 +46,9 @@ bb -e '
             (nth matches 0)))
         consumer (select "native.type-closure-consumer")
         payloadless (select "native.type-closure-payloadless")
-        provider (select "native.type-closure-provider")]
+        provider (select "native.type-closure-provider")
+        declared-duplicate
+        (select "native.type-closure-declared-duplicate")]
     (spit (nth *command-line-args* 1)
       (json/generate-string (get consumer "program")))
     (spit (nth *command-line-args* 2)
@@ -53,10 +60,15 @@ bb -e '
     (spit (nth *command-line-args* 5)
       (json/generate-string (get provider "program")))
     (spit (nth *command-line-args* 6)
-      (str (get provider "interfaceSha256") "\n")))' \
+      (str (get provider "interfaceSha256") "\n"))
+    (spit (nth *command-line-args* 7)
+      (json/generate-string (get declared-duplicate "program")))
+    (spit (nth *command-line-args* 8)
+      (str (get declared-duplicate "interfaceSha256") "\n")))' \
   "$bundle" "$consumer_ast" "$consumer_interface" \
   "$payloadless_ast" "$payloadless_interface" \
-  "$provider_ast" "$provider_interface"
+  "$provider_ast" "$provider_interface" \
+  "$declared_duplicate_ast" "$declared_duplicate_interface"
 
 consumer_path="native-core/validation/type-closure/consumer.bgl"
 interface_sha256="$(<"$consumer_interface")"
@@ -76,6 +88,14 @@ bb "$repo/native-core/bin/source-facts.clj" \
   --interface-sha256 "$payloadless_path=$payloadless_interface_sha256" \
   --output "$payloadless_facts" --include-defs
 
+declared_duplicate_path="native-core/validation/type-closure/declared_duplicate.bgl"
+declared_duplicate_interface_sha256="$(<"$declared_duplicate_interface")"
+bb "$repo/native-core/bin/source-facts.clj" \
+  --input "$declared_duplicate_ast=$declared_duplicate_path" \
+  --interface-sha256 \
+    "$declared_duplicate_path=$declared_duplicate_interface_sha256" \
+  --output "$declared_duplicate_facts" --include-defs
+
 "$repo/bin/beagle-build-all" \
   "$repo/native-core/src/native/core.bclj" \
   "$repo/native-core/src/native/stages.bclj" \
@@ -88,6 +108,70 @@ bb "$repo/native-core/bin/source-facts.clj" \
     sed -n '1,240p' "$scratch/build.log" >&2
     exit 1
   }
+
+bb -cp "$compiled" -e '
+  (require (quote [native.core :as core])
+           (quote [native.lower :as lower])
+           (quote [native.slice :as slice])
+           (quote [native.stages :as stages]))
+  (let [rows (slice/read-fact-manifest (first *command-line-args*))
+        source
+        (slice/source-program rows "native.type-closure-declared-duplicate"
+          "native-core/validation/type-closure/declared_duplicate.bgl")
+        index
+        (lower/build-source-index (stages/sourcestagev1-terms source)
+          (stages/sourcestagev1-modules source))
+        parent
+        (some
+          (fn [candidate]
+            (if (= "DuplicateParent" (lower/fact-text index candidate "name"))
+              candidate
+              nil))
+          (lower/index-form-ids index "defunion"))
+        union-types (lower/index-form-ids index "type-union")
+        structural-union
+        (some
+          (fn [source-type]
+            (let [names
+                  (set
+                    (mapv
+                      (fn [member]
+                        (lower/source-type-spelling index member))
+                      (lower/source-type-arguments index source-type)))]
+              (if (= #{"DuplicateLeft" "DuplicateRight"} names)
+                source-type
+                nil)))
+          union-types)]
+    (when-not (some? parent)
+      (throw (ex-info "declared-duplicate parent was not projected"
+               {:unions (lower/index-form-ids index "defunion")})))
+    (let [members (lower/union-member-group-items index parent)
+          names
+          (mapv
+            (fn [member] (lower/fact-text index member "name"))
+            members)]
+      (when-not (and (= ["DuplicateLeft" "DuplicateLeft" "DuplicateRight"]
+                        names)
+                  (nil?
+                    (lower/declared-union-member-identities index parent)))
+        (throw (ex-info "duplicate declared identities were accepted"
+                 {:members names}))))
+    (when-not (some? structural-union)
+      (throw (ex-info "declared-duplicate structural union was not projected"
+               {:union-types union-types})))
+    (let [arguments (lower/source-type-arguments index structural-union)
+          resolution (lower/resolve-source-type index structural-union)
+          type-id (lower/typeresolutionv0-type-id resolution)
+          definition
+          (lower/lookup-type
+            (lower/typeresolutionv0-definitions resolution) type-id)]
+      (when-not (and (nil? (lower/common-source-union index arguments))
+                  (lower/typeresolutionv0-valid resolution)
+                  (some? definition)
+                  (instance? native.core.UnionType
+                    (core/typedef-shape definition)))
+        (throw (ex-info "declared-duplicate union did not remain structural"
+                 {:resolution resolution})))))' "$declared_duplicate_facts"
 
 bb -cp "$compiled" -e '
   (require (quote [native.core :as core])

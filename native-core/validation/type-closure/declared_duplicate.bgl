@@ -1,0 +1,12 @@
+#lang beagle
+(ns native.type-closure-declared-duplicate)
+
+(defrecord DuplicateLeft [(value String)])
+(defrecord DuplicateRight [(value String)])
+
+(defunion DuplicateParent DuplicateLeft DuplicateLeft DuplicateRight)
+
+(defn preserve-duplicate
+  [value (U DuplicateLeft DuplicateRight)]
+  (U DuplicateLeft DuplicateRight)
+  value)
