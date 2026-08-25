@@ -31,6 +31,7 @@
 (def type-env Any (atom {}))             ; name(string) -> serialized annotation
 (def rename-env Any (atom {}))            ; source name -> installed hidden JS name
 (def module-bindings Any (atom {}))        ; qualifier/provider -> emitted ESM binding
+(def public-esm-module-bindings Any (atom {})) ; Beagle namespaces publish authored names
 (def loop-binding-contexts Any (atom nil)); recur validation/install contexts
 (def pattern-default-bound Any (atom nil))
 (def pattern-default-types Any (atom nil))
@@ -242,6 +243,12 @@
       by-provider
       (get (deref module-bindings) (get ref "qualifier")))))
 
+(defn qualified-public-esm-binding? [ref Any] Bool
+  (let [provider (get ref "providerId")]
+    (or (and (string? provider)
+          (true? (get (deref public-esm-module-bindings) provider)))
+      (true? (get (deref public-esm-module-bindings) (get ref "qualifier"))))))
+
 (defn emit-qualified-reference
   [ref Any
    constructor? Bool] String
@@ -254,6 +261,8 @@
         binding (qualified-module-binding ref)]
     (cond
       (= qualifier "js") member
+      (and (string? binding) (qualified-public-esm-binding? ref))
+        (str binding "[\"" authored "\"]")
       (string? binding) (str binding "." member)
       :else (str (mangle-name qualifier) "." member))))
 
@@ -2733,9 +2742,17 @@
                       ns-str
                       (relative-js-path importer ns-str))]
     (if (and refer (not (false? refer)))
-      (let [runtime-refer (filterv (fn [nm String] Bool (not (contains? macros nm))) refer)]
+      (let [runtime-refer (filterv (fn [nm String] Bool (not (contains? macros nm))) refer)
+            public-esm? (not (bare-js-module-specifier? ns-str))]
         (if (= 0 (count runtime-refer)) ""
-          (str "import { " (str/join ", " (mapv mangle-name runtime-refer)) " } from '" module-path "';")))
+          (str "import { "
+            (str/join ", "
+              (mapv (fn [name String] String
+                      (if public-esm?
+                        (str "\"" name "\" as " (mangle-name name))
+                        (mangle-name name)))
+                runtime-refer))
+            " } from '" module-path "';")))
       (let [alias0 (get r "alias")
             alias (if (absent? alias0) (last-seg ns-str) alias0)]
         (str "import * as " (mangle-name alias) " from '" module-path "';")))))
@@ -2785,6 +2802,19 @@
         (assoc (assoc bindings namespace binding) alias binding)))
     {} requires))
 
+(defn build-public-esm-module-bindings [requires Any] Any
+  (reduce
+    (fn
+      [bindings Any
+       entry Any] Any
+      (let [namespace (get entry "ns")
+            alias0 (get entry "alias")
+            alias (if (absent? alias0) (last-seg namespace) alias0)]
+        (if (bare-js-module-specifier? namespace)
+          bindings
+          (assoc (assoc bindings namespace true) alias true))))
+    {} requires))
+
 (defn register-tables! [forms Any] Nil
   (doseq [f forms]
     (let [node (get f "node")]
@@ -2831,6 +2861,8 @@
   (reset! type-env {})
   (reset! rename-env {})
   (reset! module-bindings (build-module-bindings (get prog "requires")))
+  (reset! public-esm-module-bindings
+    (build-public-esm-module-bindings (get prog "requires")))
   (reset! loop-binding-contexts nil)
   (reset! bc-get-used false)
   (reset! bc-range-used false)
@@ -2896,6 +2928,7 @@
   (reset! type-env {})
   (reset! rename-env {})
   (reset! module-bindings {})
+  (reset! public-esm-module-bindings {})
   (reset! loop-binding-contexts nil)
   (reset! bc-get-used false)
   (reset! inline-scope {})
@@ -2995,6 +3028,19 @@
          {"node" "ref" "qualifier" "str" "name" "upper-case"
           "providerId" nil})
        "str.upper_case"))
+  (expect! "reference: Beagle namespace member uses its authored public ESM name"
+    (do
+      (reset! module-bindings {"firn.system-policy" "policy" "policy" "policy"})
+      (reset! public-esm-module-bindings
+        {"firn.system-policy" true "policy" true})
+      (let [result (= (emit-expr!
+                        {"node" "ref" "qualifier" "policy"
+                         "name" "decode-hook-event"
+                         "providerId" "firn.system-policy"})
+                     "policy[\"decode-hook-event\"]")]
+        (reset! module-bindings {})
+        (reset! public-esm-module-bindings {})
+        result)))
   (expect! "reference: qualified call keeps structural callee identity"
     (= (emit-expr!
          {"node" "call"
@@ -3125,6 +3171,14 @@
           "refer" false}
          {})
        "import * as loader from './shared/loader.js';"))
+  (expect! "require: referred Beagle export keeps its authored ESM name"
+    (= (emit-require-line
+         "fixture.app"
+         {"ns" "fixture.shared.loader"
+          "alias" "loader"
+          "refer" ["decode-hook-event"]}
+         {})
+       "import { \"decode-hook-event\" as decode_hook_event } from './shared/loader.js';"))
   (expect! "typed sequential param owns one synthetic JS slot"
     (= (emit-js-params!
          [{"type" "param"

@@ -22,6 +22,8 @@
 
 (def module-bindings (atom {}))
 
+(def public-esm-module-bindings (atom {}))
+
 (def loop-binding-contexts (atom nil))
 
 (def pattern-default-bound (atom nil))
@@ -168,6 +170,10 @@
    by-provider (if (string? provider) (get (deref module-bindings) provider) nil)]
   (if (some? by-provider) by-provider (get (deref module-bindings) (get ref "qualifier")))))
 
+(defn ^Boolean qualified-public-esm-binding? [ref]
+  (let [provider (get ref "providerId")]
+  (or (and (string? provider) (true? (get (deref public-esm-module-bindings) provider))) (true? (get (deref public-esm-module-bindings) (get ref "qualifier"))))))
+
 (defn ^String emit-qualified-reference [ref ^Boolean constructor?]
   (let [authored (get ref "name")
    runtime-member (if (and constructor? (str/starts-with? authored "->")) (subs authored 2) authored)
@@ -176,6 +182,7 @@
    binding (qualified-module-binding ref)]
   (cond
   (= qualifier "js") member
+  (and (string? binding) (qualified-public-esm-binding? ref)) (str binding "[\"" authored "\"]")
   (string? binding) (str binding "." member)
   :else (str (mangle-name qualifier) "." member))))
 
@@ -1484,8 +1491,9 @@
   (let [ns-str (get r "ns")
    refer (get r "refer")
    module-path (if (bare-js-module-specifier? ns-str) ns-str (relative-js-path importer ns-str))]
-  (if (and refer (not (false? refer))) (let [runtime-refer (filterv (fn [^String nm] (not (contains? macros nm))) refer)]
-  (if (= 0 (count runtime-refer)) "" (str "import { " (str/join ", " (mapv mangle-name runtime-refer)) " } from '" module-path "';"))) (let [alias0 (get r "alias")
+  (if (and refer (not (false? refer))) (let [runtime-refer (filterv (fn [^String nm] (not (contains? macros nm))) refer)
+   public-esm? (not (bare-js-module-specifier? ns-str))]
+  (if (= 0 (count runtime-refer)) "" (str "import { " (str/join ", " (mapv (fn [^String name] (if public-esm? (str "\"" name "\" as " (mangle-name name)) (mangle-name name))) runtime-refer)) " } from '" module-path "';"))) (let [alias0 (get r "alias")
    alias (if (absent? alias0) (last-seg ns-str) alias0)]
   (str "import * as " (mangle-name alias) " from '" module-path "';")))))
 
@@ -1514,6 +1522,12 @@
    alias (if (absent? alias0) (last-seg namespace) alias0)
    binding (mangle-name alias)]
   (assoc (assoc bindings namespace binding) alias binding))) {} requires))
+
+(defn build-public-esm-module-bindings [requires]
+  (reduce (fn [bindings entry] (let [namespace (get entry "ns")
+   alias0 (get entry "alias")
+   alias (if (absent? alias0) (last-seg namespace) alias0)]
+  (if (bare-js-module-specifier? namespace) bindings (assoc (assoc bindings namespace true) alias true)))) {} requires))
 
 (defn register-tables! [forms]
   (doseq [f forms]
@@ -1556,6 +1570,7 @@
   (reset! type-env {})
   (reset! rename-env {})
   (reset! module-bindings (build-module-bindings (get prog "requires")))
+  (reset! public-esm-module-bindings (build-public-esm-module-bindings (get prog "requires")))
   (reset! loop-binding-contexts nil)
   (reset! bc-get-used false)
   (reset! bc-range-used false)
@@ -1605,6 +1620,7 @@
   (reset! type-env {})
   (reset! rename-env {})
   (reset! module-bindings {})
+  (reset! public-esm-module-bindings {})
   (reset! loop-binding-contexts nil)
   (reset! bc-get-used false)
   (reset! inline-scope {})
@@ -1651,6 +1667,13 @@
   (reset! module-bindings {})
   result)))
   (expect! "reference: qualified ref mangles only its member" (= (emit-expr! {"node" "ref" "qualifier" "str" "name" "upper-case" "providerId" nil}) "str.upper_case"))
+  (expect! "reference: Beagle namespace member uses its authored public ESM name" (do
+  (reset! module-bindings {"firn.system-policy" "policy" "policy" "policy"})
+  (reset! public-esm-module-bindings {"firn.system-policy" true "policy" true})
+  (let [result (= (emit-expr! {"node" "ref" "qualifier" "policy" "name" "decode-hook-event" "providerId" "firn.system-policy"}) "policy[\"decode-hook-event\"]")]
+  (reset! module-bindings {})
+  (reset! public-esm-module-bindings {})
+  result)))
   (expect! "reference: qualified call keeps structural callee identity" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "qualifier" "str" "name" "upper-case" "providerId" nil} "args" [{"node" "ref" "name" "value"}]}) "str.upper_case(value)"))
   (expect! "reference: qualified static call renders class and method" (= (emit-expr! {"node" "static-call" "qualifier" "Math" "name" "abs" "providerId" nil "args" [{"node" "literal" "kind" "number" "value" -1}]}) "Math.abs(-1)"))
   (expect! "reference: structural bgl/promote erases" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "qualifier" "bgl" "name" "promote" "providerId" nil} "args" [{"node" "ref" "name" "value"}]}) "value"))
@@ -1689,6 +1712,7 @@
   (= (emit-ref-name "name") "((_x) => String(_x))")))
   (expect! "require: dotted npm subpath remains exact" (= (emit-require-line "fixture.app" {"ns" "three/addons/loaders/GLTFLoader.js" "alias" "loader" "refer" false} {}) "import * as loader from 'three/addons/loaders/GLTFLoader.js';"))
   (expect! "require: dotted Beagle namespace remains importer-relative" (= (emit-require-line "fixture.app" {"ns" "fixture.shared.loader" "alias" "loader" "refer" false} {}) "import * as loader from './shared/loader.js';"))
+  (expect! "require: referred Beagle export keeps its authored ESM name" (= (emit-require-line "fixture.app" {"ns" "fixture.shared.loader" "alias" "loader" "refer" ["decode-hook-event"]} {}) "import { \"decode-hook-event\" as decode_hook_event } from './shared/loader.js';"))
   (expect! "typed sequential param owns one synthetic JS slot" (= (emit-js-params! [{"type" "param" "name" {"type" "seq-destructure" "names" ["x" "y"] "rest" false} "ann" {"kind" "hvec" "members" []}}] false) "$beagle$param$0"))
   (expect! "typed sequential param projects each leaf" (= (emit-js-param-setup! [{"type" "param" "name" {"type" "seq-destructure" "names" ["x" "y"] "rest" false} "ann" {"kind" "hvec" "members" []}}] false {}) ["let x = $beagle$param$0[0];" "let y = $beagle$param$0[1];"]))
   (expect! "typed nested map param preserves defaults and aggregate alias" (= (emit-js-param-setup! [{"type" "param" "name" {"type" "map-destructure" "keys" ["x"] "or" [{"key" "x" "value" {"node" "literal" "kind" "number" "value" 4}}] "as" "whole"} "ann" {"kind" "any"}}] false {}) ["let whole = $beagle$param$0;" "let x = ($beagle$param$0[\"x\"] ?? 4);"]))
