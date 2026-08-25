@@ -150,6 +150,10 @@
         (list
          `(defn read-host ,(br 'value 'JsArray) Any (aget value 0 "row" 1))
          `(defn write-host ,(br 'value 'JsArray) Any (aset value 0 "row" 1 9))
+         `(defn read-host-object ,(br 'value 'JsObject) Any (aget value "row"))
+         `(defn read-host-either ,(br 'value '(U JsArray JsObject)) Any
+            (aget value 0))
+         `(defn read-host-dynamic ,(br 'value 'Any) Any (aget value 0))
          `(defn length-host ,(br 'value 'JsArray) Int (alength value))
          `(defn build-host ,(br 'value 'Any) Any
             (do (array value)
@@ -163,12 +167,23 @@
             (do (js-keys value)
                 (js-in "value" value)
                 (js-delete value "value"))))))
-     (for ([name (in-list '(aget alength array aset clj_to_js into_array
-                                 js_delete js_in js_keys js_obj js_to_clj
-                                 object_array to_array))])
+     (for ([name (in-list '(admit_host_array admit_host_container
+                                 admit_host_object aget alength array aset
+                                 clj_to_js into_array js_delete js_in js_keys
+                                 js_obj js_to_clj object_array to_array))])
        (check-true
         (string-contains? js (format "~a as $$bh$~a" name name))
         (format "missing demand-tracked host import for ~a in:\n~a" name js)))
+     (check-true
+      (string-contains? js "$$bh$aget($$bh$admit_host_array("))
+     (check-true
+      (string-contains? js "$$bh$aset($$bh$admit_host_array("))
+     (check-true
+      (string-contains? js "$$bh$aget($$bh$admit_host_object("))
+     (check-true
+      (string-contains? js "$$bh$aget($$bh$admit_host_container("))
+     (check-true
+      (string-contains? js "$$bh$aget(value, 0)"))
      (check-false (string-contains? js "host_array as $$bh$host_array"))
      (check-false (string-contains? js "host_object as $$bh$host_object")))
 

@@ -6772,6 +6772,7 @@
        [(type-fn? fn-type)
         (define arg-types
           (check-args call-name fn-type (call-form-args e) env e))
+        (store-js-host-access-contract! e call-name arg-types)
         (when (and (named-reference? ref)
                    (>= (current-check-profile) 2))
           (check-scalar-predicate-literal call-name (call-form-args e) e))
@@ -7380,6 +7381,37 @@
                     #:src call-src))
      (for/list ([p (in-list fixed)] [a (in-list args)] [i (in-naturals 1)])
        (check-one-arg fn-name fn-type i p a env call-src))]))
+
+(define (js-host-access-primitive-kind type)
+  (and (type-prim? type)
+       (case (unqualify-type-name (type-prim-name type))
+         [(JsArray) 'array]
+         [(JsObject) 'object]
+         [else #f])))
+
+(define (js-host-access-root-kind type)
+  (define resolved (zonk-type type))
+  (or (js-host-access-primitive-kind resolved)
+      (and (type-union? resolved)
+           (= (length (type-union-alts resolved)) 2)
+           (let ([kinds
+                  (map js-host-access-primitive-kind
+                       (type-union-alts resolved))])
+             (and (memq 'array kinds)
+                  (memq 'object kinds)
+                  'either)))
+      'dynamic))
+
+(define (store-js-host-access-contract! call-node fn-name arg-types)
+  (when (and (eq? (current-check-target) 'js)
+             (memq fn-name '(aget aset))
+             (pair? arg-types)
+             (current-semantic-contracts))
+    (hash-set!
+     (current-semantic-contracts)
+     call-node
+     (js-host-access-contract
+      (js-host-access-root-kind (car arg-types))))))
 
 ;; G5 — enum membership. type-compatible? deliberately treats ANY Keyword as
 ;; compatible with ANY enum (types.rkt), and a keyword literal's value is erased

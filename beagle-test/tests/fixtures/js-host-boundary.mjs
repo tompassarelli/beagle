@@ -1,4 +1,7 @@
 import {
+  admit_host_array,
+  admit_host_container,
+  admit_host_object,
   aget,
   alength,
   array,
@@ -39,6 +42,19 @@ assert(alength(aget(nested, 0, "row")) === 2, "alength");
 const constructed = array(1, 2);
 const object = js_obj("present", true, "remove", 3);
 assert(is_host_array(constructed) && is_host_object(object), "constructors brand host values");
+assert(admit_host_array(constructed) === constructed, "array admission is idempotent");
+assert(admit_host_object(object) === object, "object admission is idempotent");
+
+const rawArray = [1, 2];
+const rawObject = {present: true};
+assert(admit_host_array(rawArray) === rawArray && is_host_array(rawArray), "raw array admission preserves identity");
+assert(admit_host_object(rawObject) === rawObject && is_host_object(rawObject), "raw object admission preserves identity");
+assert(admit_host_container(rawArray) === rawArray, "either admission accepts arrays");
+assert(admit_host_container(rawObject) === rawObject, "either admission accepts objects");
+rejects(() => admit_host_array(rawObject), "array admission rejects objects");
+rejects(() => admit_host_object(rawArray), "object admission rejects arrays");
+rejects(() => admit_host_container(null), "either admission rejects null");
+rejects(() => admit_host_container(1), "either admission rejects primitives");
 assert(js_in("present", object), "js-in");
 assert(js_delete(object, "remove") && !js_in("remove", object), "js-delete");
 const objectKeys = js_keys(object);

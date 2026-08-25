@@ -1403,6 +1403,23 @@ BEAGLE
 (define-syntax-rule (check-js-err/rx name rx form ...)
   (test-case name (check-exn rx (lambda () (check-js-prog form ...)))))
 
+(check-js-ok "Array and Object constructors carry host collection types"
+  '(def values JsArray (new Array 1 2 3))
+  '(def properties JsObject (new Object)))
+
+(check-js-err/rx "Object constructor rejects coercing arguments"
+  #rx"call to new: expected 0 arg"
+  '(def properties JsObject (new Object "coerce")))
+
+(check-js-ok "explicit Any ascription grants typed host array access"
+  '(defn read-trusted [(value Any)] Any
+     (aget (: value JsArray) 0)))
+
+(check-js-err/rx "persistent vectors cannot be ascribed as host arrays"
+  #rx"ascription: expected JsArray, got \\(Vec Int\\)"
+  '(defn read-persistent [(value (Vec Int))] Any
+     (aget (: value JsArray) 0)))
+
 ;; Static JavaScript member contracts preserve the receiver-first surface.
 ;; Authored records are closed; native JS prototypes are open but selected
 ;; members carry precise positive contracts.

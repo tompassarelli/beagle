@@ -1470,6 +1470,10 @@
 (struct error-contract (error-type payload-layout mode) #:transparent)
 (struct error-payload-key-contract (keyword) #:transparent)
 (struct binding-constraint-contract (synchronous? provider) #:transparent)
+;; Checked runtime admission for the root of `aget`/`aset`. ROOT-KIND is one
+;; of 'array, 'object, 'either, or 'dynamic; emitters consume this fact instead
+;; of guessing host authority from surface syntax.
+(struct js-host-access-contract (root-kind) #:transparent)
 ;; Checked representation fact for `(:field target)`. RECORD-NAME is the
 ;; nominal record or record-union type whose fields use Beagle's target-name
 ;; mangling. Emitters must not infer this from target syntax or symbol spelling.
@@ -1648,6 +1652,7 @@
  (struct-out error-contract)
  (struct-out error-payload-key-contract)
  (struct-out binding-constraint-contract)
+ (struct-out js-host-access-contract)
  (struct-out record-field-access-contract)
  (struct-out record-update-contract)
  (struct-out program)

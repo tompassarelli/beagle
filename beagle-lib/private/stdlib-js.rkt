@@ -105,6 +105,7 @@
    'decodeURI        (fn-of '(String) 'String)
 
    ;; --- Object (statics) -----------------------------------------------------
+   'Object                    (fn-of '() 'JsObject)
    (q 'Object 'keys)          (fn-of '(Any) 'Any)
    (q 'Object 'values)        (fn-of '(Any) 'Any)
    (q 'Object 'entries)       (fn-of '(Any) 'Any)
@@ -119,6 +120,7 @@
    (q 'Object 'defineProperty) (fn-of '(Any String Any) 'Any)
 
    ;; --- Array (statics) ------------------------------------------------------
+   'Array                 (fn-of '() 'JsArray #:rest 'Any)
    (q 'Array 'isArray)    (fn-of '(Any) 'Bool)
    (q 'Array 'from)       (fn-of '(Any) 'Any #:rest 'Any)
    (q 'Array 'of)         (fn-of '() 'Any #:rest 'Any)

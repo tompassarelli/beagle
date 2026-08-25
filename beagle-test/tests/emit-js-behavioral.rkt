@@ -56,6 +56,9 @@
 (define BEAGLE-CORE-JS-PATH
   (collection-file-path "lib/beagle/core.js" "beagle"))
 (define BEAGLE-CORE-JS (path->string BEAGLE-CORE-JS-PATH))
+(define BEAGLE-HOST-JS
+  (path->string
+   (collection-file-path "lib/beagle/host.js" "beagle")))
 (define BEAGLE-EXCEPTION-DISPATCH-JS
   (path->string
    (collection-file-path "lib/beagle/exception-dispatch.js" "beagle")))
@@ -68,6 +71,7 @@
             ([replacement
               (in-list
                (list (cons "beagle/core.js" BEAGLE-CORE-JS)
+                     (cons "beagle/host.js" BEAGLE-HOST-JS)
                      (cons "beagle/exception-dispatch.js"
                            BEAGLE-EXCEPTION-DISPATCH-JS)
                      (cons "beagle/exception-info.js"
@@ -902,6 +906,59 @@ JS
      (list '(def d Any (new Date 2024)))
      "console.log(typeof d);"
      "object")
+
+   (check-js-behavior "typed host collection access admits only its saved root"
+     (list
+      '(defn native-array [] JsArray (new Array 1 2))
+      '(defn native-object [] JsObject (new Object))
+      '(defn read-array [(value JsArray) (key Any)] Any (aget value key))
+      '(defn write-array! [(value JsArray) (key Any) (next Any)] Any
+         (aset value key next))
+      '(defn read-object [(value JsObject) (key Any)] Any (aget value key))
+      '(defn write-object! [(value JsObject) (key Any) (next Any)] Any
+         (aset value key next))
+      '(defn read-either [(value (U JsArray JsObject)) (key Any)] Any
+         (aget value key))
+      '(defn read-dynamic [(value Any) (key Any)] Any (aget value key))
+      '(defn read-nested [(value JsArray)] Any (aget value 0 "leaf"))
+      '(defn read-trusted-array [(value Any) (key Any)] Any
+         (aget (: value JsArray) key)))
+     (string-append
+      "const rejectsType = action => { let rejected = false; try { action(); } catch (error) { rejected = error instanceof TypeError; } if (!rejected) throw new Error('expected TypeError'); };\n"
+      "const nativeArray = native_array(), nativeObject = native_object();\n"
+      "if (read_array(nativeArray, 1) !== 2) throw new Error('native Array constructor');\n"
+      "write_object_bang(nativeObject, 'answer', 42);\n"
+      "if (nativeObject.answer !== 42) throw new Error('native Object constructor');\n"
+      "const foreignArray = [3], foreignObject = {answer: 4};\n"
+      "write_array_bang(foreignArray, 0, 5);\n"
+      "write_object_bang(foreignObject, 'answer', 6);\n"
+      "if (foreignArray[0] !== 5 || foreignObject.answer !== 6) throw new Error('identity-preserving mutation');\n"
+      "if (read_either([7], 0) !== 7 || read_either({0: 8}, 0) !== 8) throw new Error('union admission');\n"
+      "if (read_trusted_array([9], 0) !== 9) throw new Error('explicit capability ascription');\n"
+      "rejectsType(() => read_array({0: 1}, 0));\n"
+      "rejectsType(() => read_object([1], 0));\n"
+      "rejectsType(() => read_either(null, 0));\n"
+      "rejectsType(() => read_either(1, 0));\n"
+      "rejectsType(() => read_dynamic([10], 0));\n"
+      "rejectsType(() => read_dynamic({0: 10}, 0));\n"
+      "const nested = [{leaf: 11}];\n"
+      "rejectsType(() => read_nested(nested));\n"
+      "if (read_object(nested[0], 'leaf') !== 11) throw new Error('separate nested admission');"))
+
+   (check-js-behavior "typed host aset evaluates arguments once in source order"
+     (list
+      `(declare-extern root! ,(fn-ty '() 'Any))
+      `(declare-extern key! ,(fn-ty '() 'Any))
+      `(declare-extern value! ,(fn-ty '() 'Any))
+      '(defn ordered-write! [] Any
+         (aset (: (root!) JsArray) (key!) (value!))))
+     (string-append
+      "const target = [0], events = [];\n"
+      "globalThis.root_bang = () => { events.push('root'); return target; };\n"
+      "globalThis.key_bang = () => { events.push('key'); return 0; };\n"
+      "globalThis.value_bang = () => { events.push('value'); return 12; };\n"
+      "if (ordered_write_bang() !== 12 || target[0] !== 12) throw new Error('aset result');\n"
+      "if (events.join(',') !== 'root,key,value') throw new Error(`order:${events.join(',')}`);"))
 
    (check-js-output "direct members preserve selectors and the receiver"
      (list

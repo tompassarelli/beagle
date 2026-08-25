@@ -159,7 +159,39 @@
           (string-join forwarded ", ")
           (string-join (map emit-expr args) ", ")))
 
-(define (emit-core-call fn-sym args)
+(define (emit-js-host-access fn-sym args call-node)
+  (define contract
+    (and (current-js-semantic-contracts)
+         call-node
+         (hash-ref (current-js-semantic-contracts) call-node #f)))
+  (define root-kind
+    (if (js-host-access-contract? contract)
+        (js-host-access-contract-root-kind contract)
+        'dynamic))
+  (cond
+    [(eq? root-kind 'dynamic) (host-call (symbol->string fn-sym) args)]
+    [else
+     (define parameter-names
+       (for/list ([index (in-range (length args))])
+         (format "$beagle$host$arg$~a" index)))
+     (define admission-name
+       (case root-kind
+         [(array) "admit_host_array"]
+         [(object) "admit_host_object"]
+         [(either) "admit_host_container"]
+         [else (error 'beagle-js "unknown JS host access root contract: ~a"
+                      root-kind)]))
+     (define admitted-root
+       (format "$$bh$~a(~a)" admission-name (car parameter-names)))
+     (define forwarded
+       (cons admitted-root (cdr parameter-names)))
+     (format "((~a) => $$bh$~a(~a))(~a)"
+             (string-join parameter-names ", ")
+             (symbol->string fn-sym)
+             (string-join forwarded ", ")
+             (string-join (map emit-expr args) ", "))]))
+
+(define (emit-core-call fn-sym args [call-node #f])
   (define n (length args))
   (case fn-sym
     [(str) (runtime-call "str" args)]
@@ -484,8 +516,8 @@
                    [else #f])]
     [(pr-str) (if (>= n 1) (runtime-call "pr_str" args) #f)]
     [(to-array) (if (= n 1) (host-call "to_array" args) #f)]
-    [(aget) (if (>= n 2) (host-call "aget" args) #f)]
-    [(aset) (if (>= n 3) (host-call "aset" args) #f)]
+    [(aget) (if (>= n 2) (emit-js-host-access fn-sym args call-node) #f)]
+    [(aset) (if (>= n 3) (emit-js-host-access fn-sym args call-node) #f)]
     [(alength) (if (= n 1) (host-call "alength" args) #f)]
     [(array) (host-call "array" args)]
     [(js-obj) (host-call "js_obj" args)]
@@ -3300,7 +3332,7 @@
          (emit-expr (cadr args)))]
        [(and (symbol? fn-sym)
              (not (js-bound? fn-sym))
-             (emit-core-call fn-sym args))
+             (emit-core-call fn-sym args e))
         => values]
        [(qualified-ref? fn-sym)
         (format "~a(~a)"
