@@ -158,6 +158,26 @@ bb -cp "$compiled" -e '
       (throw (ex-info
                "fixture no longer projects a seven-member inferred structural union"
                {:inferred-types inferred-types})))
+    (let [structural-members
+          (lower/source-type-arguments index (first structural-unions))
+          common-full
+          (lower/common-source-union index structural-members)
+          reordered-members
+          (conj (vec (reverse structural-members)) (first structural-members))
+          common-reordered
+          (lower/common-source-union index reordered-members)
+          proper-subset
+          (subvec structural-members 0 (- (count structural-members) 1))]
+      (when-not (and (some? common-full)
+                  (some? common-reordered)
+                  (core/native-id= common-full common-reordered))
+        (throw (ex-info
+                 "complete structural union changed under reordering or duplication"
+                 {:members reordered-members
+                  :resolved common-reordered})))
+      (when-not (nil? (lower/common-source-union index proper-subset))
+        (throw (ex-info "proper structural subset widened to its parent union"
+                 {:members proper-subset}))))
     (let [configuration ["profile=3"]
           frozen (lower/sourcefreezeacceptedv0-frozen
                    (lower/freeze-source-stage source "type-closure-v0"

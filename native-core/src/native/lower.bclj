@@ -1639,9 +1639,9 @@
             source-union
             (recur (+ position 1))))))))
 
-(defn source-union-for-type-member
+(defn resolved-source-union-member
   [index SourceIndexV0
-   source-type core/NativeId] (U core/NativeId Nil)
+   source-type core/NativeId] (U ResolvedSourceNameV0 Nil)
   (let [kind (U String Nil) (source-type-kind index source-type)
         spelling (U String Nil) (source-type-spelling index source-type)]
     (if (or (not (or (= "type-prim" kind) (= "prim" kind)))
@@ -1650,29 +1650,56 @@
       (let [resolved ResolvedSourceNameV0
             (resolve-source-name index (source-module-name index source-type)
               spelling)]
-        (if (resolvedsourcenamev0-visible resolved)
-          (source-union-for-member index
-            (resolvedsourcenamev0-module-name resolved)
-            (resolvedsourcenamev0-local-name resolved))
-          nil)))))
+        (if (resolvedsourcenamev0-visible resolved) resolved nil)))))
+
+(defn declared-union-member-names
+  [index SourceIndexV0
+   source-union core/NativeId] (Map String Bool)
+  (let [members (Vec core/NativeId)
+        (union-member-group-items index source-union)]
+    (loop [position Int 0
+           names (Map String Bool) {}]
+      (if (>= position (count members))
+        names
+        (recur (+ position 1)
+          (assoc names (fact-text index (nth members position) "name") true))))))
 
 (defn common-source-union
   [index SourceIndexV0
    source-types (Vec core/NativeId)] (U core/NativeId Nil)
   (if (= 0 (count source-types))
     nil
-    (let [first-union (U core/NativeId Nil)
-          (source-union-for-type-member index (nth source-types 0))]
-      (if (nil? first-union)
+    (let [first-member (U ResolvedSourceNameV0 Nil)
+          (resolved-source-union-member index (nth source-types 0))
+          first-union (U core/NativeId Nil)
+          (if (nil? first-member)
+            nil
+            (source-union-for-member index
+              (resolvedsourcenamev0-module-name first-member)
+              (resolvedsourcenamev0-local-name first-member)))]
+      (if (or (nil? first-member) (nil? first-union))
         nil
-        (loop [position Int 1]
+        (loop [position Int 1
+               projected (Map String Bool)
+               {(resolvedsourcenamev0-local-name first-member) true}]
           (if (>= position (count source-types))
-            first-union
-            (let [candidate (U core/NativeId Nil)
-                  (source-union-for-type-member index
-                    (nth source-types position))]
-              (if (and (some? candidate) (same-id? first-union candidate))
-                (recur (+ position 1))
+            (if (= projected (declared-union-member-names index first-union))
+              first-union
+              nil)
+            (let [member (U ResolvedSourceNameV0 Nil)
+                  (resolved-source-union-member index
+                    (nth source-types position))
+                  candidate (U core/NativeId Nil)
+                  (if (nil? member)
+                    nil
+                    (source-union-for-member index
+                      (resolvedsourcenamev0-module-name member)
+                      (resolvedsourcenamev0-local-name member)))]
+              (if (and (some? member) (some? candidate)
+                    (same-id? first-union candidate))
+                (recur (+ position 1)
+                  (assoc projected
+                    (resolvedsourcenamev0-local-name member) true))
                 nil))))))))
 
 (defn source-any-type?
