@@ -183,6 +183,14 @@
    js)
   (check-regexp-match #rx"send_message\\(wire__name\\(text\\)\\)" js))
 
+(test-case "record type and constructor refers share one JS local binding"
+  (define js
+    (emit-program (fixture-program "record-refer-consumer.bjs")))
+  (check-regexp-match
+   #rx"import \\{ \"Pos\" as Pos, \"pos-x\" as pos_x \\} from './provider.js';"
+   js)
+  (check-false (regexp-match? #rx"\"->Pos\" as Pos" js)))
+
 (test-case "qualified JS imports use authored public ESM names"
   (define js
     (emit-program (fixture-program "public-esm-qualified-consumer.bjs")))

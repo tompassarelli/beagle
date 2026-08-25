@@ -2372,6 +2372,11 @@
     (if public-name
         (format "~v as ~a" public-name (mangle-name local-name))
         (mangle-name local-name)))
+  ;; A record's type/runtime name and authored `->Record` constructor both
+  ;; resolve to the same JavaScript factory binding. ESM permits either export
+  ;; spelling, but it cannot declare that local binding twice.
+  (define (same-runtime-import-binding? left right)
+    (eq? (cdr left) (cdr right)))
   ;; A `:refer`'d name that resolved to a macro is compile-time only — it's
   ;; expanded away and never referenced at runtime, and the target module emits
   ;; no runtime export for it. Emitting it in `import { … }` produces an ESM that
@@ -2399,9 +2404,10 @@
                        (and (not (hash-ref macros name #f))
                             (runtime-import-name r name)))
                      (and local-name (cons name local-name)))
-                   refer)
+                  refer)
                   (for/list ([name (in-list (referred-record-validators r refer))])
-                    (cons name name))))])
+                    (cons name name)))
+                 same-runtime-import-binding?)])
            (if (null? runtime-refer)
              ""
              (format "import { ~a } from '~a';"

@@ -1,0 +1,7 @@
+#lang beagle/js
+
+(ns export-xmodule.record-refer-consumer
+  (:require [export-xmodule.provider :refer [Pos ->Pos pos-x]]))
+
+(js/export
+  (defn origin-x [] Float (pos-x (->Pos 0.0 0.0))))
