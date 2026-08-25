@@ -2030,7 +2030,8 @@
                      public-name))
        (if (and binding
                 (record-constructor-kind? (interface-binding-kind binding))
-                (not (equal? (symbol->string runtime-name) public-name)))
+                (not (equal? (symbol->string runtime-name) public-name))
+                (not (hash-has-key? public-esm-exports runtime-name)))
            (list (format "export { ~a as ~v };"
                          (mangle-name runtime-name)
                          (symbol->string runtime-name)))
