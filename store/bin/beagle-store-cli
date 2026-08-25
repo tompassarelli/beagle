@@ -1,0 +1,81 @@
+#!/usr/bin/env bun
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+import {
+  StoreProtocolError,
+  booleanTerm,
+  float64Term,
+  float64Value,
+  instantTerm,
+  integerTerm,
+  integerValue,
+  keywordTerm,
+  storeClient,
+  stringTerm,
+  tripleTerm,
+} from '../clients/bun/store-rpc.mjs';
+
+const modulePath = process.env.BEAGLE_STORE_CLI_MODULE
+  ?? new URL('./beagle-store-cli.js', import.meta.url).pathname;
+globalThis.host_call = (bridge, operation, arguments_) =>
+  bridge.call(operation, arguments_);
+globalThis.host_get = (value, key) => value?.[key];
+globalThis.host_error_field = (error, field) => String(error?.[field] ?? '');
+const cli = await import(modulePath);
+const { run } = cli;
+const classifyError = cli['classify-error'];
+const errorMessage = cli['error-message'];
+
+const portText = process.env.BEAGLE_STORE_SERVER_PORT ?? '7977';
+const port = Number.parseInt(portText, 10);
+const space = process.env.BEAGLE_STORE_SPACE_ID;
+if (!space) {
+  console.error('store: BEAGLE_STORE_SPACE_ID is required for Store RPC data requests');
+  process.exit(1);
+}
+
+const store = storeClient({ port, space });
+const bridge = Object.freeze({
+  booleanTerm,
+  floatTerm: value => float64Term(Number.parseFloat(value)),
+  floatValue: float64Value,
+  instantTerm,
+  integerTerm,
+  integerValue,
+  keywordTerm,
+  stringTerm,
+  tripleTerm,
+  fail(message) { throw new Error(message); },
+  out(message) { console.log(message); },
+  async call(operation, payload) {
+    switch (operation) {
+      case 'version': return store.version();
+      case 'status': return store.status();
+      case 'validate': return store.validate();
+      case 'scan': return store.scan(payload);
+      case 'query': return store.query(payload);
+      case 'occurrences': return store.occurrences({
+        page: { limit: 200, ...(payload === null ? {} : { cursor: payload }) },
+      });
+      case 'assert': return store.assert(payload.t1, payload.t2, payload.t3, {
+        existing: payload.existing,
+        expectedVersion: payload.expectedVersion,
+      });
+      case 'retract': return store.retract(payload.t1, payload.t2, payload.t3, {
+        existing: payload.existing,
+        expectedVersion: payload.expectedVersion,
+      });
+      default: throw new StoreProtocolError(
+        `unsupported CLI bridge operation ${operation}`,
+        'client/unsupported-operation',
+      );
+    }
+  },
+});
+
+try {
+  process.exitCode = await run(bridge, Bun.argv.slice(2));
+} catch (error) {
+  console.error(`store: ${errorMessage(error)}`);
+  process.exitCode = classifyError(error);
+}

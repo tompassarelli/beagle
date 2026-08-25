@@ -1,0 +1,367 @@
+#lang beagle/js
+
+(ns store.cli-js)
+
+;; The bridge is the irreducible Bun/RPC boundary. Command grammar, dispatch,
+;; human syntax, rendering, and exit classification stay in this typed module.
+
+(declare-extern host-call (Fn [Any String Any] (Promise Any)))
+(declare-extern host-get (Fn [Any Any] Any))
+(declare-extern host-error-field (Fn [Any String] String))
+
+(defn delimiter? [ch String] Bool
+  (or (= ch " ") (= ch "\n") (= ch "\r") (= ch "\t")
+      (= ch ",") (= ch "[") (= ch "]") (= ch "{") (= ch "}")
+      (= ch "(") (= ch ")")))
+
+(defn token-end
+  [text String
+   start Int] Int
+  (loop [index Int start]
+    (if (or (>= index (count text))
+            (delimiter? (subs text index (+ index 1))))
+      index
+      (recur (+ index 1)))))
+
+(defn edn-json
+  [text String
+   term-mode Bool] String
+  (loop [index Int 0
+         output String ""
+         quoted Bool false
+         escaped Bool false]
+    (if (>= index (count text))
+      output
+      (let [ch String (subs text index (+ index 1))]
+        (if quoted
+          (recur (+ index 1)
+                 (str output ch)
+                 (if escaped true (not (= ch "\"")))
+                 (if escaped false (= ch "\\")))
+          (cond
+            (= ch "\"")
+            (recur (+ index 1) (str output ch) true false)
+
+            (= ch "(")
+            (recur (+ index 1) (str output "[") false false)
+
+            (= ch ")")
+            (recur (+ index 1) (str output "]") false false)
+
+            (= ch ":")
+            (let [end Int (token-end text (+ index 1))
+                  token String (subs text (+ index 1) end)
+                  value String (if term-mode (str "$kw:" token) token)]
+              (recur end (str output (.stringify JSON value)) false false))
+
+            (and term-mode (not (delimiter? ch)))
+            (let [end Int (token-end text index)
+                  token String (subs text index end)]
+              (recur end
+                     (str output (.stringify JSON (str "$atom:" token)))
+                     false false))
+
+            :else
+            (recur (+ index 1) (str output ch) false false)))))))
+
+(defn structural-query-keyword? [context String] Bool
+  (or (= context "find") (= context "rel") (= context "var")
+      (= context "pred") (= context "fn") (= context "op")
+      (= context "direction")))
+
+(defn query-value
+  [bridge Any
+   value Any
+   context String] Any
+  (cond
+    (string? value)
+    (cond
+      (= "$kw:" (subs value 0 4))
+      (let [spelling String (subs value 4)]
+        (if (structural-query-keyword? context)
+          spelling
+          (.keywordTerm bridge spelling)))
+      (= "$atom:" (subs value 0 6))
+      (let [token String (subs value 6)]
+        (cond
+          (= token "true") true
+          (= token "false") false
+          (= token "nil") nil
+          (some? (re-matches #"-?[0-9]+" token))
+          (.integerValue bridge (.integerTerm bridge token))
+          (some? (re-matches #"-?(?:[0-9]+\.[0-9]*|[0-9]*\.[0-9]+)(?:[eE][+-]?[0-9]+)?" token))
+          (.parseFloat Number token)
+          :else token))
+      :else value)
+
+    (vector? value)
+    (mapv (fn [item Any] Any (query-value bridge item context)) value)
+
+    (map? value)
+    (let [result Any (js-obj)]
+      (doseq [entry (Vec Any) (.entries Object value)]
+        (let [raw-key String (nth entry 0)
+              key String (if (= "$kw:" (subs raw-key 0 4))
+                           (subs raw-key 4)
+                           raw-key)]
+          (aset result key (query-value bridge (nth entry 1) key))))
+      result)
+
+    :else value))
+
+(defn parse-query
+  [bridge Any
+   text String] Any
+  (query-value bridge
+               (.parse JSON
+                       (if (and (> (count text) 1)
+                                (= "\"" (subs text 1 2)))
+                         text
+                         (edn-json text true)))
+               ""))
+
+(defn atom-term
+  [bridge Any
+   token String] Any
+  (cond
+    (= token "true") (.booleanTerm bridge true)
+    (= token "false") (.booleanTerm bridge false)
+    (some? (re-matches #"-?[0-9]+" token)) (.integerTerm bridge token)
+    (some? (re-matches #"-?(?:[0-9]+\.[0-9]*|[0-9]*\.[0-9]+)(?:[eE][+-]?[0-9]+)?" token))
+    (.floatTerm bridge token)
+    :else (.stringTerm bridge token)))
+
+(defn parsed-term
+  [bridge Any
+   value Any] Any
+  (cond
+    (string? value)
+    (cond
+      (= "$kw:" (subs value 0 4))
+      (.keywordTerm bridge (subs value 4))
+      (= "$atom:" (subs value 0 6))
+      (atom-term bridge (subs value 6))
+      :else (.stringTerm bridge value))
+
+    (vector? value)
+    (if (= 3 (count value))
+      (.tripleTerm bridge
+                   (parsed-term bridge (nth value 0))
+                   (parsed-term bridge (nth value 1))
+                   (parsed-term bridge (nth value 2)))
+      (.fail bridge "term vector must contain exactly three values"))
+
+    (map? value)
+    (let [instant Any (host-get value "$kw:instant")]
+      (if (and (vector? instant) (= 2 (count instant)))
+        (.instantTerm bridge
+                      (subs (nth instant 0) 6)
+                      (subs (nth instant 1) 6))
+        (.fail bridge "term map must be {:instant [SECONDS NANOS]}")))
+
+    :else (.fail bridge "unsupported human term")))
+
+(defn parse-term
+  [bridge Any
+   text String] Any
+  (parsed-term bridge (.parse JSON (edn-json text true))))
+
+(defn parse-subject
+  [bridge Any
+   text String] Any
+  (parse-term bridge
+              (if (or (= "@" (subs text 0 1))
+                      (= "[" (subs text 0 1))
+                      (= "{" (subs text 0 1))
+                      (= "\"" (subs text 0 1))
+                      (= ":" (subs text 0 1)))
+                text
+                (str "@" text))))
+
+(defn render-term [bridge Any value Any] String
+  (let [tag String (host-get value 0)]
+    (cond
+      (= tag "string") (host-get value 1)
+      (= tag "integer") (host-get value 1)
+      (= tag "float64") (str (.floatValue bridge value))
+      (= tag "boolean") (if (host-get value 1) "true" "false")
+      (= tag "keyword") (str ":" (host-get value 1))
+      (= tag "instant") (str "{:instant [" (host-get value 1) " " (host-get value 2) "]}")
+      (= tag "triple")
+      (str "[" (render-term bridge (host-get value 1)) " "
+           (render-term bridge (host-get value 2)) " "
+           (render-term bridge (host-get value 3)) "]")
+      :else (.fail bridge (str "unknown Term tag " tag)))))
+
+(defn render-row [bridge Any row Any] String
+  (str "[" (apply str
+                   (map-indexed
+                    (fn [index Int value Any] String
+                      (str (if (= index 0) "" " ")
+                           (render-term bridge value)))
+                    row)) "]"))
+
+(defn require-count
+  [bridge Any
+   arguments (Vec String)
+   expected Int
+   usage String] Nil
+  (when-not (= expected (count arguments))
+    (.fail bridge usage)))
+
+(defn scan-pattern [bridge Any arguments (Vec String)] Any
+  (let [pattern Any (js-obj)]
+    (when-not (= "_" (nth arguments 0))
+      (aset pattern "t1" (parse-term bridge (nth arguments 0))))
+    (when-not (= "_" (nth arguments 1))
+      (aset pattern "t2" (parse-term bridge (nth arguments 1))))
+    (when-not (= "_" (nth arguments 2))
+      (aset pattern "t3" (parse-term bridge (nth arguments 2))))
+    pattern))
+
+(defn ^:async call
+  [bridge Any
+   operation String
+   arguments Any] (Promise Any)
+  (await (host-call bridge operation arguments)))
+
+(defn ^:async write-command
+  [bridge Any
+   command String
+   arguments (Vec String)] (Promise Int)
+  (do
+    (require-count bridge arguments 3
+                   "usage: store tell|retract SUBJECT SLOT VALUE")
+    (let [asserting Bool (or (= command "tell") (= command "tell-existing"))
+          existing Bool (or (= command "tell-existing") (= command "retract-existing"))
+          base Any (await (call bridge "version" nil))
+          request Any (js-obj
+                       "t1" (parse-subject bridge (nth arguments 0))
+                       "t2" (parse-term bridge (nth arguments 1))
+                       "t3" (parse-term bridge (nth arguments 2))
+                       "existing" existing
+                       "expectedVersion" (host-get base "servedVersion"))
+          response Any (await (call bridge (if asserting "assert" "retract") request))
+          result Any (nth (host-get response "result") 0)
+          proposition Any (js-obj
+                           "subject" (host-get request "t1")
+                           "predicate" (host-get request "t2")
+                           "value" (host-get request "t3"))]
+      (.out bridge
+            (str (if (host-get result "stateChanged") "committed" "no change")
+                 " via server (v" (host-get response "servedVersion") "): "
+                 (render-term bridge (host-get proposition "subject")) " "
+                 (render-term bridge (host-get proposition "predicate")) " = "
+                 (render-term bridge (host-get proposition "value"))
+                 " [input 0, occurrence "
+                 (render-term bridge (host-get result "occurrence")) "]"))
+      0)))
+
+(defn normalized-argv [argv (Vec String)] (Vec String)
+  (if (and (pos? (count argv)) (= "store" (first argv)))
+    (vec (rest argv))
+    argv))
+
+(js/export
+  (defn ^:async run
+    [bridge Any
+     raw-argv (Vec String)] (Promise Int)
+    (let [argv (Vec String) (normalized-argv raw-argv)
+          command String (if (empty? argv) "" (first argv))
+          arguments (Vec String) (vec (rest argv))]
+      (cond
+        (= command "version")
+        (do (require-count bridge arguments 0 "usage: store version")
+            (.out bridge (str (host-get (await (call bridge "version" nil)) "servedVersion")))
+            0)
+
+        (= command "status")
+        (do (require-count bridge arguments 0 "usage: store status")
+            (let [response Any (await (call bridge "status" nil))
+                  result Any (host-get response "result")]
+              (.out bridge (str "up|" (host-get response "servedVersion") "|"
+                                (host-get result "liveCount") "|"
+                                (host-get result "state") "|" (host-get result "engine"))))
+            0)
+
+        (= command "validate")
+        (do (require-count bridge arguments 0 "usage: store validate")
+            (let [response Any (await (call bridge "validate" nil))
+                  result Any (host-get response "result")]
+              (doseq [violation Any (host-get result "violations")]
+                (.out bridge (str (if (host-get result "valid") "advisory: " "violation: ")
+                                  (render-term bridge violation))))
+              (if (host-get result "valid") (do (.out bridge "valid") 0) 1)))
+
+        (= command "show")
+        (do (require-count bridge arguments 1 "usage: store show SUBJECT")
+            (let [subject Any (parse-subject bridge (first arguments))
+                  response Any (await (call bridge "scan" (js-obj "t1" subject)))
+                  triples Any (host-get response "result")]
+              (if (empty? triples)
+                (.out bridge (str "no triples for " (render-term bridge subject)))
+                (doseq [triple Any triples]
+                  (.out bridge (str "  " (render-term bridge (host-get triple 2))
+                                    "  " (render-term bridge (host-get triple 3))))))
+              0))
+
+        (= command "query")
+        (do (require-count bridge arguments 1 "usage: store query EDN-QUERY")
+            (let [response Any (await (call bridge "query" (parse-query bridge (first arguments))))
+                  rows Any (host-get response "result")]
+              (if (empty? rows)
+                (.out bridge "  (no results)")
+                (doseq [row Any rows] (.out bridge (str "  " (render-row bridge row)))))
+              0))
+
+        (= command "scan")
+        (do (require-count bridge arguments 3 "usage: store scan T1|_ T2|_ T3|_")
+            (let [response Any (await (call bridge "scan" (scan-pattern bridge arguments)))]
+              (doseq [triple Any (host-get response "result")]
+                (.out bridge (render-term bridge triple)))
+              0))
+
+        (= command "occurrences")
+        (do (require-count bridge arguments 0 "usage: store occurrences")
+            (loop [cursor Any nil]
+              (let [response Any (await (call bridge "occurrences" cursor))]
+                (doseq [occurrence Any (host-get response "result")]
+                  (.out bridge
+                        (str "{:type :occurrence, :coordinate "
+                             (render-term bridge (host-get occurrence "coordinate"))
+                             ", :action :" (host-get occurrence "action")
+                             ", :proposition "
+                             (render-term bridge (host-get occurrence "proposition")) "}")))
+                (if (host-get (host-get response "page") "done")
+                  0
+                  (recur (host-get (host-get response "page") "nextCursor"))))))
+
+        (or (= command "tell") (= command "retract")
+            (= command "tell-existing") (= command "retract-existing"))
+        (await (write-command bridge command arguments))
+
+        :else (.fail bridge (str "unsupported data command: " command))))))
+
+(js/export
+  (defn classify-error [error Any] Int
+    (let [name String (host-error-field error "name")
+          code String (host-error-field error "code")]
+      (cond
+        (= code "rpc/subject-not-found") 3
+        (= name "StoreTransportError") 4
+        (and (= name "StoreProtocolError")
+             (not (or (= code "client/invalid-input")
+                      (= code "client/invalid-integer")
+                      (= code "client/integer-range")
+                      (= code "client/invalid-term")
+                      (= code "client/invalid-keyword")
+                      (= code "client/invalid-float")
+                      (= code "client/query-syntax")
+                      (= code "client/invalid-host")
+                      (= code "client/invalid-port")))) 4
+        :else 1))))
+
+(js/export
+  (defn error-message [error Any] String
+    (let [message String (host-error-field error "message")]
+      (if (= message "") (str error) message))))

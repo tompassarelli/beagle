@@ -13,7 +13,7 @@
     # Graph-edit authoring is sealed against this checkout's parent Beagle source. Its
     # nixpkgs follows this flake so the packaged .zo files and the Racket that
     # loads them are built from the exact same package set.
-    beagle.url = "path:..";
+    beagle.url = ../.;
     beagle.inputs.clj-nix.follows = "clj-nix";
     beagle.inputs.nixpkgs.follows = "nixpkgs";
   };
@@ -76,6 +76,7 @@
 
       mkStore = pkgs: cljpkgs:
         let
+          beaglePkg = beagle.packages.${pkgs.stdenv.hostPlatform.system}.default;
           serverDeps = cljpkgs.mk-deps-cache {
             lockfile = ./deps-lock.json;
           };
@@ -131,6 +132,7 @@
             pkgs.babashka
             pkgs.clojure
             pkgs.coreutils
+            beaglePkg
           ];
 
           dontConfigure = true;
@@ -140,7 +142,8 @@
             runHook preInstall
 
             mkdir -p $out/libexec/store/tests $out/libexec/store/codegraph \
-              $out/libexec/store/clients/bun $out/bin
+              $out/libexec/store/clients/bun \
+              $out/libexec/store/node_modules/beagle $out/bin
             cp -r out bin src database.clj server.clj writer_authority.clj fri.clj \
               rotations.clj deps.edn \
               $out/libexec/store/
@@ -148,6 +151,14 @@
             cp clients/bun/backup.mjs clients/bun/store-rpc.mjs \
               clients/bun/store-rpc-core.mjs \
               $out/libexec/store/clients/bun/
+            export XDG_CACHE_HOME="$TMPDIR/beagle-cache"
+            beagle build bin/beagle-store-cli.bjs \
+              $out/libexec/store/bin/beagle-store-cli.js
+            cp ${beaglePkg}/beagle-lib/lib/beagle/core.js \
+              ${beaglePkg}/beagle-lib/lib/beagle/host.js \
+              $out/libexec/store/node_modules/beagle/
+            printf '%s\n' '{"type":"module"}' \
+              >$out/libexec/store/node_modules/beagle/package.json
             # Only codegraph's source is executable runtime input. build/ is a
             # generated analysis corpus with checkout-local paths; docs/tests are
             # development assets and do not belong in the closure.
@@ -219,7 +230,7 @@
               # but require an external Beagle toolchain and are not advertised
               # as self-contained package commands.
               case "$name" in
-                beagle-store-backup|beagle-store-server|beagle-store-mcp) ;;
+                beagle-store-backup|beagle-store-cli|beagle-store-server|beagle-store-mcp) ;;
                 *) continue ;;
               esac
               chmod +x "$s"
