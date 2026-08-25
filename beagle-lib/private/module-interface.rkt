@@ -379,6 +379,18 @@
   (define name-string (symbol->string name))
   (define lower-name (string-downcase name-string))
   (append
+   (if (eq? (program-target prog) 'js)
+       (list
+        (interface-binding
+         name
+         kind
+         (type-fn (map param-interface-type fields) #f record-type)
+         #f
+         (callable-constraints prog fields #:provisional? provisional?)
+         #t
+         #f
+         (open-interface-effects prog)))
+       '())
    (list
     (interface-binding
      (string->symbol (string-append "->" name-string))

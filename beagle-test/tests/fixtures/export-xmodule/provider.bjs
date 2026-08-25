@@ -12,6 +12,11 @@
     [x Float
      z Float]))
 
+(js/export
+  (defunion JsonEvent
+    (JsonObjectStart [offset Int])
+    (JsonObjectEnd [offset Int])))
+
 (defn internal [x Float] Float (+ x 1.0))
 
 (def hidden-offset Float 0.5)

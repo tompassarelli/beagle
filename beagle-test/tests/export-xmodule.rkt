@@ -215,6 +215,16 @@
   (check-regexp-match #rx"p\\[\"scale\"\\]\\(" js)
   (check-false (regexp-match? #rx"p/scale" js)))
 
+(test-case "an imported union member instance check keeps provider identity"
+  (define js (emit-program (fixture-program "variant-instance.bjs")))
+  (check-regexp-match
+   #rx"record_instance_p\\(\"export-xmodule[.]provider/JsonObjectStart\""
+   js)
+  (check-false
+   (regexp-match?
+    #rx"export-xmodule[.]variant-instance/JsonObjectStart"
+    js)))
+
 (test-case "a local binding cannot capture a qualified import alias"
   (define js
     (emit-program (fixture-program "shadowed-alias.bjs")))

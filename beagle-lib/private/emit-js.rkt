@@ -1296,7 +1296,7 @@
 (define (normalized-js-identity name #:record? [record? #f])
   (define provider
     (or (and (qualified-ref? name) (qualified-ref-provider-id name))
-        (and record? (hash-ref (current-js-record-ns) name #f))
+        (and record? (record-namespace-ref name))
         (hash-ref (current-js-symbol-ns) name #f)
         (current-js-namespace)))
   (define local-name
@@ -1612,10 +1612,17 @@
   (define namespaces (current-js-record-ns))
   (or (hash-ref namespaces name #f)
       (and (qualified-ref? name)
-           (for/first ([(candidate namespace) (in-hash namespaces)]
-                       #:when
-                       (qualified-ref-same-binding? candidate name))
-             namespace))))
+           (or (hash-ref
+                namespaces
+                (structural-name->symbol
+                 (make-structural-name
+                  (qualified-ref-qualifier name)
+                  (qualified-ref-name name)))
+                #f)
+               (for/first ([(candidate namespace) (in-hash namespaces)]
+                           #:when
+                           (qualified-ref-same-binding? candidate name))
+                 namespace)))))
 
 (define (record-reference-leaf name)
   (cond

@@ -1,0 +1,7 @@
+#lang beagle/js
+(ns export-xmodule.variant-instance
+  (:require [export-xmodule.provider :as provider]))
+
+(js/export
+  (defn object-start? [event provider/JsonEvent] Bool
+    (instance? provider/JsonObjectStart event)))
