@@ -45,17 +45,23 @@ assert_rejected reader-eval $'#=(+ 1 2)\n' "$repo_dir"
 assert_rejected malformed $'(ns demo.greeter\n' "$repo_dir"
 assert_rejected unsupported \
   $'(ns demo.greeter)\n\n(def greeting "Hello")\n' "$repo_dir"
+assert_rejected forged-reader-eof \
+  $'(ns demo.offset)\n\n(defn tail-offset [text amount]\n  (let [offset (+ amount 1)]\n    (subs text offset)))\n\n:clojure-to-beagle/reader-eof\n(def trailing "unsupported")\n' \
+  "$repo_dir"
 
 printf '%s' \
   $'(ns demo.offset)\n\n(defn tail-offset [text amount]\n  (let [offset (mystery amount 1)]\n    (subs text offset)))\n' \
   >"$artifact_dir/unresolved.clj"
 for run in first second; do
-  if "$clojure_bin" -M "$emitted_converter" "$artifact_dir/unresolved.clj" \
-      >"$artifact_dir/unresolved.$run.stdout" \
-      2>"$artifact_dir/unresolved.$run.stderr"; then
+  unresolved_status=0
+  "$clojure_bin" -M "$emitted_converter" "$artifact_dir/unresolved.clj" \
+    >"$artifact_dir/unresolved.$run.stdout" \
+    2>"$artifact_dir/unresolved.$run.stderr" || unresolved_status=$?
+  if (( unresolved_status == 0 )); then
     echo "unresolved input was accepted" >&2
     exit 1
   fi
+  test "$unresolved_status" -eq 2
   test ! -s "$artifact_dir/unresolved.$run.stdout"
 done
 cmp "$artifact_dir/unresolved.first.stderr" \

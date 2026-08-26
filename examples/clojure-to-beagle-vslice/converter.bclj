@@ -3,7 +3,7 @@
 (ns clojure-to-beagle-vslice.converter)
 
 (def REJECTION String "rejected: unsafe, malformed, or unsupported Clojure input")
-(def READER-EOF Keyword :clojure-to-beagle/reader-eof)
+(def READER-EOF Any (java.lang.Object.))
 
 (defrecord SourceSpan
   [line Int
@@ -59,7 +59,7 @@
                     (java.io.StringReader. source))]
         (loop [forms (Vec Any) []]
           (let [form (clojure.core/read {:eof READER-EOF} reader)]
-            (if (= READER-EOF form)
+            (if (identical? READER-EOF form)
               forms
               (recur (conj forms form)))))))
     (catch Throwable _
