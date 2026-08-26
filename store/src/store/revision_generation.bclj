@@ -1,0 +1,54 @@
+#lang beagle/clj
+;; One hydrated store image belongs to the exact source, program, and durable
+;; state revisions that produced it. The native host owns one arena per active
+;; generation and destroys a rejected or superseded arena in full.
+(ns store.revision-generation)
+
+(defrecord RevisionSet
+  [source String
+   program String
+   state String])
+
+(defrecord RevisionGeneration
+  [revisions RevisionSet
+   state-bytes String])
+
+(defn revision-set
+  [source String
+   program String
+   state String] RevisionSet
+  (->RevisionSet source program state))
+
+(defn revisions-match?
+  [expected RevisionSet
+   actual RevisionSet] Bool
+  (and (= (revisionset-source expected) (revisionset-source actual))
+       (= (revisionset-program expected) (revisionset-program actual))
+       (= (revisionset-state expected) (revisionset-state actual))))
+
+;; The copy makes hydration-owned bytes explicit. On mismatch the temporary
+;; function epoch dies with candidate. On success promote copies candidate into
+;; the caller's generation arena before that temporary epoch closes.
+(defn hydrate-generation
+  [expected RevisionSet
+   actual RevisionSet
+   state-bytes String] RevisionGeneration?
+  (let [candidate RevisionGeneration (->RevisionGeneration actual (str state-bytes ""))]
+    (if (revisions-match? expected actual)
+      (bgl/promote candidate)
+      nil)))
+
+(defn generation-source-revision [generation RevisionGeneration] String
+  (revisionset-source (revisiongeneration-revisions generation)))
+
+(defn generation-program-revision [generation RevisionGeneration] String
+  (revisionset-program (revisiongeneration-revisions generation)))
+
+(defn generation-state-revision [generation RevisionGeneration] String
+  (revisionset-state (revisiongeneration-revisions generation)))
+
+(defn generation-state-bytes [generation RevisionGeneration] String
+  (revisiongeneration-state-bytes generation))
+
+(defn generation-byte-count [generation RevisionGeneration] Int
+  (count (revisiongeneration-state-bytes generation)))

@@ -16,9 +16,13 @@
 
 (def ^String vocabulary-profile-rule "R5")
 
+(def ^String fact-normal-form-profile-rule "FNF")
+
 (def vocabulary-membership :member_of)
 
 (def ^String kernel-vocabulary-prefix ":kernel/")
+
+(def ^String rpc-vocabulary-prefix ":rpc/")
 
 (defn profile-header [profile-id ^String kind ^String mode]
   (t/triple profile-id kind mode))
@@ -45,6 +49,9 @@
 (defn ^Boolean declared-vocabulary-rule? [triples ^String space-id]
   (not (empty? (filterv (fn [profile-id] (profile-has-rule? triples profile-id vocabulary-profile-rule)) (space-profile-ids triples space-id)))))
 
+(defn- ^Boolean declared-fact-normal-form-profile? [triples ^String space-id]
+  (not (empty? (filterv (fn [profile-id] (profile-has-rule? triples profile-id fact-normal-form-profile-rule)) (space-profile-ids triples space-id)))))
+
 (defn- ^Boolean namespaced-vocabulary? [value]
   (if (keyword? value) (let [keyword-value value
    spelling (str keyword-value)]
@@ -66,6 +73,25 @@
    t3 (t/triple-t3 proposition)]
   (cond-> [] (not (and (t/atom? t1) (and (t/atom? t2) (t/atom? t3)))) (conj "R1") (not (nonblank-string-or-keyword? t1)) (conj "R2") (not (nonblank-string-or-keyword? t2)) (conj "R3") (not (t/atom? t3)) (conj "R4"))))
 
+(defn- ^Boolean row-has-field? [triples row-id ^String string-field keyword-field]
+  (not (empty? (filterv (fn [value] (and (= row-id (t/triple-t1 value)) (or (= string-field (t/triple-t2 value)) (= keyword-field (t/triple-t2 value))))) triples))))
+
+(defn- ^Boolean opaque-reified-fact-row? [triples ^String space-id row-id]
+  (and (t/atom? row-id) (and (not (= space-id row-id)) (and (row-has-field? triples row-id "relation" :relation) (and (row-has-field? triples row-id "subject" :subject) (and (row-has-field? triples row-id "slot" :slot) (row-has-field? triples row-id "value" :value)))))))
+
+(defn- ^Boolean closed-fact-relation? [relation]
+  (let [spelling (str relation)]
+  (or (= profile-anchor relation) (or (= profile-includes relation) (or (= vocabulary-membership relation) (or (str/starts-with? spelling kernel-vocabulary-prefix) (str/starts-with? spelling rpc-vocabulary-prefix)))))))
+
+(defn- ^Boolean domain-namespaced-relation? [relation]
+  (let [spelling (str relation)]
+  (and (or (keyword? relation) (string? relation)) (and (str/includes? spelling "/") (not (closed-fact-relation? relation))))))
+
+(defn fact-normal-form-admission-errors [triples ^String space-id proposition]
+  (let [row-id (t/triple-t1 proposition)
+   relation (t/triple-t2 proposition)]
+  (if (or (opaque-reified-fact-row? triples space-id row-id) (and (not (closed-fact-relation? relation)) (or (domain-namespaced-relation? relation) (not (vocabulary-member? triples relation))))) [fact-normal-form-profile-rule] [])))
+
 (defn relational-lint-errors [proposition]
   (let [t1 (t/triple-t1 proposition)
    t2 (t/triple-t2 proposition)
@@ -81,10 +107,13 @@
   (if r4 errors3 (conj errors3 "R4"))))
 
 (defn lint-declared-profile [triples ^String space-id]
-  (if (not (declared-relational-profile? triples space-id)) [] (let [vocabulary? (declared-vocabulary-rule? triples space-id)]
-  (reduce (fn [violations proposition] (if (profile-anchor? proposition) violations (let [relational (relational-lint-errors proposition)
-   rules (if vocabulary? (into relational (vocabulary-lint-errors triples proposition)) relational)]
-  (reduce (fn [rows ^String rule] (conj rows (t/triple proposition profile-violation rule))) violations rules)))) [] triples))))
+  (let [relational? (declared-relational-profile? triples space-id)
+   fact-normal-form? (declared-fact-normal-form-profile? triples space-id)]
+  (if (not (or relational? fact-normal-form?)) [] (let [vocabulary? (declared-vocabulary-rule? triples space-id)]
+  (reduce (fn [violations proposition] (if (profile-anchor? proposition) violations (let [relational (if relational? (relational-lint-errors proposition) [])
+   vocabulary (if vocabulary? (into relational (vocabulary-lint-errors triples proposition)) relational)
+   rules (if fact-normal-form? (into vocabulary (fact-normal-form-admission-errors triples space-id proposition)) vocabulary)]
+  (reduce (fn [rows ^String rule] (conj rows (t/triple proposition profile-violation rule))) violations rules)))) [] triples)))))
 
 (defn ^Boolean triple-eq? [left right]
   (= left right))

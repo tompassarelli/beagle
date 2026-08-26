@@ -1,0 +1,1667 @@
+#lang beagle/clj
+;; Record-only query core over recursive Terms. EDN, JSON, and RPC are syntax
+;; adapters; evaluation, validation, results, pages, and errors are typed IR.
+(ns store.query)
+(require [store.datalog :as d])
+(require [store.types :as t])
+(require [clojure.string :as str])
+
+(defrecord AggregateSpec
+  [operator Keyword
+   argument Int?])
+(defrecord HavingClause
+  [operator Keyword
+   aggregate-index Int
+   value Any])
+(defrecord FindSpec
+  [relation String
+   grouping (Vec Int)
+   aggregates (Vec AggregateSpec)
+   having (Vec HavingClause)])
+(defrecord OrderClause
+  [column Int
+   direction Keyword])
+(defrecord QueryPlan
+  [find FindSpec
+   strata (Vec (Vec d/Rule))
+   order (Vec OrderClause)
+   limit Int?])
+(defalias TextAttributeScope (U (Set Any) Nil))
+(defrecord Projection
+  [edb d/Db
+   candidates d/CandidateSources])
+(defrecord ProjectionResult
+  [projection Projection?
+   error d/QueryEvaluationError?])
+(defrecord QueryError
+  [code Keyword
+   message String])
+(defrecord CompileResult
+  [plan QueryPlan?
+   errors (Vec QueryError)])
+(defrecord QueryResult
+  [rows (Vec d/Tuple)
+   errors (Vec QueryError)
+   over-limit Int?
+   maximum Int?])
+(defrecord QueryExecutionResult
+  [query-result QueryResult?
+   error d/QueryEvaluationError?])
+(defrecord QueryPage
+  [rows (Vec d/Tuple)
+   next String?
+   more Bool
+   errors (Vec QueryError)
+   max-bytes Int?])
+(defrecord CursorResult
+  [key String?
+   error QueryError?])
+(defalias NumericAtom (Dyn Int Float))
+(defrecord AggregateGroup
+  [key d/Tuple
+   members (Vec d/Tuple)])
+(defrecord AggregateGroups
+  [by-key (Map String AggregateGroup)
+   order (Vec String)])
+
+(def ^:dynamic *query-control* d/QueryControl? nil)
+
+(def base-rel-arities (Map String Int)
+  {d/triple-relation 3
+   d/occurrence-relation 3
+   d/withdrawal-relation 2
+   d/text-match-relation 3
+   d/text-phrase-relation 3
+   d/text-substring-relation 3
+   d/text-stem-relation 3
+   d/text-search-relation 4})
+(def base-relations (Set String)
+  d/base-relations)
+(def aggregate-operators (Set Keyword)
+  #{:count :count-distinct :sum :avg :min :max})
+(def aggregate-argument-operators (Set Keyword)
+  #{:count-distinct :sum :avg :min :max})
+
+(defn query-error
+  [code Keyword
+   message String] QueryError
+  (->QueryError code message))
+
+(defn relation-find [relation String] FindSpec
+  (->FindSpec relation [] [] []))
+
+(defn aggregate-spec
+  [operator Keyword
+   argument Int?] AggregateSpec
+  (->AggregateSpec operator argument))
+
+(defn having-clause
+  [operator Keyword
+   aggregate-index Int
+   value Any] HavingClause
+  (->HavingClause operator aggregate-index value))
+
+(defn aggregate-find
+  [relation String
+   grouping (Vec Int)
+   aggregates (Vec AggregateSpec)
+   having (Vec HavingClause)] FindSpec
+  (->FindSpec relation grouping aggregates having))
+
+(defn order-clause
+  [column Int
+   direction Keyword] OrderClause
+  (->OrderClause column direction))
+
+(defn ordered-query-plan
+  [find FindSpec
+   strata (Vec (Vec d/Rule))
+   order (Vec OrderClause)
+   limit Int?] QueryPlan
+  (->QueryPlan find strata order limit))
+
+(defn query-plan
+  [find FindSpec
+   strata (Vec (Vec d/Rule))] QueryPlan
+  (ordered-query-plan find strata [] nil))
+
+(defn- literal-text-attribute-scope
+  [literal d/Literal
+   scope TextAttributeScope] TextAttributeScope
+  (if (nil? scope)
+    nil
+    (if (and (= :relation (d/literal-kind literal))
+             (contains? d/text-relations (d/literal-relation literal)))
+      (let [attribute (nth (d/literal-arguments literal) 1)]
+        (if (some? (d/queryterm-variable attribute))
+          nil
+          (conj scope (d/queryterm-value attribute))))
+      scope)))
+
+(defn- rule-text-attribute-scope
+  [rule d/Rule
+   scope TextAttributeScope] TextAttributeScope
+  (reduce
+   (fn
+     [current TextAttributeScope
+      literal d/Literal] TextAttributeScope
+     (literal-text-attribute-scope literal current))
+   scope (d/rule-body rule)))
+
+(defn- empty-any-set [] (Set Any) #{})
+
+(defn plan-text-attribute-scope [plan QueryPlan] TextAttributeScope
+  (reduce
+   (fn
+     [scope TextAttributeScope
+      stratum (Vec d/Rule)] TextAttributeScope
+     (reduce
+      (fn
+        [current TextAttributeScope
+         rule d/Rule] TextAttributeScope
+        (rule-text-attribute-scope rule current))
+      scope stratum))
+   (empty-any-set) (queryplan-strata plan)))
+
+(defn query-plan? [value Any] Bool (instance? QueryPlan value))
+(defn projection? [value Any] Bool (instance? Projection value))
+(defn aggregate-find? [find FindSpec] Bool
+  (not (empty? (findspec-aggregates find))))
+
+(def max-results Int
+  (let [raw Any (System/getenv "BEAGLE_STORE_MAX_RESULTS")
+        parsed (U Int Nil) (if (and (string? raw) (not (= raw "")))
+          (let [text String raw] (parse-long text))
+          nil)]
+    (if (and (some? parsed) (> parsed 0)) parsed 100000)))
+
+(defn compile-ok? [result CompileResult] Bool
+  (empty? (compileresult-errors result)))
+(defn compiled-plan [result CompileResult] QueryPlan?
+  (compileresult-plan result))
+(defn compile-errors [result CompileResult] (Vec QueryError)
+  (compileresult-errors result))
+
+(defn result-ok? [result QueryResult] Bool
+  (empty? (queryresult-errors result)))
+(defn result-rows [result QueryResult] (Vec d/Tuple)
+  (queryresult-rows result))
+(defn result-errors [result QueryResult] (Vec QueryError)
+  (queryresult-errors result))
+(defn result-over-limit [result QueryResult] Int?
+  (queryresult-over-limit result))
+(defn result-maximum [result QueryResult] Int?
+  (queryresult-maximum result))
+
+(defn execution-query-result [result QueryExecutionResult] QueryResult?
+  (queryexecutionresult-query-result result))
+
+(defn execution-error [result QueryExecutionResult] d/QueryEvaluationError?
+  (queryexecutionresult-error result))
+
+(defn projection-result-projection [result ProjectionResult] Projection?
+  (projectionresult-projection result))
+
+(defn projection-result-error [result ProjectionResult] d/QueryEvaluationError?
+  (projectionresult-error result))
+
+(defn page-ok? [page QueryPage] Bool (empty? (querypage-errors page)))
+(defn page-rows [page QueryPage] (Vec d/Tuple) (querypage-rows page))
+(defn page-next [page QueryPage] String? (querypage-next page))
+(defn page-more? [page QueryPage] Bool (querypage-more page))
+(defn page-errors [page QueryPage] (Vec QueryError) (querypage-errors page))
+
+(defn error-code [error-value QueryError] Keyword
+  (queryerror-code error-value))
+(defn error-message [error-value QueryError] String
+  (queryerror-message error-value))
+
+(defn- success-result [rows (Vec d/Tuple)] QueryResult
+  (->QueryResult rows [] nil nil))
+(defn- failure-result [errors (Vec QueryError)] QueryResult
+  (->QueryResult [] errors nil nil))
+(defn- limited-result
+  [error-value QueryError
+   count-value Int
+   maximum Int] QueryResult
+  (->QueryResult [] [error-value] count-value maximum))
+(defn- success-page
+  [rows (Vec d/Tuple)
+   next String?
+   more Bool] QueryPage
+  (->QueryPage rows next more [] nil))
+(defn- failure-page [errors (Vec QueryError)] QueryPage
+  (->QueryPage [] nil false errors nil))
+(defn- wire-failure-page
+  [error-value QueryError
+   maximum Int] QueryPage
+  (->QueryPage [] nil false [error-value] maximum))
+
+(defn project-with-candidates
+  [propositions (Vec t/Triple)
+   candidates d/CandidateSources] Projection
+  (->Projection (d/edb propositions) candidates))
+
+(defn project-with-source
+  [propositions (Vec t/Triple)
+   relation String
+   source d/CandidateSourceValue] Projection
+  (project-with-candidates propositions {relation source}))
+
+(defn- projection-from-candidates-result
+  [database d/Db
+   result d/CandidateSourcesResult] ProjectionResult
+  (let [error-value (d/candidatesourcesresult-error result)]
+    (if (some? error-value)
+      (->ProjectionResult nil error-value)
+      (->ProjectionResult
+       (->Projection database (d/candidatesourcesresult-sources result)) nil))))
+
+(defn project-result! [propositions (Vec t/Triple)] ProjectionResult
+  (projection-from-candidates-result
+   (d/edb propositions)
+   (d/build-text-candidates-result! propositions)))
+
+(defn project-with-history-result!
+  [propositions (Vec t/Triple)
+   occurrences (Vec t/OperationOccurrence)
+   withdrawals (Vec t/Withdrawal)] ProjectionResult
+  (let [database d/Db (d/edb-with-history propositions occurrences withdrawals)]
+    (projection-from-candidates-result
+     database (d/build-text-candidates-result! propositions))))
+
+(defn- projection-or-raise [result ProjectionResult] Projection
+  (let [projection-value (projectionresult-projection result)
+        error-value (projectionresult-error result)]
+    (if (some? projection-value)
+      projection-value
+      (if (some? error-value)
+        (d/raise-query-evaluation-error error-value)
+        (throw (ex-info "query projection produced no result"
+                        {:type :query-projection-missing-result}))))))
+
+(defn project! [propositions (Vec t/Triple)] Projection
+  (projection-or-raise (project-result! propositions)))
+
+(defn project-with-history!
+  [propositions (Vec t/Triple)
+   occurrences (Vec t/OperationOccurrence)
+   withdrawals (Vec t/Withdrawal)] Projection
+  (projection-or-raise
+   (project-with-history-result! propositions occurrences withdrawals)))
+
+(defn- set-union
+  [left (Set String)
+   right (Set String)] (Set String)
+  (into left right))
+
+(defn- ordered-names [names (Set String)] (Vec String)
+  (sort (vec names)))
+
+(defn- empty-string-set [] (Set String) #{})
+(defn- empty-query-errors [] (Vec QueryError) [])
+(defn- empty-rules [] (Vec d/Rule) [])
+
+(defn- term-vars [terms (Vec d/QueryTerm)] (Set String)
+  (reduce (fn
+            [acc (Set String)
+             term d/QueryTerm] (Set String)
+            (let [name (d/queryterm-variable term)]
+              (if (some? name) (conj acc name) acc)))
+          (empty-string-set) terms))
+
+(defn- term-errors
+  [terms (Vec d/QueryTerm)
+   context String] (Vec QueryError)
+  (reduce (fn
+            [acc (Vec QueryError)
+             term d/QueryTerm] (Vec QueryError)
+            (if (d/query-term? term)
+              acc
+              (conj acc (query-error :query-invalid-term
+                                     (str context " contains an invalid QueryTerm")))))
+          [] terms))
+
+(defn- unbound-errors
+  [terms (Vec d/QueryTerm)
+   bound (Set String)
+   context String] (Vec QueryError)
+  (reduce (fn
+            [acc (Vec QueryError)
+             name String] (Vec QueryError)
+            (if (contains? bound name)
+              acc
+              (conj acc (query-error :query-unbound-variable
+                                     (str context " variable '" name "' is not bound")))))
+          [] (ordered-names (term-vars terms))))
+
+(defn- head-arities [rules (Vec d/Rule)] (Map String Int)
+  (reduce (fn
+            [acc (Map String Int)
+             rule d/Rule] (Map String Int)
+            (let [relation (d/rule-head-relation rule)]
+              (if (contains? acc relation)
+                acc
+                (assoc acc relation (count (d/rule-head-arguments rule))))))
+          {} rules))
+
+(defn- derived-relations [rules (Vec d/Rule)] (Set String)
+  (reduce (fn
+            [acc (Set String)
+             rule d/Rule] (Set String)
+            (conj acc (d/rule-head-relation rule)))
+          #{} rules))
+
+(defn- relation-arity
+  [relation String
+   arities (Map String Int)] Int?
+  (if (contains? base-rel-arities relation)
+    (get base-rel-arities relation)
+    (get arities relation)))
+
+(defn- literal-errors
+  [literal d/Literal
+   known (Set String)
+   arities (Map String Int)
+   bound (Set String)] (Vec QueryError)
+  (let [kind (d/literal-kind literal)
+        arguments (d/literal-arguments literal)
+        base-errors (term-errors arguments "literal")]
+    (cond
+      [(= kind :relation)
+       (let [relation (d/literal-relation literal)
+             arity (relation-arity relation arities)
+             relation-errors (cond
+               [(not (contains? known relation))
+                [(query-error :query-unknown-relation
+                              (str "unknown relation '" relation "'"))]]
+               [(and (some? arity) (not (= arity (count arguments))))
+                [(query-error :query-arity
+                              (str "relation '" relation "' takes " arity " arguments"))]]
+               [:else (empty-query-errors)])
+             range-errors (if (d/literal-negated literal)
+               (unbound-errors arguments bound "negated literal")
+               (empty-query-errors))]
+         (vec (concat base-errors (concat relation-errors range-errors))))]
+      [(= kind :comparison)
+       (let [operator-errors (if (contains? d/comparison-operators (d/literal-operator literal))
+               (empty-query-errors)
+               [(query-error :query-invalid-comparison
+                             "comparison operator is not supported")])
+             arity-errors (if (= 2 (count arguments))
+               (empty-query-errors)
+               [(query-error :query-arity
+                             "comparison literal takes two arguments")])]
+         (vec (concat base-errors
+                      (concat operator-errors
+                              (concat arity-errors
+                                      (unbound-errors arguments bound "comparison"))))))]
+      [(= kind :builtin)
+       (let [operator-errors (if (contains? d/builtin-operators (d/literal-operator literal))
+               (empty-query-errors)
+               [(query-error :query-invalid-builtin
+                             "builtin operator is not supported")])
+             arity-errors (if (= 2 (count arguments))
+               (empty-query-errors)
+               [(query-error :query-arity "builtin literal takes two arguments")])
+             binding (d/literal-binding literal)
+             binding-errors (cond
+               [(not (pos? (count binding)))
+                [(query-error :query-invalid-builtin
+                              "builtin binding must be non-empty")]]
+               [(contains? bound binding)
+                [(query-error :query-unbound-variable
+                              (str "builtin binding '" binding "' is already bound"))]]
+               [:else (empty-query-errors)])]
+         (vec (concat base-errors
+                      (concat operator-errors
+                              (concat arity-errors
+                                      (concat binding-errors
+                                              (unbound-errors arguments bound "builtin")))))))]
+      [:else [(query-error :query-invalid-literal "literal kind is not supported")]])))
+
+(defn- literal-bindings [literal d/Literal] (Set String)
+  (cond
+    [(and (= :relation (d/literal-kind literal))
+          (not (d/literal-negated literal)))
+     (term-vars (d/literal-arguments literal))]
+    [(= :builtin (d/literal-kind literal)) #{(d/literal-binding literal)}]
+    [:else #{}]))
+
+(defn- text-literal-errors!
+  [literal d/Literal
+   bound (Set String)] (Vec QueryError)
+  (if (and (= :relation (d/literal-kind literal))
+           (contains? d/text-relations (d/literal-relation literal)))
+    (let [relation (d/literal-relation literal)
+          arguments (d/literal-arguments literal)]
+      (cond
+        [(d/literal-negated literal)
+         [(query-error :query-text-negative
+                       (str relation " is available only as a positive relation"))]]
+        [(not (= (get base-rel-arities relation) (count arguments)))
+         (empty-query-errors)]
+        [:else
+         (let [needle (nth arguments 2)
+               variable (d/queryterm-variable needle)]
+           (cond
+             [(some? variable)
+              (if (contains? bound variable)
+                (empty-query-errors)
+                [(query-error :query-text-unbound-needle
+                              (str relation
+                                   " query must be constant or already bound"))])]
+             [(d/text-relation-needle-valid?!
+               relation (d/queryterm-value needle)) (empty-query-errors)]
+             [:else
+              [(query-error :query-text-invalid-needle
+                            (str relation " query is empty or invalid"))]]))]))
+    (empty-query-errors)))
+
+(defn- rule-errors!
+  [rule d/Rule
+   known (Set String)
+   arities (Map String Int)] (Vec QueryError)
+  (let [head-relation (d/rule-head-relation rule)
+        head-arguments (d/rule-head-arguments rule)
+        head-errors (vec (concat
+              (if (pos? (count head-relation))
+                (empty-query-errors)
+                [(query-error :query-invalid-rule "rule head relation is empty")])
+              (concat
+               (if (contains? base-relations head-relation)
+                 [(query-error :query-base-shadow
+                               (str "rule head cannot redefine base relation '"
+                                    head-relation "'"))]
+                 (empty-query-errors))
+               (term-errors head-arguments "rule head"))))]
+    (let [body (d/rule-body rule)]
+      (loop [position Int 0
+             bound (Set String) (empty-string-set)
+             errors (Vec QueryError) head-errors]
+        (if (>= position (count body))
+          (vec (concat errors (unbound-errors head-arguments bound "rule head")))
+          (let [literal (nth body position)]
+            (recur (inc position)
+                   (set-union bound (literal-bindings literal))
+                   (vec
+                    (concat errors
+                            (concat (literal-errors literal known arities bound)
+                                    (text-literal-errors! literal bound)))))))))))
+
+(defn- arity-errors [rules (Vec d/Rule)] (Vec QueryError)
+  (let [arities (head-arities rules)]
+    (reduce (fn
+              [acc (Vec QueryError)
+               rule d/Rule] (Vec QueryError)
+              (let [relation (d/rule-head-relation rule)
+                    expected (get arities relation)
+                    actual (count (d/rule-head-arguments rule))]
+                (if (= expected actual)
+                  acc
+                  (conj acc (query-error :query-arity
+                                         (str "relation '" relation
+                                              "' has inconsistent arity"))))))
+            (empty-query-errors) rules)))
+
+(defn- positive-relations [rule d/Rule] (Set String)
+  (reduce (fn
+            [acc (Set String)
+             literal d/Literal] (Set String)
+            (if (and (= :relation (d/literal-kind literal))
+                     (not (d/literal-negated literal)))
+              (conj acc (d/literal-relation literal))
+              acc))
+          (empty-string-set) (d/rule-body rule)))
+
+(defn- dependency-edges [rules (Vec d/Rule)] (Map String (Set String))
+  (reduce (fn
+            [acc (Map String (Set String))
+             rule d/Rule] (Map String (Set String))
+            (let [head (d/rule-head-relation rule)]
+              (update acc head
+                      (fn [current (U (Set String) Nil)] (Set String)
+                        (set-union (or current (empty-string-set))
+                                   (positive-relations rule))))))
+          {} rules))
+
+(defn- reaches?
+  [start String
+   target String
+   edges (Map String (Set String))] Bool
+  (loop [frontier (Vec String) (vec (get edges start (empty-string-set)))
+         position Int 0
+         seen (Set String) (empty-string-set)]
+    (if (>= position (count frontier))
+      false
+      (let [current (nth frontier position)]
+        (cond
+          [(= current target) true]
+          [(contains? seen current) (recur frontier (inc position) seen)]
+          [:else
+           (recur (vec (concat frontier
+                               (vec (get edges current (empty-string-set)))))
+                  (inc position)
+                  (conj seen current))])))))
+
+(defn- recursive-relations [rules (Vec d/Rule)] (Set String)
+  (let [edges (dependency-edges rules)]
+    (reduce (fn
+              [acc (Set String)
+               rule d/Rule] (Set String)
+              (let [relation (d/rule-head-relation rule)]
+                (if (reaches? relation relation edges) (conj acc relation) acc)))
+            (empty-string-set) rules)))
+
+(defn- recursive-builtin? [rule d/Rule] Bool
+  (let [body (d/rule-body rule)]
+    (loop [position Int 0]
+      (if (>= position (count body))
+        false
+        (if (= :builtin (d/literal-kind (nth body position)))
+          true
+          (recur (inc position)))))))
+
+(defn- recursive-builtin-errors [rules (Vec d/Rule)] (Vec QueryError)
+  (let [recursive (recursive-relations rules)]
+    (reduce
+     (fn
+       [acc (Vec QueryError)
+        rule d/Rule] (Vec QueryError)
+       (if (and (contains? recursive (d/rule-head-relation rule))
+                (recursive-builtin? rule))
+         (conj acc (query-error :query-recursive-builtin
+                                (str "recursive relation '" (d/rule-head-relation rule)
+                                     "' cannot contain a builtin binding")))
+         acc))
+     (empty-query-errors) rules)))
+
+(defn- forward-errors
+  [strata (Vec (Vec d/Rule))
+   all-derived (Set String)] (Vec QueryError)
+  (loop [position Int 0
+         lower (Set String) base-relations
+         errors (Vec QueryError) (empty-query-errors)]
+    (if (>= position (count strata))
+      errors
+      (let [stratum (nth strata position)
+            current (derived-relations stratum)
+            available (set-union lower current)
+            errors2 (reduce
+             (fn
+               [acc (Vec QueryError)
+                rule d/Rule] (Vec QueryError)
+               (reduce
+                (fn
+                  [inner (Vec QueryError)
+                   relation String] (Vec QueryError)
+                  (if (and (contains? all-derived relation)
+                           (not (contains? available relation)))
+                    (conj inner (query-error :query-forward-reference
+                                             (str "relation '" relation
+                                                  "' is defined only in a later stratum")))
+                    inner))
+                acc (ordered-names (positive-relations rule))))
+             errors stratum)]
+        (recur (inc position) (set-union lower current) errors2)))))
+
+(defn- find-errors
+  [find FindSpec
+   derived (Set String)
+   arities (Map String Int)] (Vec QueryError)
+  (let [relation (findspec-relation find)
+        arity (get arities relation)
+        relation-errors (cond
+          [(contains? base-relations relation)
+           [(query-error :query-invalid-find "find cannot name a base relation")]]
+          [(not (contains? derived relation))
+           [(query-error :query-invalid-find
+                         (str "find relation '" relation "' is not derived"))]]
+          [:else (empty-query-errors)])
+        aggregate-errors (if (aggregate-find? find)
+          (let [group-errors (reduce (fn
+                                       [acc (Vec QueryError)
+                                        position Int] (Vec QueryError)
+                                       (if (and (>= position 0)
+                                   (and (some? arity) (< position arity)))
+                            acc
+                            (conj acc (query-error :query-invalid-aggregate
+                                                   "aggregate group position is out of range"))))
+                        (empty-query-errors) (findspec-grouping find))
+                spec-errors (reduce
+                 (fn
+                   [acc (Vec QueryError)
+                    spec AggregateSpec] (Vec QueryError)
+                   (let [operator (aggregatespec-operator spec)
+                         argument (aggregatespec-argument spec)]
+                     (cond
+                       [(not (contains? aggregate-operators operator))
+                        (conj acc (query-error :query-invalid-aggregate
+                                               "aggregate operator is not supported"))]
+                       [(and (contains? aggregate-argument-operators operator)
+                             (nil? argument))
+                        (conj acc (query-error :query-invalid-aggregate
+                                               "aggregate operator requires an argument position"))]
+                       [(and (some? argument)
+                             (not (and (>= argument 0)
+                                       (and (some? arity) (< argument arity)))))
+                        (conj acc (query-error :query-invalid-aggregate
+                                               "aggregate argument position is out of range"))]
+                       [:else acc])))
+                 (empty-query-errors) (findspec-aggregates find))
+                having-errors (reduce
+                 (fn
+                   [acc (Vec QueryError)
+                    clause HavingClause] (Vec QueryError)
+                   (cond
+                     [(not (contains? d/comparison-operators
+                                     (havingclause-operator clause)))
+                      (conj acc (query-error :query-invalid-having
+                                             "having operator is not supported"))]
+                     [(not (and (>= (havingclause-aggregate-index clause) 0)
+                                (< (havingclause-aggregate-index clause)
+                                   (count (findspec-aggregates find)))))
+                      (conj acc (query-error :query-invalid-having
+                                             "having aggregate index is out of range"))]
+                     [(not (number? (havingclause-value clause)))
+                      (conj acc (query-error :query-invalid-having
+                                             "having comparison value must be numeric"))]
+                     [:else acc]))
+                 (empty-query-errors) (findspec-having find))]
+            (vec (concat group-errors (concat spec-errors having-errors))))
+          (if (or (not (empty? (findspec-grouping find)))
+                  (not (empty? (findspec-having find))))
+            [(query-error :query-invalid-find
+                          "plain find cannot contain grouping or having clauses")]
+            (empty-query-errors)))]
+    (vec (concat relation-errors aggregate-errors))))
+
+(defn- result-arity
+  [find FindSpec
+   arities (Map String Int)] Int?
+  (if (aggregate-find? find)
+    (+ (count (findspec-grouping find))
+       (count (findspec-aggregates find)))
+    (get arities (findspec-relation find))))
+
+(defn- order-errors
+  [plan QueryPlan
+   arities (Map String Int)] (Vec QueryError)
+  (let [arity (result-arity (queryplan-find plan) arities)
+        clause-errors (loop [remaining (Vec OrderClause) (queryplan-order plan)
+                             seen (Set Int) #{}
+                             errors (Vec QueryError) []]
+                        (if (empty? remaining)
+            errors
+            (let [clause (first remaining)
+                  column (orderclause-column clause)
+                  direction (orderclause-direction clause)
+                  errors2 (cond
+                    [(not (contains? #{:asc :desc} direction))
+                     (conj errors
+                           (query-error :query-invalid-order
+                                        "query order direction must be :asc or :desc"))]
+                    [(or (< column 0)
+                         (and (some? arity) (>= column arity)))
+                     (conj errors
+                           (query-error :query-invalid-order
+                                        "query order column is out of range"))]
+                    [(contains? seen column)
+                     (conj errors
+                           (query-error :query-invalid-order
+                                        "query order columns must be unique"))]
+                    [:else errors])]
+              (recur (rest remaining) (conj seen column) errors2))))
+        limit (queryplan-limit plan)
+        limit-errors (if (and (some? limit)
+                 (or (< limit 1) (> limit max-results)))
+          [(query-error :query-invalid-limit
+                        (str "query limit must be from 1 through " max-results))]
+          [])]
+    (vec (concat clause-errors limit-errors))))
+
+(defn validate-plan! [plan QueryPlan] (Vec QueryError)
+  (let [strata (queryplan-strata plan)
+        rules (reduce (fn
+                        [acc (Vec d/Rule)
+                         stratum (Vec d/Rule)] (Vec d/Rule)
+                        (vec (concat acc stratum)))
+                      (empty-rules) strata)
+        derived (derived-relations rules)
+        known (set-union base-relations derived)
+        arities (head-arities rules)
+        empty-errors (if (empty? rules)
+          [(query-error :query-invalid-plan "query plan must contain at least one rule")]
+          (empty-query-errors))
+        rules-errors (reduce (fn
+                               [acc (Vec QueryError)
+                                rule d/Rule] (Vec QueryError)
+                               (vec (concat acc (rule-errors! rule known arities))))
+                (empty-query-errors) rules)
+        strata-errors (reduce (fn
+                                [acc (Vec QueryError)
+                                 message String] (Vec QueryError)
+                                (conj acc (query-error :query-stratification message)))
+                (empty-query-errors) (d/strata-violations strata))]
+    (vec (concat empty-errors
+                 (concat rules-errors
+                         (concat (arity-errors rules)
+                                 (concat (recursive-builtin-errors rules)
+                                         (concat (forward-errors strata derived)
+                                                 (concat strata-errors
+                                                         (concat
+                                                          (find-errors (queryplan-find plan)
+                                                                       derived arities)
+                                                          (order-errors plan arities)))))))))))
+
+;; --- syntax adapter ---------------------------------------------------------
+(defn- variable-form? [value Any] Bool
+  (and (map? value)
+       (and (= 1 (count value))
+            (and (contains? value :var)
+                 (and (string? (:var value)) (pos? (count (:var value))))))))
+
+(defn- query-term-form? [value Any] Bool
+  (or (variable-form? value) (t/term? value)))
+
+(defn- all-vectors? [values (Vec Any)] Bool
+  (loop [remaining (Vec Any) values]
+    (if (empty? remaining)
+      true
+      (if (vector? (first remaining)) (recur (rest remaining)) false))))
+
+(defn- raw-strata [form Any] Any
+  (cond
+    [(not (map? form)) nil]
+    [(and (contains? form :rules) (not (contains? form :strata)))
+     (if (vector? (:rules form)) [(:rules form)] nil)]
+    [(and (contains? form :strata) (not (contains? form :rules)))
+     (if (and (vector? (:strata form)) (all-vectors? (:strata form)))
+       (:strata form) nil)]
+    [:else nil]))
+
+(defn- syntax-term-errors
+  [values Any
+   context String] (Vec QueryError)
+  (if (not (vector? values))
+    [(query-error :query-invalid-syntax (str context " arguments must be a vector"))]
+    (reduce (fn
+              [acc (Vec QueryError)
+               value Any] (Vec QueryError)
+              (if (query-term-form? value)
+                acc
+                (conj acc (query-error :query-invalid-syntax
+                                       (str context " contains an invalid term")))))
+            [] values)))
+
+(defn- syntax-literal-errors [literal Any] (Vec QueryError)
+  (if (not (map? literal))
+    [(query-error :query-invalid-syntax "literal must be a map")]
+    (cond
+      [(contains? literal :pred)
+       (vec (concat
+             (if (keyword? (:pred literal))
+               [] [(query-error :query-invalid-syntax
+                                "comparison operator must be a keyword")])
+             (syntax-term-errors (:args literal) "comparison")))]
+      [(contains? literal :fn)
+       (vec (concat
+             (if (and (keyword? (:fn literal)) (string? (:bind literal)))
+               [] [(query-error :query-invalid-syntax
+                                "builtin requires keyword :fn and string :bind")])
+             (syntax-term-errors (:args literal) "builtin")))]
+      [:else
+       (vec (concat
+             (if (string? (:rel literal))
+               [] [(query-error :query-invalid-syntax
+                                "relation literal requires string :rel")])
+             (concat
+              (if (or (nil? (:neg literal))
+                      (or (= true (:neg literal)) (= false (:neg literal))))
+                [] [(query-error :query-invalid-syntax
+                                 "literal :neg must be boolean")])
+              (syntax-term-errors (:args literal) "literal"))))])))
+
+(defn- syntax-rule-errors [rule Any] (Vec QueryError)
+  (if (not (map? rule))
+    [(query-error :query-invalid-syntax "rule must be a map")]
+    (let [head (:head rule)
+          body (:body rule)
+          head-errors (if (and (map? head) (and (string? (:rel head)) (vector? (:args head))))
+            (syntax-term-errors (:args head) "rule head")
+            [(query-error :query-invalid-syntax
+                          "rule head must contain string :rel and vector :args")])
+          body-errors (if (vector? body)
+            (reduce (fn
+                      [acc (Vec QueryError)
+                       literal Any] (Vec QueryError)
+                      (vec (concat acc (syntax-literal-errors literal))))
+                    [] body)
+            [(query-error :query-invalid-syntax "rule body must be a vector")])]
+      (vec (concat head-errors body-errors)))))
+
+(defn- syntax-find-errors [find Any] (Vec QueryError)
+  (cond
+    [(string? find) []]
+    [(not (map? find))
+     [(query-error :query-invalid-syntax "find must be a relation string or aggregate map")]]
+    [:else
+     (let [base-errors (vec (concat
+                 (if (string? (:rel find))
+                   [] [(query-error :query-invalid-syntax
+                                    "aggregate find requires string :rel")])
+                 (concat
+                  (if (and (vector? (:group find))
+                           (every? integer? (:group find)))
+                    [] [(query-error :query-invalid-syntax
+                                     "aggregate :group must contain integer positions")])
+                  (if (and (vector? (:agg find)) (not (empty? (:agg find))))
+                    [] [(query-error :query-invalid-syntax
+                                     "aggregate :agg must be a non-empty vector")]))))
+           spec-errors (if (vector? (:agg find))
+             (reduce
+              (fn
+                [acc (Vec QueryError)
+                 spec Any] (Vec QueryError)
+                (if (and (map? spec)
+                         (and (keyword? (:op spec))
+                              (or (nil? (:arg spec)) (integer? (:arg spec)))))
+                  acc
+                  (conj acc (query-error :query-invalid-syntax
+                                         "aggregate spec requires keyword :op and optional integer :arg"))))
+              [] (:agg find))
+             [])
+           having-errors (if (or (nil? (:having find)) (vector? (:having find)))
+             (reduce
+              (fn
+                [acc (Vec QueryError)
+                 clause Any] (Vec QueryError)
+                (if (and (map? clause)
+                         (and (keyword? (:op clause))
+                              (and (integer? (:agg clause))
+                                   (number? (:val clause)))))
+                  acc
+                  (conj acc (query-error :query-invalid-syntax
+                                         "having clause requires :op, integer :agg, and numeric :val"))))
+              [] (or (:having find) []))
+             [(query-error :query-invalid-syntax "aggregate :having must be a vector")])]
+       (vec (concat base-errors (concat spec-errors having-errors))))]))
+
+(defn- syntax-order-errors [value Any] (Vec QueryError)
+  (if (or (nil? value) (vector? value))
+    (reduce
+     (fn
+       [errors (Vec QueryError)
+        clause Any] (Vec QueryError)
+       (if (and (map? clause)
+                (and (integer? (:column clause))
+                     (contains? #{:asc :desc} (:direction clause))))
+         errors
+         (conj errors
+               (query-error :query-invalid-syntax
+                            "query :order-by requires :column and :direction"))))
+     [] (or value []))
+    [(query-error :query-invalid-syntax
+                  "query :order-by must be a vector")]))
+
+(defn- syntax-errors [form Any] (Vec QueryError)
+  (cond
+    [(not (map? form)) [(query-error :query-invalid-syntax "query must be a map")]]
+    [(= (contains? form :rules) (contains? form :strata))
+     [(query-error :query-invalid-syntax
+                   "query must provide exactly one of :rules or :strata")]]
+    [(nil? (raw-strata form))
+     [(query-error :query-invalid-syntax "rules or strata have an invalid shape")]]
+    [:else
+     (let [strata (raw-strata form)
+           rules (reduce (fn
+                           [acc (Vec Any)
+                            stratum Any] (Vec Any)
+                           (vec (concat acc stratum)))
+                         [] strata)
+           rule-errors (reduce (fn
+                                 [acc (Vec QueryError)
+                                  rule Any] (Vec QueryError)
+                                 (vec (concat acc (syntax-rule-errors rule))))
+                   [] rules)]
+       (vec
+        (concat
+         (syntax-find-errors (:find form))
+         (concat
+          (syntax-order-errors (:order-by form))
+          (concat
+           (if (or (nil? (:limit form)) (integer? (:limit form)))
+             []
+             [(query-error :query-invalid-syntax
+                           "query :limit must be an integer")])
+           rule-errors)))))]))
+
+(defn- compile-term-form [value Any] d/QueryTerm
+  (if (variable-form? value) (d/variable (:var value)) (d/constant value)))
+
+(defn- compile-term-forms [values (Vec Any)] (Vec d/QueryTerm)
+  (mapv (fn [value Any] d/QueryTerm (compile-term-form value)) values))
+
+(defn- compile-literal-form [literal Any] d/Literal
+  (cond
+    [(contains? literal :pred)
+     (d/comparison-literal (:pred literal) (compile-term-forms (:args literal)))]
+    [(contains? literal :fn)
+     (d/builtin-literal (:fn literal) (compile-term-forms (:args literal))
+                        (:bind literal))]
+    [(= true (:neg literal))
+     (d/negated-literal (:rel literal) (compile-term-forms (:args literal)))]
+    [:else
+     (d/relation-literal (:rel literal) (compile-term-forms (:args literal)))]))
+
+(defn- compile-rule-form [rule Any] d/Rule
+  (d/rule (:rel (:head rule))
+          (compile-term-forms (:args (:head rule)))
+          (mapv (fn [literal Any] d/Literal (compile-literal-form literal))
+                (:body rule))))
+
+(defn- compile-find-form [find Any] FindSpec
+  (if (string? find)
+    (relation-find find)
+    (aggregate-find
+     (:rel find)
+     (:group find)
+     (mapv (fn [spec Any] AggregateSpec
+             (aggregate-spec (:op spec) (:arg spec)))
+           (:agg find))
+     (mapv (fn [clause Any] HavingClause
+             (having-clause (:op clause) (:agg clause) (:val clause)))
+           (or (:having find) [])))))
+
+(defn compile-query! [form Any] CompileResult
+  (if (query-plan? form)
+    (let [errors (validate-plan! form)]
+      (if (empty? errors) (->CompileResult form []) (->CompileResult nil errors)))
+    (let [errors (syntax-errors form)]
+      (if (not (empty? errors))
+        (->CompileResult nil errors)
+        (let [strata (mapv (fn [stratum (Vec Any)] (Vec d/Rule)
+                      (mapv (fn [rule Any] d/Rule (compile-rule-form rule)) stratum))
+                    (raw-strata form))
+              plan (ordered-query-plan
+               (compile-find-form (:find form))
+               strata
+               (mapv (fn [clause Any] OrderClause
+                       (order-clause (:column clause) (:direction clause)))
+                     (or (:order-by form) []))
+               (:limit form))
+              validation-errors (validate-plan! plan)]
+          (if (empty? validation-errors)
+            (->CompileResult plan [])
+            (->CompileResult nil validation-errors)))))))
+
+;; --- deterministic Term ordering -------------------------------------------
+(defn term-key [value Any] String
+  (d/term-key value))
+
+(defn row-key [row d/Tuple] String
+  (d/row-key row))
+
+(defn- order-row-vector [rows (Vec d/Tuple)] (Vec d/Tuple)
+  (d/order-row-vector rows))
+
+(defn- ordered-rows [rows (Set d/Tuple)] (Vec d/Tuple)
+  (order-row-vector (vec rows)))
+
+(defn- term-rank [value Any] Int
+  (cond
+    [(boolean? value) 0]
+    [(number? value) 1]
+    [(string? value) 2]
+    [(keyword? value) 3]
+    [(t/instant? value) 4]
+    [(t/triple? value) 5]
+    [:else 6]))
+
+(defn- int-compare
+  [left Int
+   right Int] Int
+  (cond
+    [(< left right) -1]
+    [(> left right) 1]
+    [:else 0]))
+
+(defn- bool-compare
+  [left Bool
+   right Bool] Int
+  (cond
+    [(= left right) 0]
+    [left 1]
+    [:else -1]))
+
+(defn- float-compare
+  [left Float
+   right Float] Int
+  (cond
+    [(< left right) -1]
+    [(> left right) 1]
+    [:else 0]))
+
+(defn term-compare
+  [left Any
+   right Any] Int
+  (let [left-rank (term-rank left)
+        right-rank (term-rank right)
+        rank-order (int-compare left-rank right-rank)]
+    (if (not (zero? rank-order))
+      rank-order
+      (cond
+        [(and (boolean? left) (boolean? right))
+         (let [left-bool Bool left
+               right-bool Bool right]
+           (bool-compare left-bool right-bool))]
+        [(and (number? left) (number? right))
+         (if (and (integer? left) (integer? right))
+           (let [left-int Int left
+                 right-int Int right]
+             (int-compare left-int right-int))
+           (let [left-float Float (double left)
+                 right-float Float (double right)]
+             (float-compare left-float right-float)))]
+        [(and (string? left) (string? right))
+         (let [left-string String left
+               right-string String right]
+           (compare left-string right-string))]
+        [(and (keyword? left) (keyword? right))
+         (let [left-keyword Keyword left
+               right-keyword Keyword right]
+           (compare (str left-keyword) (str right-keyword)))]
+        [(and (t/instant? left) (t/instant? right))
+         (let [left-instant t/Instant left
+               right-instant t/Instant right
+               seconds-order Int (int-compare (t/instant-epoch-seconds left-instant)
+                            (t/instant-epoch-seconds right-instant))]
+           (if (zero? seconds-order)
+             (int-compare (t/instant-nanos left-instant)
+                          (t/instant-nanos right-instant))
+             seconds-order))]
+        [(and (t/triple? left) (t/triple? right))
+         (let [left-triple t/Triple left
+               right-triple t/Triple right
+               first-order Int (term-compare (t/triple-t1 left-triple)
+                             (t/triple-t1 right-triple))
+               second-order Int (if (zero? first-order)
+                 (term-compare (t/triple-t2 left-triple)
+                               (t/triple-t2 right-triple))
+                 first-order)]
+           (if (zero? second-order)
+             (term-compare (t/triple-t3 left-triple)
+                           (t/triple-t3 right-triple))
+             second-order))]
+        [:else (compare (term-key left) (term-key right))]))))
+
+(defn- ordered-row-compare
+  [order (Vec OrderClause)
+   left d/Tuple
+   right d/Tuple] Int
+  (loop [remaining (Vec OrderClause) order]
+    (if (empty? remaining)
+      (compare (row-key left) (row-key right))
+      (let [clause (first remaining)
+            column-order (term-compare (nth left (orderclause-column clause))
+                          (nth right (orderclause-column clause)))
+            directed-order (if (= :desc (orderclause-direction clause))
+              (- 0 column-order)
+              column-order)]
+        (if (zero? directed-order)
+          (recur (rest remaining))
+          directed-order)))))
+
+(defn- merge-ordered-row-vectors
+  [order (Vec OrderClause)
+   left (Vec d/Tuple)
+   right (Vec d/Tuple)] (Vec d/Tuple)
+  (loop [left-index Int 0
+         right-index Int 0
+         merged (Vec d/Tuple) []]
+    (cond
+      [(>= left-index (count left))
+       (into merged (subvec right right-index))]
+      [(>= right-index (count right))
+       (into merged (subvec left left-index))]
+      [(<= (ordered-row-compare order
+                                (nth left left-index)
+                                (nth right right-index))
+           0)
+       (recur (inc left-index)
+              right-index
+              (conj merged (nth left left-index)))]
+      [:else
+       (recur left-index
+              (inc right-index)
+              (conj merged (nth right right-index)))])))
+
+(defn- merge-sort-ordered-rows
+  [order (Vec OrderClause)
+   rows (Vec d/Tuple)] (Vec d/Tuple)
+  (if (<= (count rows) 1)
+    rows
+    (let [middle Int (quot (count rows) 2)
+          left (Vec d/Tuple) (merge-sort-ordered-rows order (subvec rows 0 middle))
+          right (Vec d/Tuple) (merge-sort-ordered-rows order (subvec rows middle))]
+      (merge-ordered-row-vectors order left right))))
+
+(defn ordered-plan-rows
+  [plan QueryPlan
+   rows (Vec d/Tuple)] (Vec d/Tuple)
+  (let [order (queryplan-order plan)
+        ordered (if (empty? order)
+          (order-row-vector rows)
+          (merge-sort-ordered-rows order rows))
+        limit (queryplan-limit plan)]
+    (if (some? limit)
+      (vec (take limit ordered))
+      ordered)))
+
+(defn- evaluate-plan-result!
+  [projection Projection
+   plan QueryPlan
+   control d/QueryControl?] d/QueryEvaluationResult
+  (d/run-strata-db-with-candidates-result!
+   (projection-edb projection)
+   (queryplan-strata plan)
+   (projection-candidates projection)
+   control))
+
+(defn- abort-result [problem Any] QueryResult
+  (let [data (ex-data problem)]
+    (if (= :store-query-abort (:type data))
+      (failure-result [(query-error (:code data) (ex-message problem))])
+      (throw problem))))
+
+;; --- aggregates -------------------------------------------------------------
+(def numeric-aggregate-operators (Set Keyword) #{:sum :avg :min :max})
+
+(defn- number-atom [value Any] NumericAtom?
+  (cond
+    [(number? value)
+     (if (integer? value)
+       (let [integer-value Int value] integer-value)
+       (let [float-value Float (double value)] float-value))]
+    [(string? value)
+     (let [text String value
+           integer-result (U Int Nil) (parse-long text)]
+       (if (some? integer-result)
+         (let [integer-value Int integer-result
+               numeric-value NumericAtom integer-value]
+           numeric-value)
+         (let [float-result (U Float Nil) (parse-double text)]
+           (if (some? float-result)
+             (let [float-value Float float-result
+                   numeric-value NumericAtom float-value]
+               numeric-value)
+             nil))))]
+    [:else nil]))
+
+(defn- required-number [value Any] NumericAtom
+  (let [number (number-atom value)]
+    (if (some? number)
+      (let [present NumericAtom number] present)
+      0)))
+
+(defn- numeric-int [value NumericAtom] Int
+  (if (integer? value)
+    (let [integer-value Int value] integer-value)
+    0))
+
+(defn- numeric-float [value NumericAtom] Float
+  (if (integer? value)
+    (let [integer-value Int value] (double integer-value))
+    (let [float-value Float value] float-value)))
+
+(defn- nonnumeric-row?
+  [rows (Vec d/Tuple)
+   position Int] Bool
+  (loop [index Int 0]
+    (if (>= index (count rows))
+      false
+      (if (nil? (number-atom (nth (nth rows index) position)))
+        true
+        (recur (inc index))))))
+
+(defn- numeric-column-error
+  [rows (Vec d/Tuple)
+   find FindSpec] QueryError?
+  (let [specs (findspec-aggregates find)]
+    (loop [index Int 0]
+      (if (>= index (count specs))
+        nil
+        (let [spec (nth specs index)]
+          (if (contains? numeric-aggregate-operators (aggregatespec-operator spec))
+            (let [position Int (or (aggregatespec-argument spec) 0)
+                  bad Bool (nonnumeric-row? rows position)]
+              (if bad
+                (query-error :query-nonnumeric-aggregate
+                             (str "aggregate position " position
+                                  " contains a non-numeric Term"))
+                (recur (inc index))))
+            (recur (inc index))))))))
+
+(defn- group-rows
+  [rows (Vec d/Tuple)
+   grouping (Vec Int)] AggregateGroups
+  (reduce (fn
+            [acc AggregateGroups
+             row d/Tuple] AggregateGroups
+            (let [key (mapv (fn [position Int] Any (nth row position)) grouping)
+                  key-text (row-key key)
+                  groups (aggregategroups-by-key acc)
+                  current (get groups key-text)]
+              (if (some? current)
+                (let [group AggregateGroup current
+                      updated AggregateGroup (->AggregateGroup
+                               (aggregategroup-key group)
+                               (conj (aggregategroup-members group) row))]
+                  (->AggregateGroups (assoc groups key-text updated)
+                                     (aggregategroups-order acc)))
+                (->AggregateGroups
+                 (assoc groups key-text (->AggregateGroup key [row]))
+                 (conj (aggregategroups-order acc) key-text)))))
+          (->AggregateGroups {} []) rows))
+
+(defn- all-integers?
+  [rows (Vec d/Tuple)
+   position Int] Bool
+  (every? (fn [row d/Tuple] Bool
+            (integer? (required-number (nth row position))))
+          rows))
+
+(defn- sum-values
+  [rows (Vec d/Tuple)
+   position Int] NumericAtom
+  (if (all-integers? rows position)
+    (reduce (fn
+              [acc Int
+               row d/Tuple] Int
+              (+ acc (numeric-int (required-number (nth row position)))))
+            0 rows)
+    (reduce (fn
+              [acc Float
+               row d/Tuple] Float
+              (+ acc (numeric-float (required-number (nth row position)))))
+            0.0 rows)))
+
+(defn- extreme-value
+  [rows (Vec d/Tuple)
+   position Int
+   maximum? Bool] NumericAtom?
+  (reduce (fn
+            [best NumericAtom?
+             row d/Tuple] NumericAtom?
+            (let [candidate (required-number (nth row position))]
+              (if (nil? best)
+                candidate
+                (let [present-best NumericAtom best]
+                  (if (if maximum?
+                        (> (numeric-float candidate) (numeric-float present-best))
+                        (< (numeric-float candidate) (numeric-float present-best)))
+                    candidate present-best)))))
+          nil rows))
+
+(defn- distinct-column-count
+  [rows (Vec d/Tuple)
+   position Int] Int
+  (count
+   (reduce (fn
+             [keys (Set String)
+              row d/Tuple] (Set String)
+             (conj keys (term-key (nth row position))))
+           (empty-string-set) rows)))
+
+(defn- aggregate-value
+  [rows (Vec d/Tuple)
+   spec AggregateSpec] NumericAtom
+  (let [operator Keyword (aggregatespec-operator spec)
+        position Int (or (aggregatespec-argument spec) 0)]
+    (cond
+      [(= operator :count) (count rows)]
+      [(= operator :count-distinct)
+       (distinct-column-count rows position)]
+      [(= operator :sum) (sum-values rows position)]
+      [(= operator :avg)
+       (/ (numeric-float (sum-values rows position)) (double (count rows)))]
+      [(= operator :min) (or (extreme-value rows position false) 0)]
+      [(= operator :max) (or (extreme-value rows position true) 0)]
+      [:else 0])))
+
+(defn- comparison-number
+  [operator Keyword
+   left NumericAtom
+   right NumericAtom] Bool
+  (let [left-number (numeric-float left)
+        right-number (numeric-float right)]
+    (cond
+      [(= operator :eq) (= left-number right-number)]
+      [(= operator :ne) (not (= left-number right-number))]
+      [(= operator :lt) (< left-number right-number)]
+      [(= operator :le) (<= left-number right-number)]
+      [(= operator :gt) (> left-number right-number)]
+      [(= operator :ge) (>= left-number right-number)]
+      [:else false])))
+
+(defn- aggregate-values
+  [rows (Vec d/Tuple)
+   specs (Vec AggregateSpec)] (Vec NumericAtom)
+  (mapv (fn [spec AggregateSpec] NumericAtom
+          (aggregate-value rows spec))
+        specs))
+
+(defn- append-aggregate-values
+  [row d/Tuple
+   values (Vec NumericAtom)] d/Tuple
+  (reduce (fn
+            [current d/Tuple
+             value NumericAtom] d/Tuple
+            (if (integer? value)
+              (let [integer-value Int value
+                    element Any integer-value]
+                (conj current element))
+              (let [float-value Float value
+                    element Any float-value]
+                (conj current element))))
+          row values))
+
+(defn- having-passes?
+  [row d/Tuple
+   grouping-count Int
+   clauses (Vec HavingClause)] Bool
+  (every?
+   (fn [clause HavingClause] Bool
+     (comparison-number
+      (havingclause-operator clause)
+      (required-number
+       (nth row (+ grouping-count (havingclause-aggregate-index clause))))
+      (required-number (havingclause-value clause))))
+   clauses))
+
+(defn- aggregate-result
+  [db d/Db
+   plan QueryPlan] QueryResult
+  (let [find (queryplan-find plan)
+        rows (vec (get db (findspec-relation find) #{}))]
+    (if (empty? rows)
+      (success-result [])
+      (let [numeric-error (numeric-column-error rows find)]
+        (if (some? numeric-error)
+          (failure-result [numeric-error])
+          (let [groups (group-rows rows (findspec-grouping find))
+                aggregated (reduce
+                 (fn
+                   [acc (Vec d/Tuple)
+                    group-key String] (Vec d/Tuple)
+                   (let [group-value Any (get (aggregategroups-by-key groups) group-key)
+                         group AggregateGroup (if (some? group-value)
+                           (let [present AggregateGroup group-value] present)
+                           (->AggregateGroup [] []))
+                         key d/Tuple (aggregategroup-key group)
+                         members (Vec d/Tuple) (aggregategroup-members group)
+                         values (Vec NumericAtom) (aggregate-values members (findspec-aggregates find))]
+                     (conj acc (append-aggregate-values key values))))
+                 [] (aggregategroups-order groups))
+                survivors (filterv (fn [row d/Tuple] Bool
+                           (having-passes? row (count (findspec-grouping find))
+                                           (findspec-having find)))
+                         aggregated)
+                count-value (count survivors)]
+            (if (and (nil? (queryplan-limit plan))
+                     (> count-value max-results))
+              (limited-result
+               (query-error :query-result-limit
+                            (str "aggregate result has " count-value
+                                 " groups, over limit " max-results))
+               count-value max-results)
+              (success-result (ordered-plan-rows plan survivors)))))))))
+
+(defn run-plan-projected-result!
+  [projection Projection
+   plan QueryPlan
+   control d/QueryControl?] QueryExecutionResult
+  (let [errors (validate-plan! plan)]
+    (if (not (empty? errors))
+      (->QueryExecutionResult (failure-result errors) nil)
+      (let [evaluation (evaluate-plan-result! projection plan control)
+            error-value (d/query-evaluation-result-error evaluation)]
+        (if (some? error-value)
+          (->QueryExecutionResult nil error-value)
+          (let [db (d/query-evaluation-db evaluation)
+                find (queryplan-find plan)
+                result (if (aggregate-find? find)
+            (aggregate-result db plan)
+            (let [rows (get db (findspec-relation find) #{})
+                  count-value (count rows)]
+              (if (and (nil? (queryplan-limit plan))
+                       (> count-value max-results))
+                (limited-result
+                 (query-error :query-result-limit
+                              (str "result has " count-value
+                                   " rows, over limit " max-results))
+                 count-value max-results)
+                (success-result (ordered-plan-rows plan (vec rows))))))]
+            (->QueryExecutionResult result nil)))))))
+
+(defn run-plan-with-history-result!
+  [propositions (Vec t/Triple)
+   occurrences (Vec t/OperationOccurrence)
+   withdrawals (Vec t/Withdrawal)
+   plan QueryPlan
+   control d/QueryControl?] QueryExecutionResult
+  (let [projection-result ProjectionResult (project-with-history-result! propositions occurrences withdrawals)
+        projection-value Projection? (projection-result-projection projection-result)
+        error-value d/QueryEvaluationError? (projection-result-error projection-result)]
+    (cond
+      [(some? projection-value)
+       (run-plan-projected-result! projection-value plan control)]
+      [(some? error-value) (->QueryExecutionResult nil error-value)]
+      [:else
+       (->QueryExecutionResult
+        nil
+        (d/query-evaluation-error
+         :query-projection-missing-result
+         :rpc/native-query-failed
+         "query projection produced no result"))])))
+
+(defn- execution-result-or-raise! [execution QueryExecutionResult] QueryResult
+  (let [result (queryexecutionresult-query-result execution)
+        error-value (queryexecutionresult-error execution)]
+    (cond
+      [(some? result) result]
+      [(some? error-value)
+       (if (= :store-query-abort
+              (d/query-evaluation-error-type error-value))
+         (failure-result
+          [(query-error (d/query-evaluation-error-code error-value)
+                        (d/query-evaluation-error-message error-value))])
+         (d/raise-query-evaluation-error! error-value))]
+      [:else
+       (failure-result
+        [(query-error :query-evaluation-missing-result
+                      "query evaluation produced no result")])])))
+
+(defn run-plan-projected-controlled!
+  [projection Projection
+   plan QueryPlan
+   control d/QueryControl?] QueryResult
+  (try
+    (execution-result-or-raise!
+     (run-plan-projected-result! projection plan control))
+    (catch Exception problem (abort-result problem))))
+
+(defn run-plan-projected!
+  [projection Projection
+   plan QueryPlan] QueryResult
+  (run-plan-projected-controlled! projection plan *query-control*))
+
+(defn run-projected!
+  [projection Projection
+   plan QueryPlan] QueryResult
+  (run-plan-projected! projection plan))
+
+(defn run!
+  [propositions (Vec t/Triple)
+   plan QueryPlan] QueryResult
+  (run-plan-projected! (project! propositions) plan))
+
+(defn run-syntax!
+  [propositions (Vec t/Triple)
+   form Any] QueryResult
+  (let [compiled (compile-query! form)
+        plan (compileresult-plan compiled)]
+    (if (some? plan)
+      (run! propositions plan)
+      (failure-result (compileresult-errors compiled)))))
+
+;; --- stable cursor paging ---------------------------------------------------
+(def max-page-limit Int 4096)
+(def max-page-wire-bytes Int 1048576)
+(def max-page-payload-bytes Int (- max-page-wire-bytes 512))
+(def max-page-cursor-bytes Int 524288)
+(def page-cursor-prefix String "store-query-term-page-v1.")
+
+;; Stays on JVM interop: utf8-encode is portable and lowers natively, but the
+;; Clojure emitter has no binding for it, so the hosted runtime cannot load it.
+(defn- utf8-size [value String] Int (count (.getBytes value "UTF-8")))
+
+(defn page-cursor [row d/Tuple] String
+  (str page-cursor-prefix (row-key row)))
+
+(defn decode-page-cursor [cursor Any] CursorResult
+  (if (not (string? cursor))
+    (->CursorResult nil
+                    (query-error :query-page-cursor
+                                 "page cursor must be a string"))
+    (if (or (> (utf8-size cursor) max-page-cursor-bytes)
+            (or (not (str/starts-with? cursor page-cursor-prefix))
+                (= cursor page-cursor-prefix)))
+      (->CursorResult nil
+                      (query-error :query-page-cursor
+                                   "page cursor is not canonical"))
+      (->CursorResult (subs cursor (count page-cursor-prefix)) nil))))
+
+(defn- page-envelope
+  [window (Vec d/Tuple)
+   count-value Int] QueryPage
+  (let [rows (subvec window 0 count-value)
+        more (> (count window) count-value)
+        next (if (and more (> count-value 0))
+               (page-cursor (nth rows (- count-value 1))) nil)]
+    (success-page rows next more)))
+
+(defn- envelope-size
+  [rows-size Int
+   next Any
+   more Bool] Int
+  (+ (utf8-size "rows:") rows-size (utf8-size "|next:")
+     (utf8-size (pr-str next)) (utf8-size "|more:")
+     (utf8-size (pr-str more))))
+
+(defn- fitting-prefix
+  [window (Vec d/Tuple)
+   wanted Int] Int
+  (loop [index Int 0
+         rows-size Int 2
+         best Int 0]
+    (if (>= index wanted)
+      best
+      (let [row (nth window index)
+            count-value (+ index 1)
+            rows-size2 (+ rows-size (if (= index 0) 0 1)
+                          (utf8-size (pr-str row)))
+            more (> (count window) count-value)
+            next (if more (page-cursor row) nil)
+            fits (and (or (nil? next)
+                          (<= (utf8-size next) max-page-cursor-bytes))
+                      (<= (envelope-size rows-size2 next more)
+                          max-page-payload-bytes))]
+        (recur count-value rows-size2 (if fits count-value best))))))
+
+(defn- abort-page [problem Any] QueryPage
+  (let [data (ex-data problem)]
+    (if (= :store-query-abort (:type data))
+      (failure-page [(query-error (:code data) (ex-message problem))])
+      (throw problem))))
+
+(defn- evaluation-error-page-or-raise! [error-value d/QueryEvaluationError] QueryPage
+  (if (= :store-query-abort (d/query-evaluation-error-type error-value))
+    (failure-page
+     [(query-error (d/query-evaluation-error-code error-value)
+                   (d/query-evaluation-error-message error-value))])
+    (d/raise-query-evaluation-error! error-value)))
+
+(defn- rows-after-key
+  [rows (Vec d/Tuple)
+   after-key String] (Vec d/Tuple)
+  (loop [position Int 0]
+    (cond
+      [(>= position (count rows)) []]
+      [(= after-key (row-key (nth rows position)))
+       (vec (drop (inc position) rows))]
+      [:else (recur (inc position))])))
+
+(defn run-page-plan-projected!
+  [projection Projection
+   plan QueryPlan
+   limit Any
+   after Any] QueryPage
+  (let [validation-errors (validate-plan! plan)]
+    (cond
+      [(not (empty? validation-errors)) (failure-page validation-errors)]
+      [(aggregate-find? (queryplan-find plan))
+       (failure-page [(query-error :query-aggregate-not-pageable
+                                  "aggregate results are not pageable")])]
+      [(or (not (integer? limit)) (or (< limit 1) (> limit max-page-limit)))
+       (failure-page [(query-error :query-page-limit
+                                  (str "page limit must be from 1 through " max-page-limit))])]
+      [(and (some? after) (not (string? after)))
+       (failure-page [(query-error :query-page-cursor
+                                  "page cursor must be a string or nil")])]
+      [:else
+       (let [decoded (if (some? after)
+                       (decode-page-cursor after)
+                       (->CursorResult nil nil))
+             cursor-error (cursorresult-error decoded)]
+         (if (some? cursor-error)
+           (failure-page [cursor-error])
+           (try
+             (let [evaluation (evaluate-plan-result! projection plan *query-control*)
+                   error-value (d/query-evaluation-result-error evaluation)]
+               (if (some? error-value)
+                 (evaluation-error-page-or-raise! error-value)
+                 (let [db (d/query-evaluation-db evaluation)
+                       relation (get db (findspec-relation (queryplan-find plan)) #{})
+                       ordered (ordered-plan-rows plan (vec relation))
+                       after-key (cursorresult-key decoded)
+                       eligible (if (some? after-key)
+                         (rows-after-key ordered after-key)
+                         ordered)
+                       window (vec (take (+ limit 1) eligible))
+                       wanted (min limit (count window))]
+                   (if (= wanted 0)
+                     (page-envelope window 0)
+                     (let [count-value (fitting-prefix window wanted)]
+                       (if (= count-value 0)
+                         (wire-failure-page
+                          (query-error
+                           :query-page-row-too-large
+                           "page contains a row too large for the bounded response")
+                          max-page-wire-bytes)
+                         (page-envelope window count-value)))))))
+             (catch Exception problem (abort-page problem)))))])))
+
+(defn run-page-projected!
+  [projection Projection
+   plan QueryPlan
+   limit Any
+   after Any] QueryPage
+  (run-page-plan-projected! projection plan limit after))
+
+(defn run-page!
+  [propositions (Vec t/Triple)
+   plan QueryPlan
+   limit Any
+   after Any] QueryPage
+  (run-page-plan-projected! (project! propositions) plan limit after))

@@ -1,7 +1,7 @@
 # kind	source	destination
-# .bgl modules are canonically native (store:bin/beagle-store-native-build); kind
-# `beagle-core` also projects them onto the hosted out/ tree from that one source.
-beagle-core	src/store/rt_core.bgl	out/store/rt_core.clj
+# Production semantics compile from hosted Beagle. The separate Native Core
+# closure is an explicitly experimental viability path, not a production input.
+beagle	src/store/rt_core.bclj	out/store/rt_core.clj
 copy	src/store/rt.clj	out/store/rt.clj
 copy	src/store/kernel_host.clj	out/store/kernel_host.clj
 copy	src/store/json.clj	out/store/json.clj
@@ -12,22 +12,22 @@ copy	src/store/graph_control_mcp.clj	out/store/graph_control_mcp.clj
 copy	src/store/code_commit_gate.clj	out/store/code_commit_gate.clj
 copy	src/store/projection_lifecycle.clj	out/store/projection_lifecycle.clj
 copy	src/store/candidate_transformer.clj	out/store/candidate_transformer.clj
-beagle-core	src/store/slots.bgl	out/store/slots.clj
-beagle-core	src/store/types.bgl	out/store/types.clj
-beagle-core	src/store/rpc_limits.bgl	out/store/rpc_limits.clj
-beagle-core	src/store/store.bgl	out/store/store.clj
-beagle-core	src/store/rotation.bgl	out/store/rotation.clj
-beagle-core	src/store/txn.bgl	out/store/txn.clj
-beagle-core	src/store/schema.bgl	out/store/schema.clj
-beagle-core	src/store/datalog.bgl	out/store/datalog.clj
-beagle-core	src/store/kernel.bgl	out/store/kernel.clj
-beagle-core	src/store/query.bgl	out/store/query.clj
-beagle-core	src/store/text_index.bgl	out/store/text_index.clj
-beagle-core	src/store/text_search.bgl	out/store/text_search.clj
-beagle-core	src/commit_plan.bgl	out/commit_plan.clj
-beagle-core	src/store/kernel_classify.bgl	out/store/kernel_classify.clj
-beagle-core	src/store/chain_rules.bgl	out/store/chain_rules.clj
-beagle-core	src/store/revision_generation.bgl	out/store/revision_generation.clj
+beagle	src/store/slots.bclj	out/store/slots.clj
+beagle	src/store/types.bclj	out/store/types.clj
+beagle	src/store/rpc_limits.bclj	out/store/rpc_limits.clj
+beagle	src/store/store.bclj	out/store/store.clj
+beagle	src/store/rotation.bclj	out/store/rotation.clj
+beagle	src/store/txn.bclj	out/store/txn.clj
+beagle	src/store/schema.bclj	out/store/schema.clj
+beagle	src/store/datalog.bclj	out/store/datalog.clj
+beagle	src/store/kernel.bclj	out/store/kernel.clj
+beagle	src/store/query.bclj	out/store/query.clj
+beagle	src/store/text_index.bclj	out/store/text_index.clj
+beagle	src/store/text_search.bclj	out/store/text_search.clj
+beagle	src/commit_plan.bclj	out/commit_plan.clj
+beagle	src/store/kernel_classify.bclj	out/store/kernel_classify.clj
+beagle	src/store/chain_rules.bclj	out/store/chain_rules.clj
+beagle	src/store/revision_generation.bclj	out/store/revision_generation.clj
 beagle	src/store/branch.bclj	out/store/branch.clj
 beagle	src/store/fold.bclj	out/store/fold.clj
 beagle	src/store/import.bclj	out/store/import.clj

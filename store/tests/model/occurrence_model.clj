@@ -4,7 +4,7 @@
 ;;
 ;; INVARIANT: every rule here is restated from docs/architecture.md,
 ;; docs/concurrency-and-writes.md, and docs/guarantees.md — never transcribed
-;; from store:src/store/store.bgl or store:database.clj, so a divergence is evidence and not a
+;; from store:src/store/store.bclj or store:database.clj, so a divergence is evidence and not a
 ;; shared mistake. Depends on `store.types` for Term construction only.
 (ns occurrence-model
   (:require [store.types :as t]))

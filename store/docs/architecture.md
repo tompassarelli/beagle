@@ -195,7 +195,7 @@ merges physical Store spaces or their security boundaries.
 ## Executable contracts
 
 - [`../database.clj`](../database.clj), [`../server.clj`](../server.clj), and [`../writer_authority.clj`](../writer_authority.clj): database lifetime, server entry, and writer authority.
-- `store:src/store/types.bgl`, `store:src/store/store.bgl`, and `store:src/commit_plan.bgl`: recursive values, transactions, liveness, and commit planning.
+- `store:src/store/types.bclj`, `store:src/store/store.bclj`, and `store:src/commit_plan.bclj`: recursive values, transactions, liveness, and commit planning.
 - [`../src/store/rpc.bclj`](../src/store/rpc.bclj): Store RPC records and codec.
 - [`../native/store.h`](../native/store.h),
   [`../native/store_embed.c`](../native/store_embed.c),

@@ -5,7 +5,7 @@
 ;;   bb store_invariant_test.clj
 (require '[clojure.string :as str])
 
-(def src (slurp "src/store/store.bgl"))
+(def src (slurp "src/store/store.bclj"))
 ;; strip each line from its first `;` (beagle comment) — no `;` occurs in code strings here.
 (def code (->> (str/split-lines src)
                (map (fn [l] (let [i (str/index-of l ";")] (if i (subs l 0 i) l))))

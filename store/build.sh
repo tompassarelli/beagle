@@ -4,9 +4,9 @@
 # You do NOT need this to run Beagle Store — out/ is committed and runs on babashka
 # (bin/beagle store). Rebuilding needs Beagle at $BEAGLE_HOME, entered via direnv.
 #
-# Kind `beagle` compiles hosted .bclj; kind `beagle-core` projects a canonical
-# .bgl Native Core module onto the same hosted tree, so the one source that
-# store:bin/beagle-store-native-build materializes natively cannot drift from out/.
+# Every typed production module is hosted `.bclj` and compiles through the
+# ordinary `beagle` route. The separate `.bgl` closure belongs only to the
+# explicitly experimental Native viability path and is not an input here.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="$HERE/out"
@@ -45,15 +45,6 @@ for fragment in "${fragments[@]}"; do
           "$source_path" "$destination_path" >/dev/null
         label="${destination#out/}"
         echo "  built ${label%.clj}"
-        ;;
-      beagle-core)
-        # --target clj is required: beagle-build refuses a bare .bgl so that a
-        # Core module is never projected hosted by accident.
-        BEAGLE_EMIT_SRCLOC=0 direnv exec "$BEAGLE" "$BEAGLE/bin/beagle-build" \
-          --target clj --module-root "store/src=$HERE/src" \
-          "$source_path" "$destination_path" >/dev/null
-        label="${destination#out/}"
-        echo "  built ${label%.clj} (core)"
         ;;
       copy)
         cp "$source_path" "$destination_path"
