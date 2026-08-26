@@ -17286,15 +17286,17 @@
                     checked-accumulator (U core/NativeId Nil) (if builtin-conj
                       (checked-expression-type env state (nth args 1))
                       nil)
-                    conj-accumulator (U core/NativeId Nil) (cond
-                      (and (some? checked-accumulator)
-                        (vector-type? types checked-accumulator))
-                      checked-accumulator
+                    conj-accumulator (U core/NativeId Nil) (if builtin-conj
+                      (cond
+                        (and (some? checked-accumulator)
+                          (vector-type? types checked-accumulator))
+                        checked-accumulator
 
-                      (and (some? expected) (vector-type? types expected))
-                      expected
+                        (and (some? expected) (vector-type? types expected))
+                        expected
 
-                      :else nil)
+                        :else nil)
+                      nil)
                     conj-element (U core/NativeId Nil) (if (some? conj-accumulator)
                       (vector-element-of types conj-accumulator)
                       nil)
