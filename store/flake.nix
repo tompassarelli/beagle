@@ -1,5 +1,5 @@
 {
-  description = "store — fact-engine CLIs and native-first server launcher";
+  description = "store — fact-engine CLIs and JVM/Clojure production server";
 
   inputs = {
     # Pinned to the same nixpkgs rev the host system tracks.
@@ -86,7 +86,9 @@
           # codegraph/, tests/, and src/
           # from there. The CLI + MCP run on babashka against committed out/. The
           # JVM oracle's exact classpath is resolved once during the build from the
-          # pure cache above. Native remains the launcher's default route.
+          # pure cache above. JVM/Clojure is the launcher's default production
+          # route; Native is retained only behind explicit experimental
+          # runtime selection.
           runtimePackages = [
             pkgs.bun
             pkgs.babashka
@@ -266,11 +268,11 @@
           '';
 
           meta = with pkgs.lib; {
-            description = "Beagle Store fact-engine CLI, backup operator, MCP server, primer, and native-first server launcher";
+            description = "Beagle Store fact-engine CLI, backup operator, MCP server, primer, and JVM/Clojure server launcher";
             longDescription = ''
               Self-contained data CLI, native backup operator, MCP server,
-              primer, and native-first server launcher with an explicitly
-              selected packaged JVM oracle.
+              primer, and JVM/Clojure production server launcher. Native is
+              retained as an explicitly selected experimental backend.
               Beagle graph-authoring helpers are retained under libexec and require
               an external BEAGLE_HOME toolchain; they are not public package commands.
             '';

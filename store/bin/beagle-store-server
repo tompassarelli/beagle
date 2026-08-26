@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
-# Beagle Store server — the sole-writer multi-agent service. Launches require a
-# completed Beagle native artifact.
+# Beagle Store server — the sole-writer multi-agent service. JVM/Clojure is the
+# supported production engine. Native remains an explicitly selected
+# experimental backend and is never a default or fallback route.
 #   beagle-store-server [serve] [port] [store-log] [space-id]   (mode defaults to serve)
+#   BEAGLE_STORE_SERVER_RUNTIME=jvm         supported production runtime (default)
+#   BEAGLE_STORE_SERVER_RUNTIME=native      experimental backend (explicit only)
 #   BEAGLE_STORE_NATIVE_ARTIFACT_DIR=<path>  READY native-build artifact directory;
 #                                    a checkout builds its own when unset
+#   BEAGLE_STORE_SERVER_RUNTIME=jvm-oracle  packaged Java/classpath runtime
+#   BEAGLE_STORE_SERVER_RUNTIME=jvm-dev      checkout-only Clojure runtime
 #   BEAGLE_STORE_BIND=0.0.0.0          bind all interfaces (default loopback)
+#   BEAGLE_STORE_SERVER_XMX=4g         JVM fallback max heap; empty disables the flag
+#   BEAGLE_STORE_SERVER_G1_REGION=32m  JVM fallback G1 region size; empty disables it
 #   BEAGLE_STORE_SERVER_LOG=<path>     request log file (default stderr)
 #   BEAGLE_STORE_SERVER_QUIET=1        log only slow requests
 #   BEAGLE_STORE_SLOW_MS=1000          slow-request threshold, always logged
@@ -41,49 +48,144 @@ if [[ ! -e "$log_path" && -z "$space_id" ]]; then
   exit 2
 fi
 
-artifact_dir="${BEAGLE_STORE_NATIVE_ARTIFACT_DIR:-}"
-# A checkout resolves its own artifact through the release gate, which is
-# content-addressed and returns the cached directory when one already matches;
-# a packaged tree carries no gate and must be told the path.
-if [[ -z "$artifact_dir" && -x "$HERE/bin/beagle-store-native-build" &&
-  -r "$HERE/native/core_closure_sources.txt" ]]; then
-  closure_sources=()
-  while IFS= read -r closure_source || [[ -n "$closure_source" ]]; do
-    [[ -n "$closure_source" ]] || continue
-    closure_sources+=("$HERE/$closure_source")
-  done <"$HERE/native/core_closure_sources.txt"
-  artifact_dir="$("$HERE/bin/beagle-store-native-build" --host server \
-    "${closure_sources[@]}")" || exit 2
+runtime="${BEAGLE_STORE_SERVER_RUNTIME:-jvm}"
+if [[ "$runtime" == "jvm" ]]; then
+  # A package carries a sealed Java/classpath closure. A checkout uses the
+  # same server.clj through the local Clojure toolchain. Both are the JVM
+  # production engine; this distinction only selects how its closure is found.
+  if [[ "${BEAGLE_STORE_PACKAGED:-0}" == "1" ||
+    -n "${BEAGLE_STORE_JAVA:-}" || -n "${BEAGLE_STORE_SERVER_CLASSPATH_FILE:-}" ]]; then
+    runtime="jvm-oracle"
+  else
+    runtime="jvm-dev"
+  fi
 fi
-if [[ -z "$artifact_dir" ]]; then
-  echo "beagle-store-server: BEAGLE_STORE_NATIVE_ARTIFACT_DIR is required" >&2
-  exit 2
-fi
-case "$artifact_dir" in
-  /*) ;;
+case "$runtime" in
+  native|native-experimental)
+    artifact_dir="${BEAGLE_STORE_NATIVE_ARTIFACT_DIR:-}"
+    # A checkout resolves its own artifact through the release gate, which is
+    # content-addressed and returns the cached directory when one already
+    # matches; a packaged tree carries no gate and must be told the path.
+    if [[ -z "$artifact_dir" && -x "$HERE/bin/beagle-store-native-build" &&
+      -r "$HERE/native/core_closure_sources.txt" ]]; then
+      closure_sources=()
+      while IFS= read -r closure_source || [[ -n "$closure_source" ]]; do
+        [[ -n "$closure_source" ]] || continue
+        closure_sources+=("$HERE/$closure_source")
+      done <"$HERE/native/core_closure_sources.txt"
+      artifact_dir="$("$HERE/bin/beagle-store-native-build" --host server \
+        "${closure_sources[@]}")" || exit 2
+    fi
+    if [[ -z "$artifact_dir" ]]; then
+      echo "beagle-store-server: BEAGLE_STORE_NATIVE_ARTIFACT_DIR is required for experimental Native runtime" >&2
+      exit 2
+    fi
+    case "$artifact_dir" in
+      /*) ;;
+      *)
+        echo "beagle-store-server: BEAGLE_STORE_NATIVE_ARTIFACT_DIR must be absolute: $artifact_dir" >&2
+        exit 2
+        ;;
+    esac
+    ready="$artifact_dir/READY"
+    native_server="$artifact_dir/bin/beagle-store-server-native"
+    if [[ ! -r "$ready" ]]; then
+      echo "beagle-store-server: native artifact is not ready: missing $ready" >&2
+      exit 2
+    fi
+    ready_line="$(<"$ready")"
+    if [[ ! "$ready_line" =~ ^beagle-store-native-build/v1\ [0-9a-f]{64}$ ]]; then
+      echo "beagle-store-server: native artifact READY marker is invalid: $ready" >&2
+      exit 2
+    fi
+    if [[ ! -x "$native_server" ]]; then
+      echo "beagle-store-server: native artifact executable is unavailable: $native_server" >&2
+      exit 2
+    fi
+    mkdir -p "$(dirname "$log_path")"
+    export BEAGLE_STORE_SERVER_PORT="${1:-7977}"
+    export BEAGLE_STORE_LOG="$log_path"
+    if [[ -n "$space_id" ]]; then export BEAGLE_STORE_SPACE_ID="$space_id"; fi
+    cd "$HERE"
+    exec "$native_server"
+    ;;
+  jvm-oracle|jvm-dev) ;;
   *)
-    echo "beagle-store-server: BEAGLE_STORE_NATIVE_ARTIFACT_DIR must be absolute: $artifact_dir" >&2
+    echo "beagle-store-server: unsupported BEAGLE_STORE_SERVER_RUNTIME '$runtime'; expected jvm, jvm-oracle, jvm-dev, or explicit experimental native" >&2
     exit 2
     ;;
 esac
-ready="$artifact_dir/READY"
-native_server="$artifact_dir/bin/beagle-store-server-native"
-if [[ ! -r "$ready" ]]; then
-  echo "beagle-store-server: native artifact is not ready: missing $ready" >&2
-  exit 2
-fi
-ready_line="$(<"$ready")"
-if [[ ! "$ready_line" =~ ^beagle-store-native-build/v1\ [0-9a-f]{64}$ ]]; then
-  echo "beagle-store-server: native artifact READY marker is invalid: $ready" >&2
-  exit 2
-fi
-if [[ ! -x "$native_server" ]]; then
-  echo "beagle-store-server: native artifact executable is unavailable: $native_server" >&2
-  exit 2
-fi
+
 mkdir -p "$(dirname "$log_path")"
-export BEAGLE_STORE_SERVER_PORT="${1:-7977}"
-export BEAGLE_STORE_LOG="$log_path"
-if [[ -n "$space_id" ]]; then export BEAGLE_STORE_SPACE_ID="$space_id"; fi
+server_args=(server.clj serve "${1:-7977}" "$log_path")
+if [[ -n "$space_id" ]]; then server_args+=("$space_id"); fi
+
+# Heap and G1 region size are bound together: shrinking the heap also shrinks the
+# ergonomic region, which LOWERS the humongous-allocation threshold.
+heap_flags=()
+xmx="${BEAGLE_STORE_SERVER_XMX-4g}"
+if [[ -n "$xmx" ]]; then heap_flags+=("-Xmx$xmx"); fi
+g1_region="${BEAGLE_STORE_SERVER_G1_REGION-32m}"
+if [[ -n "$g1_region" ]]; then
+  heap_flags+=(-XX:+UseG1GC "-XX:G1HeapRegionSize=$g1_region")
+fi
+# A capped heap must die loudly, not thrash: the supervisor restarts it and
+# the dump names the culprit. BEAGLE_STORE_SERVER_NO_OOM_EXIT=1 opts out.
+if [[ -z "${BEAGLE_STORE_SERVER_NO_OOM_EXIT:-}" && -n "$xmx" ]]; then
+  oom_dump="${BEAGLE_STORE_SERVER_LOG:+$BEAGLE_STORE_SERVER_LOG.heap.hprof}"
+  heap_flags+=(-XX:+ExitOnOutOfMemoryError -XX:+HeapDumpOnOutOfMemoryError
+    "-XX:HeapDumpPath=${oom_dump:-/tmp/beagle-store-server-oom.hprof}")
+fi
+
+if [[ "$runtime" == "jvm-oracle" ]]; then
+  if [[ -z "${BEAGLE_STORE_JAVA:-}" || -z "${BEAGLE_STORE_SERVER_CLASSPATH_FILE:-}" ]]; then
+    echo "beagle-store-server: BEAGLE_STORE_SERVER_RUNTIME=jvm-oracle requires BEAGLE_STORE_JAVA and BEAGLE_STORE_SERVER_CLASSPATH_FILE" >&2
+    exit 2
+  fi
+  if [[ ! -x "$BEAGLE_STORE_JAVA" ]]; then
+    echo "beagle-store-server: BEAGLE_STORE_JAVA is not executable: $BEAGLE_STORE_JAVA" >&2
+    exit 2
+  fi
+  if [[ ! -r "$BEAGLE_STORE_SERVER_CLASSPATH_FILE" ]]; then
+    echo "beagle-store-server: classpath file is not readable: $BEAGLE_STORE_SERVER_CLASSPATH_FILE" >&2
+    exit 2
+  fi
+  server_classpath="$(<"$BEAGLE_STORE_SERVER_CLASSPATH_FILE")"
+  if [[ -z "$server_classpath" ]]; then
+    echo "beagle-store-server: packaged classpath is empty" >&2
+    exit 2
+  fi
+  cd "$HERE"
+  jvm_args=("${heap_flags[@]}")
+  if [[ -n "${BEAGLE_STORE_LISTEN_FD:-}" ]]; then
+    jvm_args+=(
+      --add-exports=java.base/sun.nio.ch=ALL-UNNAMED
+      --add-opens=java.base/sun.nio.ch=ALL-UNNAMED
+    )
+  fi
+  exec "$BEAGLE_STORE_JAVA" "${jvm_args[@]}" -cp "$server_classpath" clojure.main \
+    "${server_args[@]}"
+fi
+
+if [[ "${BEAGLE_STORE_PACKAGED:-0}" == "1" ]]; then
+  echo "beagle-store-server: BEAGLE_STORE_SERVER_RUNTIME=jvm-dev is checkout-only" >&2
+  exit 2
+fi
+if [[ -n "${BEAGLE_STORE_JAVA:-}" || -n "${BEAGLE_STORE_SERVER_CLASSPATH_FILE:-}" ]]; then
+  echo "beagle-store-server: BEAGLE_STORE_SERVER_RUNTIME=jvm-dev rejects packaged Java/classpath bindings" >&2
+  exit 2
+fi
+if ! command -v clojure >/dev/null 2>&1; then
+  echo "beagle-store-server: BEAGLE_STORE_SERVER_RUNTIME=jvm-dev requires clojure on PATH" >&2
+  exit 2
+fi
 cd "$HERE"
-exec "$native_server"
+clojure_jvm_args=()
+for flag in "${heap_flags[@]}"; do clojure_jvm_args+=("-J$flag"); done
+if [[ -n "${BEAGLE_STORE_LISTEN_FD:-}" ]]; then
+  clojure_jvm_args+=(
+    -J--add-exports=java.base/sun.nio.ch=ALL-UNNAMED
+    -J--add-opens=java.base/sun.nio.ch=ALL-UNNAMED
+  )
+fi
+exec clojure "${clojure_jvm_args[@]}" -M "${server_args[@]}"
