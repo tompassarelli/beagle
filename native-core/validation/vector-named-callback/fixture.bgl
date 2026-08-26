@@ -3,6 +3,15 @@
 (ns native.vector-named-callback
   (:require [native.vector-named-callback-provider :as provider]))
 
+(defn insert-sorted [values (Vec String) value String] (Vec String)
+  (loop [index Int 0 prefix (Vec String) []]
+    (if (>= index (count values))
+      (conj prefix value)
+      (let [current String (nth values index)]
+        (if (neg? (compare value current))
+          (reduce conj (conj prefix value) (subvec values index))
+          (recur (+ index 1) (conj prefix current)))))))
+
 (defn -main [args (Vec String)] Int
   (let [values (Vec provider/Item) [(provider/->Item 4) (provider/->Item 9)]
         mapped (Vec Int) (mapv provider/item-to-int values)
@@ -14,7 +23,8 @@
         shadowed (Vec String) (reduce provider/conj ["seed"] args)
         left (Set String) (set ["seed"])
         right (Set String) (set args)
-        joined (Set String) (into left right)]
+        joined (Set String) (into left right)
+        sorted (Vec String) (insert-sorted ["alpha" "omega"] "middle")]
     (if (and (= (count mapped) 2)
              (= (nth mapped 1) 9)
              (= (count filtered) 2)
@@ -24,5 +34,9 @@
              (= (count appended) (+ 1 (count args)))
              (= appended shadowed)
              (contains? joined "seed")
-             (= (count joined) (+ 1 (count (set args)))))
+             (= (count joined) (+ 1 (count (set args))))
+             (= (count sorted) 3)
+             (= (nth sorted 0) "alpha")
+             (= (nth sorted 1) "middle")
+             (= (nth sorted 2) "omega"))
       0 1)))
