@@ -5724,6 +5724,38 @@
     [(hash-ref (hash-ref env '#%jvm-imports (hasheq)) name #f) => values]
     [else name]))
 
+;; Present a known FQCN through the bare spelling authored by this module's
+;; import, so ordinary let/return compatibility agrees with the source type.
+(define (surface-class name env)
+  (or (for/first ([(bare fqcn)
+                   (in-hash (hash-ref env '#%jvm-imports (hasheq)))]
+                  #:when (eq? fqcn name))
+        bare)
+      name))
+
+(define (map-jvm-type type class-map)
+  (cond
+    [(type-prim? type) (type-prim (class-map (type-prim-name type)))]
+    [(type-app? type)
+     (type-app (type-app-ctor type)
+               (map (lambda (arg) (map-jvm-type arg class-map))
+                    (type-app-args type)))]
+    [(type-union? type)
+     (type-union
+      (map (lambda (alt) (map-jvm-type alt class-map))
+           (type-union-alts type)))]
+    [else type]))
+
+(define (canon-jvm-type type env)
+  (map-jvm-type type (lambda (name) (canon-class name env))))
+
+(define (surface-jvm-type type env)
+  (map-jvm-type type (lambda (name) (surface-class name env))))
+
+(define (jvm-type-compatible? actual expected env)
+  (type-compatible? (canon-jvm-type actual env)
+                    (canon-jvm-type expected env)))
+
 ;; Drop the leading `.` from a method symbol (.write -> write). CLASS-TABLE keys
 ;; methods by bare name; method-call-method-name carries the dot.
 (define (strip-method-dot sym)
@@ -5774,6 +5806,22 @@
     (if method?
       (type-fn (cdr (type-fn-params ft)) (type-fn-rest-type ft) (type-fn-ret ft))
       ft))
+  (define (check-selected! ft)
+    (define selected (method-args-only ft))
+    (for ([expected (in-list (type-fn-params selected))]
+          [arg (in-list call-args)]
+          [index (in-naturals 1)])
+      (define actual (infer-expr arg env))
+      (unless (jvm-type-compatible? actual expected env)
+        (raise-diag
+         'type-mismatch
+         (format "call to ~a: arg ~a expected ~a, got ~a"
+                 (reference->string fn-name) index
+                 (type->string expected) (type->string actual))
+         (hash-set* (type-mismatch-details expected actual)
+                    'function (reference->string fn-name)
+                    'arg-position index)
+         #:src (or (src-for node) (src-for arg))))))
   (cond
     [(null? by-arity)
      (raise-diag 'arity
@@ -5781,18 +5829,19 @@
                  (hasheq 'function (symbol->string fn-name))
                  #:src (src-for node))]
     [(null? (cdr by-arity))
-     (check-args fn-name (method-args-only (car by-arity)) call-args env node)
-     (type-fn-ret (car by-arity))]
+     (check-selected! (car by-arity))
+     (surface-jvm-type (type-fn-ret (car by-arity)) env)]
     [else
      (define arg-types (map (lambda (a) (infer-expr a env)) call-args))
      (define hit
        (findf (lambda (ft)
-                (andmap type-compatible?
+                (andmap (lambda (actual expected)
+                          (jvm-type-compatible? actual expected env))
                         arg-types
                         (type-fn-params (method-args-only ft))))
               by-arity))
      (if hit
-       (type-fn-ret hit)
+       (surface-jvm-type (type-fn-ret hit) env)
        (raise-diag 'type-mismatch
                    (format "~a ~a/~a: no overload matches the argument types" label cls member)
                    (hasheq 'function (symbol->string fn-name))
@@ -6285,15 +6334,17 @@
      ;; a known class → error; wrong-receiver method → error). Otherwise fall
      ;; back to the flat stdlib method table (receiver Any/record/unknown).
      (define recv-type (infer-expr (method-call-target e) env))
-     (define recv-entry (and (type-prim? recv-type)
-                             (hash-ref CLASS-TABLE (type-prim-name recv-type) #f)))
+     (define recv-class
+       (and (type-prim? recv-type)
+            (canon-class (type-prim-name recv-type) env)))
+     (define recv-entry (and recv-class (hash-ref CLASS-TABLE recv-class #f)))
      (cond
        [recv-entry
         (define mname (strip-method-dot method-sym))
         (define overloads (hash-ref (class-entry-methods recv-entry) mname #f))
         (cond
           [overloads
-           (resolve-jvm-call 'method (type-prim-name recv-type) mname overloads
+           (resolve-jvm-call 'method recv-class mname overloads
                              (cons (method-call-target e) (method-call-args e)) env e)]
           [else
            ;; Method not in this class's set. Fall back to the flat stdlib table
@@ -6314,7 +6365,7 @@
              [else
               (raise-diag 'type-mismatch
                           (format ".~a is not a method of ~a"
-                                  mname (type-prim-name recv-type))
+                                  mname recv-class)
                           (hasheq 'function (symbol->string mname))
                           #:src (src-for e))])])]
        [else
@@ -6356,7 +6407,7 @@
             (if (type-prim? recv-type)
               (type-prim (canon-class (type-prim-name recv-type) env))
               recv-type))
-          (unless (type-compatible? canon-recv-type (type-prim cls))
+          (unless (jvm-type-compatible? canon-recv-type (type-prim cls) env)
             (raise-diag 'type-mismatch
                         (format "~a/~a receiver: expected ~a, got ~a"
                                 cls member cls (type->string recv-type))
@@ -6480,7 +6531,7 @@
        [(and entry (pair? (class-entry-ctors entry)))
         (resolve-jvm-call 'constructor cls 'new (class-entry-ctors entry)
                           (new-form-args e) env e)
-        (type-prim cls)]
+        (type-prim (surface-class cls env))]
        [else
         (for ([a (in-list (new-form-args e))]) (infer-expr a env))
         ANY])]

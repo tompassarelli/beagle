@@ -100,6 +100,7 @@
 (define current-emit-src-table (make-parameter #f))
 (define current-emit-record-fields (make-parameter (hasheq)))
 (define current-emit-record-ns (make-parameter (hasheq)))
+(define current-emit-jvm-import-tags (make-parameter (hasheq)))
 (define current-emit-target (make-parameter 'clj))
 (define current-clj-semantic-contracts (make-parameter #f))
 
@@ -376,6 +377,20 @@ CLJ
       [(defmulti-form? form) (set-add names (defmulti-form-name form))]
       [else names])))
 
+(define (build-jvm-import-tags prog)
+  ;; An authored Java import is the proof that its bare class tag resolves in
+  ;; the emitted ns.  Keep both authored spellings so `(x FileChannel)` and
+  ;; `(x java.nio.channels.FileChannel)` lower to the same safe `^FileChannel`.
+  (for/fold ([tags (hasheq)]) ([fqcn (in-list (program-imports prog))])
+    (define spelling (symbol->string fqcn))
+    (define split (regexp-match-positions #rx"\\.[^.]*$" spelling))
+    (if split
+        (let ([bare (substring spelling (add1 (caar split)))])
+          (hash-set (hash-set tags fqcn bare)
+                    (string->symbol bare)
+                    bare))
+        tags)))
+
 ;; --- structural type-hint lowering ----------------------------------------
 ;;
 ;; Type information lives directly on def-form / defonce-form / defn-form /
@@ -415,11 +430,27 @@ CLJ
         ;; compiler rejects them ("Unable to resolve classname"). A missing
         ;; hint is always safe; a wrong one breaks the load.
         (define nm (type-prim-name t))
-        (if (and (hash-has-key? (current-emit-record-fields) nm)
-                 (not (hash-has-key? (current-emit-record-ns) nm)))
-          (symbol->string nm)
-          #f)])]
-    ;; Parametric / function / union types: no useful hint.
+        (cond
+          [(and (hash-has-key? (current-emit-record-fields) nm)
+                (not (hash-has-key? (current-emit-record-ns) nm)))
+           (symbol->string nm)]
+          [(hash-ref (current-emit-jvm-import-tags) nm #f) => values]
+          [else #f])])]
+    [(and (type-app? t)
+          (eq? (type-app-ctor t) 'Arr)
+          (= 1 (length (type-app-args t)))
+          (type-prim? (car (type-app-args t))))
+     (case (type-prim-name (car (type-app-args t)))
+       [(Bool) "booleans"]
+       [(I8) "bytes"]
+       [(Char) "chars"]
+       [(Float) "doubles"]
+       [(F32) "floats"]
+       [(I32) "ints"]
+       [(Int) "longs"]
+       [(I16) "shorts"]
+       [else #f])]
+    ;; Other parametric / function / union types have no useful hint.
     [else #f]))
 
 ;; Format a binding's tag prefix: `^Tag ` (short form) or empty when no
@@ -433,6 +464,7 @@ CLJ
                  [current-type-table (program-type-table prog)]
                  [current-emit-record-fields (build-record-field-table prog)]
                  [current-emit-record-ns (build-record-ns-table prog)]
+                 [current-emit-jvm-import-tags (build-jvm-import-tags prog)]
                  [current-emit-target (program-target prog)]
                  [current-clj-semantic-contracts
                   (program-semantic-contracts prog)]
@@ -1861,6 +1893,12 @@ CLJ
       (clj-tag-prefix (param-type p))
       ""))
 
+(define (let-binding-tag-prefix binding)
+  (if (and (let-binding? binding)
+           (symbol? (let-binding-name binding)))
+      (clj-tag-prefix (let-binding-type binding))
+      ""))
+
 ;; A constrained callable cannot expose any authored parameter name before all
 ;; parameter predicates have been captured. Otherwise a predicate expression
 ;; that resolved to an outer name could be captured accidentally by a sibling
@@ -1977,7 +2015,10 @@ CLJ
    (apply
     append
     (for/list ([b (in-list bindings)] [index (in-naturals)])
-      (define target (emit-binding-name (let-binding-name b) b))
+      (define target
+        (string-append
+         (let-binding-tag-prefix b)
+         (emit-binding-name (let-binding-name b) b)))
       (define value (emit-expr (let-binding-value b)))
       (define constraint (let-binding-constraint b))
       (cond
@@ -1998,7 +2039,10 @@ CLJ
     [(null? bindings) body-str]
     [else
      (define b (car bindings))
-     (define target (emit-binding-name (let-binding-name b) b))
+     (define target
+       (string-append
+        (let-binding-tag-prefix b)
+        (emit-binding-name (let-binding-name b) b)))
      (define value (emit-expr (let-binding-value b)))
      (define inner
        (emit-with-open-chain (cdr bindings) body-str (add1 index)))

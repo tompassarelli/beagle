@@ -89,6 +89,23 @@
   (check-true (matches? #rx"\\(defn add \\[x y\\]" out))
   (check-true (matches? #rx"\\(\\+ x y\\)"            out)))
 
+(test-case "primitive array params emit array tags without enabling ^long"
+  (define out
+    (compile '(defn arrays [(bytes (Arr I8)) (entries (Arr Int)) (index Int)] Int
+                (aget entries index))))
+  (check-true (matches? #rx"\\[\\^bytes bytes \\^longs entries index\\]" out))
+  (check-false (matches? #rx"\\^long([ ^])" out)))
+
+(test-case "authored Java imports make class hints safe on params and lets"
+  (define out
+    (compile '(import java.io.RandomAccessFile)
+             '(import java.nio.channels.FileChannel)
+             '(defn size [(file RandomAccessFile)] Int
+                (let [channel FileChannel (.getChannel file)]
+                  (.size channel)))))
+  (check-true (matches? #rx"\\[\\^RandomAccessFile file\\]" out))
+  (check-true (matches? #rx"\\[\\^FileChannel channel \\(\\.getChannel file\\)\\]" out)))
+
 ;; Omitted binding types are gone, so a vector mixing a bare binder with a
 ;; grouped declaration is rejected — naming the binder left without a type.
 (test-case "mixed inferred and typed parameters are rejected"

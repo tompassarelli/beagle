@@ -2089,3 +2089,37 @@ BEAGLE
   #rx"Arr String|Arr Int"
   '(defn f [(s javax.net.ssl.SSLServerSocket) (a (Arr Int))] Nil
      (.setEnabledProtocols s a)))
+
+(check-ok "primitive byte arrays preserve element, accessor, and length types"
+  '(defn f [(bytes (Arr I8))] I8
+     (do (aset-byte bytes 0 7)
+         (aget bytes (- (alength bytes) 1)))))
+
+(check-ok "primitive long arrays preserve Int elements through aget/aset-long"
+  '(defn f [(entries (Arr Int))] Int
+     (do (aset-long entries 0 42)
+         (aget entries 0))))
+
+(check-err/rx "primitive array accessor rejects the wrong element type"
+  #rx"expected I8|got String"
+  '(defn f [(bytes (Arr I8))] I8
+     (aset-byte bytes 0 "not-a-byte")))
+
+(check-ok "imported RandomAccessFile and FileChannel receivers canonicalize"
+  `(ns test.jvm-packed (:import ,(br 'java.io 'RandomAccessFile)
+                                ,(br 'java.nio.channels 'FileChannel)))
+  '(defn channel-size [(file RandomAccessFile)] Int
+     (.size (.getChannel file))))
+
+(check-ok "ByteBuffer and mapped FileChannel APIs carry precise receiver types"
+  `(ns test.jvm-buffer (:import ,(br 'java.nio 'ByteBuffer 'MappedByteBuffer)
+                                ,(br 'java.nio.channels 'FileChannel)))
+  '(defn read-long [(channel FileChannel) (mode Any)] Int
+     (let [mapped MappedByteBuffer (.map channel mode 0 4096)
+           view ByteBuffer (.duplicate mapped)]
+       (.getLong view 0))))
+
+(check-err/rx "known ByteBuffer rejects a method from another JVM receiver"
+  #rx"not a method"
+  '(defn f [(buffer java.nio.ByteBuffer)] Nil
+     (.setLength buffer 0)))
