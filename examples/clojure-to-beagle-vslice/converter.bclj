@@ -90,7 +90,80 @@
     (->NamespaceIR (str (second form)))
     (reject!)))
 
+(defn contains-value? [(values Any) (needle Any)] Boolean
+  (if (empty? values)
+    false
+    (if (= (first values) needle)
+      true
+      (contains-value? (rest values) needle))))
+
+(defn unique-values? [values Any] Boolean
+  (if (empty? values)
+    true
+    (and (not (contains-value? (rest values) (first values)))
+         (unique-values? (rest values)))))
+
+(defn valid-arity? [arity Any] Boolean
+  (and (seq? arity)
+       (= 2 (count arity))
+       (vector? (first arity))
+       (every? symbol? (first arity))
+       (unique-values? (first arity))
+       (seq? (second arity))))
+
+(defn infer-param-type [(parameter Any) (body Any)] String
+  ;; Conservative, syntax-directed inference for the M3 surface.  Unknown
+  ;; parameters remain String, which is the useful default for source code
+  ;; conversion and still leaves unsupported calls to the checker.
+  (if (and (seq? body)
+           (= "+" (str (first body)))
+           (contains-value? (rest body) parameter))
+    "Int"
+    "String"))
+
+(declare render-params)
+
+(defn render-arities [arities Any] String
+  (if (empty? arities)
+    ")\n"
+    (let [arity (first arities)
+          params (first arity)
+          body (second arity)
+          typed-params (render-params params body)
+          return-type (if (and (seq? body)
+                               (or (= "+" (str (first body)))
+                                   (= "-" (str (first body)))
+                                   (= "*" (str (first body)))
+                                   (= "/" (str (first body)))))
+                        "Int" "String")]
+      (str "  ([" typed-params "] " return-type "\n    "
+           (pr-str body) ")\n"
+           (render-arities (rest arities))))))
+
+(defn render-params [(params Any) (body Any)] String
+  (if (empty? params)
+    ""
+    (str " " (first params) " " (infer-param-type (first params) body)
+         (render-params (rest params) body))))
+
+(defn canonical-multi! [form Any] FunctionIR
+  (if (and (seq? form) (= "defn" (str (first form)))
+           (symbol? (second form)) (> (count form) 2)
+           (let [arities (rest (rest form))
+                 arity-counts (map (fn [arity Any] Int (count (first arity))) arities)]
+             (and (every? valid-arity? arities)
+                  (unique-values? arity-counts))))
+    (let [name (str (second form))
+          arities (rest (rest form))
+          rendered (str "(defn " name "\n" (render-arities arities))]
+      (->FunctionIR name rendered "" (->BindingIR "" "" "" 0 "Any" (source-span! form))
+                    "multi" "Any" []))
+    (reject!)))
+
 (defn canonical-function! [form Any] FunctionIR
+  (if (and (seq? form) (> (count form) 2)
+           (seq? (nth form 2)))
+    (canonical-multi! form)
   (if (and (seq? form)
            (= 4 (count form))
            (= "defn" (str (first form)))
@@ -171,7 +244,7 @@
                "String"
                constraints))
             (reject!)))))
-    (reject!)))
+    (reject!))))
 
 (defn canonicalize! [forms Any] ModuleIR
   (if (and (vector? forms) (= 2 (count forms)))
@@ -183,18 +256,22 @@
   (let [namespace (moduleir-namespace module)
         function (moduleir-function module)
         binding (functionir-binding function)]
-    (str "#lang beagle/clj\n\n"
-         "(ns " (namespaceir-name namespace) ")\n\n"
-         "(defn " (functionir-name function)
-         " [" (functionir-string-parameter function) " String "
-         (functionir-integer-parameter function) " Int] "
-         (functionir-result-type function) "\n"
-         "  (let [" (bindingir-name binding) " "
-         (bindingir-inferred-type binding) " (" (bindingir-operator binding) " "
-         (bindingir-parameter binding) " " (bindingir-literal binding) ")]\n"
-         "    (" (functionir-result-operator function) " "
-         (functionir-string-parameter function) " "
-         (bindingir-name binding) ")))\n")))
+    (if (= "multi" (functionir-result-operator function))
+      (str "#lang beagle/clj\n\n"
+           "(ns " (namespaceir-name namespace) ")\n\n"
+           (functionir-string-parameter function))
+      (str "#lang beagle/clj\n\n"
+           "(ns " (namespaceir-name namespace) ")\n\n"
+           "(defn " (functionir-name function)
+           " [" (functionir-string-parameter function) " String "
+           (functionir-integer-parameter function) " Int] "
+           (functionir-result-type function) "\n"
+           "  (let [" (bindingir-name binding) " "
+           (bindingir-inferred-type binding) " (" (bindingir-operator binding) " "
+           (bindingir-parameter binding) " " (bindingir-literal binding) ")]\n"
+           "    (" (functionir-result-operator function) " "
+           (functionir-string-parameter function) " "
+           (bindingir-name binding) ")))\n"))))
 
 (defn diagnostic-message [error Any] String
   (if (= true (get (ex-data error) :converter-diagnostic))

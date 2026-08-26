@@ -24,6 +24,35 @@ generated_result="$(ORACLE_PATH="$artifact_dir/generated.clj" "$clojure_bin" -M 
 test "$original_result" = "cdef"
 test "$generated_result" = "$original_result"
 
+multi_source=$' (ns demo.multi)\n\n(defn greet\n  ([name]\n    (str "Hello, " name))\n  ([name title]\n    (str "Hello, " title " " name)))\n'
+printf '%s' "${multi_source# }" >"$artifact_dir/multi.clj"
+for run in first second; do
+  "$clojure_bin" -M "$emitted_converter" "$artifact_dir/multi.clj" \
+    >"$artifact_dir/multi.$run.bclj"
+done
+cmp "$artifact_dir/multi.first.bclj" "$artifact_dir/multi.second.bclj"
+cat >"$artifact_dir/multi.expected.bclj" <<'EOF'
+#lang beagle/clj
+
+(ns demo.multi)
+
+(defn greet
+  ([ name String] String
+    (str "Hello, " name))
+  ([ name String title String] String
+    (str "Hello, " title " " name))
+)
+EOF
+cmp "$artifact_dir/multi.first.bclj" "$artifact_dir/multi.expected.bclj"
+"$repo_dir/bin/beagle-check" "$artifact_dir/multi.first.bclj"
+"$repo_dir/bin/beagle-build" "$artifact_dir/multi.first.bclj" "$artifact_dir/multi.generated.clj"
+multi_original="$(ORACLE_PATH="$artifact_dir/multi.clj" "$clojure_bin" -M -e \
+  '(do (load-file (System/getenv "ORACLE_PATH")) (print [(demo.multi/greet "Ada") (demo.multi/greet "Ada" "Dr.")]))')"
+multi_generated="$(ORACLE_PATH="$artifact_dir/multi.generated.clj" "$clojure_bin" -M -e \
+  '(do (load-file (System/getenv "ORACLE_PATH")) (print [(demo.multi/greet "Ada") (demo.multi/greet "Ada" "Dr.")]))')"
+test "$multi_original" = '["Hello, Ada" "Hello, Dr. Ada"]'
+test "$multi_generated" = "$multi_original"
+
 assert_rejected() {
   local name="$1"
   local source="$2"
@@ -47,6 +76,12 @@ assert_rejected unsupported \
   $'(ns demo.greeter)\n\n(def greeting "Hello")\n' "$repo_dir"
 assert_rejected forged-reader-eof \
   $'(ns demo.offset)\n\n(defn tail-offset [text amount]\n  (let [offset (+ amount 1)]\n    (subs text offset)))\n\n:clojure-to-beagle/reader-eof\n(def trailing "unsupported")\n' \
+  "$repo_dir"
+assert_rejected duplicate-arity \
+  $'(ns demo.duplicate)\n\n(defn greet\n  ([name] (str "Hello, " name))\n  ([other] (str "Hi, " other)))\n' \
+  "$repo_dir"
+assert_rejected malformed-arity \
+  $'(ns demo.malformed)\n\n(defn greet\n  ([name 42] (str "Hello, " name)))\n' \
   "$repo_dir"
 
 printf '%s' \
