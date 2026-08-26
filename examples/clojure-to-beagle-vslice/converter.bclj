@@ -18,9 +18,14 @@
 (defn reject! [] Any
   (throw (ex-info REJECTION {})))
 
+(defn reject-tagged-reader! [_tag Any _value Any] Any
+  (reject!))
+
 (defn safe-read-forms! [source String] Any
   (try
-    (binding [*read-eval* false]
+    (binding [*read-eval* false
+              *data-readers* {}
+              *default-data-reader-fn* reject-tagged-reader!]
       (read-string (str "[" source "\n]")))
     (catch Throwable _
       (reject!))))
