@@ -5,11 +5,14 @@ set -euo pipefail
 
 package_root="${1:?usage: package_server_smoke.sh /nix/store/...-store}"
 bb="${BEAGLE_STORE_SMOKE_BB:?BEAGLE_STORE_SMOKE_BB is required}"
+bash_bin="${BEAGLE_STORE_SMOKE_BASH:?BEAGLE_STORE_SMOKE_BASH is required}"
 env_bin="${BEAGLE_STORE_SMOKE_ENV:?BEAGLE_STORE_SMOKE_ENV is required}"
 grep_bin="${BEAGLE_STORE_SMOKE_GREP:?BEAGLE_STORE_SMOKE_GREP is required}"
 readlink_bin="${BEAGLE_STORE_SMOKE_READLINK:?BEAGLE_STORE_SMOKE_READLINK is required}"
 tr_bin="${BEAGLE_STORE_SMOKE_TR:?BEAGLE_STORE_SMOKE_TR is required}"
 require_proc="${BEAGLE_STORE_SMOKE_REQUIRE_PROC:-0}"
+beagle_revision="${BEAGLE_STORE_SMOKE_REVISION:?BEAGLE_STORE_SMOKE_REVISION is required}"
+source_tree="${BEAGLE_STORE_SMOKE_SOURCE_TREE:?BEAGLE_STORE_SMOKE_SOURCE_TREE is required}"
 
 case "$package_root" in /nix/store/*) ;; *)
   echo "store package smoke: refusing non-store package root: $package_root" >&2
@@ -25,7 +28,7 @@ required=(
   "$runtime/writer_authority.clj" "$runtime/rotations.clj"
   "$runtime/out/store/rpc.clj" "$runtime/out/store/rt.clj"
   "$runtime/out/store/types.clj" "$runtime/tests/store_mcp.clj"
-  "$runtime/server.classpath"
+  "$runtime/server.classpath" "$runtime/runtime.manifest"
 )
 for path in "${required[@]}"; do
   [[ -e "$path" ]] || { echo "store package smoke: missing runtime asset: $path" >&2; exit 1; }
@@ -56,7 +59,13 @@ mkdir -p "$home" "$work/cwd"
 log="$work/history.storelog"
 space="package-jvm-rpc"
 server_output="$work/server.out"
+expected_manifest="$work/runtime.manifest.expected"
+notify="$work/systemd-notify"
+notify_log="$work/notify.log"
+notify_hold="$work/notify.hold"
+notify_stopping="$work/notify.stopping"
 pid=
+blocker_pid=
 cleanup() {
   if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
     kill "$pid" 2>/dev/null || true
@@ -64,9 +73,43 @@ cleanup() {
     kill -KILL "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
   fi
+  if [[ -n "$blocker_pid" ]] && kill -0 "$blocker_pid" 2>/dev/null; then
+    kill "$blocker_pid" 2>/dev/null || true
+    wait "$blocker_pid" 2>/dev/null || true
+  fi
   rm -rf "${work:?}"
 }
 trap cleanup EXIT INT TERM
+
+printf '%s\n' \
+  'format=beagle-store-runtime/v1' \
+  "beagle_revision=$beagle_revision" \
+  "source_tree=$source_tree" \
+  'engine=jvm-clojure' \
+  'native_backend=experimental-non-production' \
+  'heap_policy=fixed-xmx' \
+  'heap_max_bytes=2147483648' \
+  'protocol=store-rpc' \
+  'protocol_version=2.0' \
+  'readiness=restore+listen+usable-rpc' \
+  'stopping=before-drain' \
+  >"$expected_manifest"
+cmp -s "$expected_manifest" "$runtime/runtime.manifest" || {
+  echo "store package smoke: runtime manifest is not canonical or source-exact" >&2
+  diff -u "$expected_manifest" "$runtime/runtime.manifest" >&2 || true
+  exit 1
+}
+
+printf '#!%s\n' "$bash_bin" >"$notify"
+cat >>"$notify" <<'NOTIFY'
+set -euo pipefail
+printf '%s\n' "$*" >>"${BEAGLE_STORE_NOTIFY_LOG:?}"
+if [[ " $* " == *" STOPPING=1 "* && -e "${BEAGLE_STORE_NOTIFY_HOLD:?}" ]]; then
+  : >"${BEAGLE_STORE_NOTIFY_STOPPING:?}"
+  while [[ -e "$BEAGLE_STORE_NOTIFY_HOLD" ]]; do sleep 0.01; done
+fi
+NOTIFY
+chmod +x "$notify"
 
 free_port() { "$bb" -e '(with-open [s (java.net.ServerSocket. 0)] (println (.getLocalPort s)))'; }
 port="$(free_port)"
@@ -91,6 +134,11 @@ start_server() {
   (
     cd "$work/cwd"
     exec "$env_bin" -i HOME="$home" XDG_CACHE_HOME="$home/.cache" \
+      NOTIFY_SOCKET="$work/notify.sock" BEAGLE_STORE_SD_NOTIFY="$notify" \
+      BEAGLE_STORE_NOTIFY_LOG="$notify_log" \
+      BEAGLE_STORE_NOTIFY_HOLD="$notify_hold" \
+      BEAGLE_STORE_NOTIFY_STOPPING="$notify_stopping" \
+      BEAGLE_STORE_SERVER_XMX=7g \
       BEAGLE_STORE_BIND=127.0.0.1 BEAGLE_STORE_SPACE_ID="$space" \
       "$package_root/bin/beagle-store-server" serve "$port" "$log"
   ) >"$server_output" 2>&1 &
@@ -139,10 +187,50 @@ stop_server() {
   pid=
 }
 
+stop_server_with_drain_probe() {
+  local expected_version="$1" drain_version= stopping_seen=0
+  : >"$notify_hold"
+  rm -f "$notify_stopping"
+  kill "$pid"
+  for _ in $(seq 1 200); do
+    if [[ -e "$notify_stopping" ]]; then stopping_seen=1; break; fi
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.01
+  done
+  [[ "$stopping_seen" == "1" ]] || {
+    echo "store package smoke: STOPPING notification was not observed" >&2
+    rm -f "$notify_hold"
+    exit 1
+  }
+  drain_version="$("$bb" -cp "$runtime/out" -e "$native_probe" "$port" "$space")"
+  [[ "$drain_version" == "$expected_version" ]] || {
+    echo "store package smoke: RPC was not usable before STOPPING released drain" >&2
+    rm -f "$notify_hold"
+    exit 1
+  }
+  rm -f "$notify_hold"
+  for _ in $(seq 1 100); do kill -0 "$pid" 2>/dev/null || break; sleep 0.05; done
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "store package smoke: server ignored SIGTERM after STOPPING" >&2; exit 1
+  fi
+  wait "$pid" 2>/dev/null || true
+  pid=
+}
+
 start_server
 initial_version="$(wait_ready)"
 [[ "$initial_version" == "0" ]] || {
   echo "store package smoke: fresh STORELOG did not start at version 0: $initial_version" >&2; exit 1; }
+for _ in $(seq 1 100); do
+  "$grep_bin" -Fxq \
+    'READY=1 STATUS=Beagle Store restored, listening, and RPC-usable' \
+    "$notify_log" 2>/dev/null && break
+  sleep 0.01
+done
+"$grep_bin" -Fxq \
+  'READY=1 STATUS=Beagle Store restored, listening, and RPC-usable' \
+  "$notify_log" || {
+    echo "store package smoke: READY notification is absent" >&2; exit 1; }
 
 if [[ "$require_proc" == "1" ]]; then
   cmdline="$("$tr_bin" '\0' '\n' <"/proc/$pid/cmdline")"
@@ -152,6 +240,15 @@ if [[ "$require_proc" == "1" ]]; then
     echo "store package smoke: server cmdline lacks package root" >&2; exit 1; }
   [[ "$("$readlink_bin" "/proc/$pid/cwd")" == "$runtime" ]] || {
     echo "store package smoke: server cwd is not packaged runtime" >&2; exit 1; }
+  [[ "$("$grep_bin" -Fxc -- '-Xmx2g' <<<"$cmdline")" == "1" ]] || {
+    echo "store package smoke: packaged JVM does not carry exactly one fixed -Xmx2g" >&2
+    printf '%s\n' "$cmdline" >&2
+    exit 1
+  }
+  ! "$grep_bin" -Fq -- '-Xmx7g' <<<"$cmdline" || {
+    echo "store package smoke: legacy heap override changed the production heap" >&2
+    exit 1
+  }
 fi
 
 cli_env=("$env_bin" -i BEAGLE_STORE_SERVER_PORT="$port" BEAGLE_STORE_SPACE_ID="$space")
@@ -220,7 +317,7 @@ space_receipt="$("$bb" -cp "$runtime/out" -e "$wrong_space_probe" "$port")"
 version_before_restart="$(wait_ready)"
 [[ "$version_before_restart" =~ ^[1-9][0-9]*$ ]] || {
   echo "store package smoke: writes did not advance logical version: $version_before_restart" >&2; exit 1; }
-stop_server
+stop_server_with_drain_probe "$version_before_restart"
 start_server
 restart_version="$(wait_ready)"
 [[ "$restart_version" == "$version_before_restart" ]] || {
@@ -229,6 +326,17 @@ restart_show="$(run_private_cli show package)"
 "$grep_bin" -Fq "kind  smoke" <<<"$restart_show" || {
   echo "store package smoke: restart lost MCP write" >&2; exit 1; }
 stop_server
+
+ready_count="$("$grep_bin" -Fxc \
+  'READY=1 STATUS=Beagle Store restored, listening, and RPC-usable' \
+  "$notify_log")"
+stopping_count="$("$grep_bin" -Fxc \
+  'STOPPING=1 STATUS=Beagle Store draining' "$notify_log")"
+[[ "$ready_count" == "2" && "$stopping_count" == "2" ]] || {
+  echo "store package smoke: notification sequence is not paired exactly" >&2
+  sed -n '1,20p' "$notify_log" >&2
+  exit 1
+}
 
 # Packaged default state is writable history.storelog and still needs an explicit
 # database identity.
@@ -247,5 +355,38 @@ wait_ready >/dev/null
   echo "store package smoke: default state did not create history.storelog" >&2; exit 1; }
 stop_server
 
+# A restored database whose listener cannot bind must never claim readiness.
+bind_port="$(free_port)"
+blocker_ready="$work/blocker.ready"
+"$bb" -e '
+(let [[port ready] *command-line-args*]
+  (with-open [server (java.net.ServerSocket. (parse-long port))]
+    (spit ready "ready\n")
+    (Thread/sleep 30000)))' "$bind_port" "$blocker_ready" &
+blocker_pid=$!
+for _ in $(seq 1 100); do [[ -e "$blocker_ready" ]] && break; sleep 0.01; done
+[[ -e "$blocker_ready" ]] || {
+  echo "store package smoke: bind-failure blocker did not start" >&2; exit 1; }
+bind_notify_log="$work/bind-notify.log"
+if "$env_bin" -i HOME="$home" NOTIFY_SOCKET="$work/bind-notify.sock" \
+    BEAGLE_STORE_SD_NOTIFY="$notify" BEAGLE_STORE_NOTIFY_LOG="$bind_notify_log" \
+    BEAGLE_STORE_NOTIFY_HOLD="$notify_hold" \
+    BEAGLE_STORE_NOTIFY_STOPPING="$notify_stopping" \
+    BEAGLE_STORE_BIND=127.0.0.1 BEAGLE_STORE_SPACE_ID=bind-failure \
+    "$package_root/bin/beagle-store-server" serve "$bind_port" \
+    "$work/bind-failure.storelog" >"$work/bind-failure.out" 2>&1; then
+  echo "store package smoke: occupied listener unexpectedly started" >&2
+  exit 1
+fi
+if [[ -e "$bind_notify_log" ]] && "$grep_bin" -Fq 'READY=1' "$bind_notify_log"; then
+  echo "store package smoke: bind failure emitted READY" >&2
+  sed -n '1,20p' "$bind_notify_log" >&2
+  exit 1
+fi
+kill "$blocker_pid"
+wait "$blocker_pid" 2>/dev/null || true
+blocker_pid=
+
 echo "store package smoke: JVM version $restart_version"
 echo "store package smoke: exact-epoch $lease_receipt"
+echo "store package smoke: operational manifest, fixed heap, READY/STOPPING PASS"

@@ -77,6 +77,14 @@
       mkStore = pkgs: cljpkgs:
         let
           beaglePkg = beagle.packages.${pkgs.stdenv.hostPlatform.system}.default;
+          beagleRevision = self.rev or (throw "store package requires a Git revision");
+          # Nix exposes the complete canonical source NAR but not Git's tree
+          # object. Hashing that immutable identity yields a deterministic,
+          # timestamp-free 40-hex source-tree identity, including dirty inputs.
+          sourceTree = builtins.hashString "sha1" self.sourceInfo.narHash;
+          sdNotify = if pkgs.stdenv.hostPlatform.isLinux
+            then "${pkgs.systemd}/bin/systemd-notify"
+            else "systemd-notify";
           serverDeps = cljpkgs.mk-deps-cache {
             lockfile = ./deps-lock.json;
           };
@@ -149,6 +157,20 @@
             cp -r out bin src database.clj server.clj writer_authority.clj fri.clj \
               rotations.clj deps.edn \
               $out/libexec/store/
+            printf '%s\n' \
+              'format=beagle-store-runtime/v1' \
+              'beagle_revision=${beagleRevision}' \
+              'source_tree=${sourceTree}' \
+              'engine=jvm-clojure' \
+              'native_backend=experimental-non-production' \
+              'heap_policy=fixed-xmx' \
+              'heap_max_bytes=2147483648' \
+              'protocol=store-rpc' \
+              'protocol_version=2.0' \
+              'readiness=restore+listen+usable-rpc' \
+              'stopping=before-drain' \
+              >$out/libexec/store/runtime.manifest
+            chmod 0444 $out/libexec/store/runtime.manifest
             cp tests/store_mcp.clj $out/libexec/store/tests/
             cp clients/bun/backup.mjs clients/bun/store-rpc.mjs \
               clients/bun/store-rpc-core.mjs \
@@ -246,7 +268,8 @@
                 --set BEAGLE_STORE_RESOLVE "$out/libexec/store/out/resolve.clj" \
                 --set BEAGLE_STORE_PACKAGED "1" \
                 --set BEAGLE_STORE_JAVA "${pkgs.jdk}/bin/java" \
-                --set BEAGLE_STORE_SERVER_CLASSPATH_FILE "$out/libexec/store/server.classpath"
+                --set BEAGLE_STORE_SERVER_CLASSPATH_FILE "$out/libexec/store/server.classpath" \
+                --set-default BEAGLE_STORE_SD_NOTIFY "${sdNotify}"
             done
 
             runHook postInstall
@@ -257,10 +280,13 @@
             runHook preInstallCheck
 
             BEAGLE_STORE_SMOKE_BB="${pkgs.babashka}/bin/bb" \
+            BEAGLE_STORE_SMOKE_BASH="${pkgs.bash}/bin/bash" \
             BEAGLE_STORE_SMOKE_ENV="${pkgs.coreutils}/bin/env" \
             BEAGLE_STORE_SMOKE_GREP="${pkgs.gnugrep}/bin/grep" \
             BEAGLE_STORE_SMOKE_READLINK="${pkgs.coreutils}/bin/readlink" \
             BEAGLE_STORE_SMOKE_TR="${pkgs.coreutils}/bin/tr" \
+            BEAGLE_STORE_SMOKE_REVISION="${beagleRevision}" \
+            BEAGLE_STORE_SMOKE_SOURCE_TREE="${sourceTree}" \
             BEAGLE_STORE_SMOKE_REQUIRE_PROC="${if pkgs.stdenv.hostPlatform.isLinux then "1" else "0"}" \
               ${pkgs.bash}/bin/bash ${./tests/package_server_smoke.sh} "$out"
 
@@ -286,6 +312,7 @@
           passthru = {
             runtimeRoot = "${finalAttrs.finalPackage}/libexec/store";
             babashkaClasspath = "${finalAttrs.finalPackage}/libexec/store/out";
+            runtimeManifest = "${finalAttrs.finalPackage}/libexec/store/runtime.manifest";
           };
         });
 
@@ -596,8 +623,10 @@
           package-contract = pkgs.runCommand "store-package-contract" {} ''
             test "${store.runtimeRoot}" = "${store}/libexec/store"
             test "${store.babashkaClasspath}" = "${store}/libexec/store/out"
+            test "${store.runtimeManifest}" = "${store}/libexec/store/runtime.manifest"
             test -d "${store.runtimeRoot}"
             test -d "${store.babashkaClasspath}"
+            test -f "${store.runtimeManifest}"
             test "${graphEditRuntime.coreManifest}" = \
               "${graphEditRuntime}/share/store/graph-edit-runtime-core-v1.json"
             test -x "${graphEditRuntime}/bin/beagle-store-graph-edit-runtime"

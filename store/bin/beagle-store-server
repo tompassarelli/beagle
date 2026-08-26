@@ -10,7 +10,6 @@
 #   BEAGLE_STORE_SERVER_RUNTIME=jvm-oracle  packaged Java/classpath runtime
 #   BEAGLE_STORE_SERVER_RUNTIME=jvm-dev      checkout-only Clojure runtime
 #   BEAGLE_STORE_BIND=0.0.0.0          bind all interfaces (default loopback)
-#   BEAGLE_STORE_SERVER_XMX=4g         JVM fallback max heap; empty disables the flag
 #   BEAGLE_STORE_SERVER_G1_REGION=32m  JVM fallback G1 region size; empty disables it
 #   BEAGLE_STORE_SERVER_LOG=<path>     request log file (default stderr)
 #   BEAGLE_STORE_SERVER_QUIET=1        log only slow requests
@@ -120,11 +119,11 @@ mkdir -p "$(dirname "$log_path")"
 server_args=(server.clj serve "${1:-7977}" "$log_path")
 if [[ -n "$space_id" ]]; then server_args+=("$space_id"); fi
 
-# Heap and G1 region size are bound together: shrinking the heap also shrinks the
-# ergonomic region, which LOWERS the humongous-allocation threshold.
-heap_flags=()
-xmx="${BEAGLE_STORE_SERVER_XMX-4g}"
-if [[ -n "$xmx" ]]; then heap_flags+=("-Xmx$xmx"); fi
+# The production contract fixes the JVM heap below the service's 3 GiB
+# MemoryMax. Keeping this flag immutable makes the package manifest, live JVM,
+# and service resource envelope describe one runtime.
+xmx="2g"
+heap_flags=("-Xmx$xmx")
 g1_region="${BEAGLE_STORE_SERVER_G1_REGION-32m}"
 if [[ -n "$g1_region" ]]; then
   heap_flags+=(-XX:+UseG1GC "-XX:G1HeapRegionSize=$g1_region")

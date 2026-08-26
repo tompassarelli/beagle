@@ -31,6 +31,8 @@
 (def writer-authority (atom nil))
 (def listener (atom nil))
 (def stopping? (atom false))
+(def ^:private lifecycle-notification-state (atom :idle))
+(def ^:private shutdown-monitor (Object.))
 (def active-requests (atom {}))
 (def connection-executor (atom nil))
 (def connection-sockets (atom #{}))
@@ -153,6 +155,42 @@
       (try (.close writer) (catch Throwable _ nil)))
     (reset! request-log-writer nil)))
 
+(defn- service-manager-notify! [state status]
+  (when (env-string "NOTIFY_SOCKET")
+    (let [command (or (env-string "BEAGLE_STORE_SD_NOTIFY") "systemd-notify")
+          process (-> (ProcessBuilder.
+                       (into-array String [command state (str "STATUS=" status)]))
+                      (.inheritIO)
+                      (.start))
+          exit (.waitFor process)]
+      (when-not (zero? exit)
+        (throw
+         (ex-info "systemd notification failed"
+                  {:type :service-manager-notification-failed
+                   :state state :exit exit :command command}))))))
+
+(defn- notify-ready! []
+  (locking lifecycle-notification-state
+    (when-not (= :starting @lifecycle-notification-state)
+      (throw
+       (ex-info "server readiness notification is out of sequence"
+                {:type :service-manager-notification-order
+                 :state @lifecycle-notification-state})))
+    (service-manager-notify!
+     "READY=1" "Beagle Store restored, listening, and RPC-usable")
+    (reset! lifecycle-notification-state :ready)))
+
+(defn- notify-stopping! []
+  (locking lifecycle-notification-state
+    (when (contains? #{:starting :ready} @lifecycle-notification-state)
+      (try
+        (service-manager-notify! "STOPPING=1" "Beagle Store draining")
+        (catch Throwable error
+          (.println System/err
+                    (str "beagle-store-server: STOPPING notification failed: "
+                         (.getMessage error)))))
+      (reset! lifecycle-notification-state :stopping))))
+
 (defn record-request!
   "Account one served request and log it. `elapsed-ns` covers server-side work
    only — decode to response-written — so client send time never reads as
@@ -255,26 +293,30 @@
   (drop-query-caches!))
 
 (defn shutdown! []
-  (reset! stopping? true)
-  (when-let [^ServerSocket server @listener]
-    (try (.close server) (catch Throwable _ nil)))
-  (doseq [cancellation (vals @active-requests)]
-    (reset! (:cancelled cancellation) true)
-    (when-let [control @(:query-control cancellation)]
-      (datalog/cancel-query! control :server-shutdown)))
-  (stop-connection-admission!)
-  (stop-commit-sequencer!)
-  (reset! active-requests {})
-  (drop-query-caches!)
-  (reset! query-archive-manifest [])
-  (reset! query-history-stores {})
-  (reset! published-snapshot nil)
-  (writer-authority/release! @writer-authority)
-  (reset! writer-authority nil)
-  (reset! active-store nil)
-  (reset! server-role nil)
-  (reset! listener nil)
-  (close-request-log!)
+  (locking shutdown-monitor
+    ;; STOPPING is synchronous and precedes the first admission/drain mutation.
+    (notify-stopping!)
+    (reset! stopping? true)
+    (when-let [^ServerSocket server @listener]
+      (try (.close server) (catch Throwable _ nil)))
+    (doseq [cancellation (vals @active-requests)]
+      (reset! (:cancelled cancellation) true)
+      (when-let [control @(:query-control cancellation)]
+        (datalog/cancel-query! control :server-shutdown)))
+    (stop-connection-admission!)
+    (stop-commit-sequencer!)
+    (reset! active-requests {})
+    (drop-query-caches!)
+    (reset! query-archive-manifest [])
+    (reset! query-history-stores {})
+    (reset! published-snapshot nil)
+    (writer-authority/release! @writer-authority)
+    (reset! writer-authority nil)
+    (reset! active-store nil)
+    (reset! server-role nil)
+    (reset! listener nil)
+    (close-request-log!)
+    (reset! lifecycle-notification-state :idle))
   nil)
 
 (defn boot!
@@ -2397,41 +2439,90 @@
             (record-request! nil (- (System/nanoTime) opened) :error code nil))
           (throw error))))))
 
+(defn- readiness-probe-host [^java.net.InetAddress address]
+  (if (.isAnyLocalAddress address)
+    (if (= 16 (alength (.getAddress address))) "::1" "127.0.0.1")
+    (.getHostAddress address)))
+
+(defn- prove-rpc-ready! [^ServerSocket server]
+  (let [request-id Long/MIN_VALUE
+        space (database/database-space @active-store)
+        request (rpc/rpc-request! space :rpc/version nil nil nil rpc/rpc-unit)
+        request-packet (rpc/store-rpc-request-packet request-id request)
+        host (readiness-probe-host (.getInetAddress server))
+        port (.getLocalPort server)]
+    (with-open [client (Socket.)]
+      (.connect client (java.net.InetSocketAddress. host port) 5000)
+      (.setSoTimeout client 5000)
+      (let [accepted (.accept server)]
+        (admit-connection! accepted))
+      (let [output (.getOutputStream client)]
+        (.write output (rpc/store-rpc-encode-packet-v2! request-packet))
+        (.flush output))
+      (let [packet (read-rpc-packet! (.getInputStream client))
+            response (some-> packet t/storerpcpacketv2-response)]
+        (when-not
+         (and packet
+              (= :response (t/storerpcpacketv2-kind packet))
+              (= request-id (t/storerpcpacketv2-request-id packet))
+              response
+              (= space (t/rpcresponse-space response))
+              (= :rpc/version (t/rpcresponse-op response))
+              (nil? (t/rpcresponse-error response)))
+          (throw
+           (ex-info "Store RPC readiness probe failed"
+                    {:type :rpc-readiness-probe-failed
+                     :host host :port port})))))))
+
 (defn serve!
   "Serve Store RPC v2 requests. The default bind is loopback; an authenticated
    private gateway may set BEAGLE_STORE_BIND explicitly. The active process holds
    writer authority for the full listener lifetime; a standby refreshes reads."
   [port path expected-space role]
   (boot! path expected-space role)
+  (reset! lifecycle-notification-state :starting)
   (let [bind-host (or (not-empty (System/getenv "BEAGLE_STORE_BIND")) "127.0.0.1")
-        server (ServerSocket. (int port) 128
-                              (java.net.InetAddress/getByName bind-host))
-        _ (start-connection-admission!)]
-    (reset! listener server)
-    (println (str "Beagle Store server listening on " bind-host ":" port
-                  " space=" (database/database-space @active-store)
-                  " role=" (name @server-role)))
-    (flush)
-    (emit-log-line!
-     (str "store-rpc ts=" (Instant/now) " op=server/listen"
-          " bind=" bind-host ":" port
-          " space=" (database/database-space @active-store)
-          " role=" (name @server-role)
-          " slow-ms=" slow-request-ms
-          " quiet=" (if request-log-quiet? 1 0)
-          " log=" (or request-log-path "stderr")
-          " connection-workers=" connection-worker-limit
-          " connection-queue=" connection-pending-limit
-          " connection-read-timeout-ms=" connection-first-packet-timeout-ms
-          " max-heap-mb=" (quot (.maxMemory (Runtime/getRuntime)) 1048576)))
+        runtime (Runtime/getRuntime)
+        shutdown-hook (doto (Thread. shutdown!)
+                        (.setName "beagle-store-shutdown"))]
+    (.addShutdownHook runtime shutdown-hook)
     (try
-      (while (not @stopping?)
+      (let [server (ServerSocket. (int port) 128
+                                  (java.net.InetAddress/getByName bind-host))
+            actual-port (.getLocalPort server)]
+        (reset! listener server)
+        (start-connection-admission!)
+        ;; The probe traverses the bound TCP listener, packet codec, admission
+        ;; executor, and restored database before Type=notify may activate.
+        (prove-rpc-ready! server)
+        (notify-ready!)
+        (println (str "Beagle Store server listening on " bind-host ":" actual-port
+                      " space=" (database/database-space @active-store)
+                      " role=" (name @server-role)))
+        (flush)
+        (emit-log-line!
+         (str "store-rpc ts=" (Instant/now) " op=server/listen"
+              " bind=" bind-host ":" actual-port
+              " space=" (database/database-space @active-store)
+              " role=" (name @server-role)
+              " slow-ms=" slow-request-ms
+              " quiet=" (if request-log-quiet? 1 0)
+              " log=" (or request-log-path "stderr")
+              " connection-workers=" connection-worker-limit
+              " connection-queue=" connection-pending-limit
+              " connection-read-timeout-ms=" connection-first-packet-timeout-ms
+              " max-heap-mb=" (quot (.maxMemory runtime) 1048576)))
+        (while (not @stopping?)
+          (try
+            (let [socket (.accept server)]
+              (admit-connection! socket))
+            (catch java.net.SocketException error
+              (when-not @stopping? (throw error))))))
+      (finally
+        (shutdown!)
         (try
-          (let [socket (.accept server)]
-            (admit-connection! socket))
-          (catch java.net.SocketException error
-            (when-not @stopping? (throw error)))))
-      (finally (shutdown!)))))
+          (.removeShutdownHook runtime shutdown-hook)
+          (catch IllegalStateException _ nil))))))
 
 (defn -main [& arguments]
   (let [[command & command-arguments] arguments]
