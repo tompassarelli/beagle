@@ -127,15 +127,17 @@
 (defn compiler-fact-operations
   [root (Atom t/TermStore)
    facts (Vec fact-profile/CompileQueryFact)] (Vec t/CommitOperation)
-  (reduce
-   (fn
-     [operations (Vec t/CommitOperation)
-      fact fact-profile/CompileQueryFact] (Vec t/CommitOperation)
-     (let [proposition (compiler-fact-triple fact)]
-       (if (contains? (term-store/live-propositions root) proposition)
-         operations
-         (conj operations (t/->CommitOperation t/assert-action proposition)))))
-   [] facts))
+  (let [live-propositions (Set t/Triple)
+        (set (term-store/live-propositions root))]
+    (reduce
+     (fn
+       [operations (Vec t/CommitOperation)
+        fact fact-profile/CompileQueryFact] (Vec t/CommitOperation)
+       (let [proposition (compiler-fact-triple fact)]
+         (if (contains? live-propositions proposition)
+           operations
+           (conj operations (t/->CommitOperation t/assert-action proposition)))))
+     [] facts)))
 
 (defn compiler-commit!
   [prior StoreResult
