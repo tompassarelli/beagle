@@ -25,7 +25,7 @@ only to the revision checked; never treat it as evergreen.
   store under either offered license.
 
 - 2026-08-26 — Beagle packaged-input revision
-  `3dc8f7004ace2422b8775dfdbf6f3356e977b6a0` is MIT OR Apache-2.0. It is
+  `4ff539675c1e29eafdfe3a49efdfb8631297a577` is MIT OR Apache-2.0. It is
   the current `beagle-pin.txt` native compiler and `flake.nix` graph-authoring
   runtime pin and is license-compatible with store; update this dated record
   when the package pin advances.
