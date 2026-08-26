@@ -20,7 +20,8 @@
            [java.time Instant]
            [java.util.concurrent ArrayBlockingQueue LinkedBlockingQueue
             ThreadFactory ThreadPoolExecutor TimeUnit]
-           [java.util.concurrent.atomic AtomicLong]))
+           [java.util.concurrent.atomic AtomicLong]
+           [java.util.zip CRC32]))
 
 (load-file "database.clj")
 (load-file "writer_authority.clj")
@@ -192,14 +193,14 @@
 (def native-rpc-operations
   #{:rpc/version :rpc/status :rpc/assert :rpc/retract :rpc/batch :rpc/scan
     :rpc/query :rpc/occurrences :rpc/lease-acquire :rpc/lease-renew
-    :rpc/lease-release :rpc/lease-check :rpc/validate})
+    :rpc/lease-release :rpc/lease-check :rpc/validate :rpc/checkpoint})
 
 (def paged-rpc-operations #{:rpc/query :rpc/scan :rpc/occurrences})
 
 (def read-only-rpc-operations
   (apply disj native-rpc-operations
          [:rpc/assert :rpc/retract :rpc/batch :rpc/lease-acquire
-          :rpc/lease-renew :rpc/lease-release]))
+          :rpc/lease-renew :rpc/lease-release :rpc/checkpoint]))
 
 (defn- server-fail! [code message data]
   (throw (ex-info message (assoc data :type code :store/code code :code code))))
@@ -1866,6 +1867,50 @@
                  (if (keyword? code) code :rpc/validation-failed)
                  (or (.getMessage error) "validation failed"))])))))
 
+(defn- checkpoint-image-path [db]
+  (str (:log db) ".snapshot"))
+
+(defn- write-checkpoint-image!
+  "Write one exact JVM snapshot at the commit-sequencer durability barrier.
+   The STORELOG remains authoritative; FRI binds the image to its canonical
+   prefix and atomically installs the derived file beside it."
+  [db snapshot]
+  (let [version (:version snapshot)
+        {:keys [valid-bytes fingerprint space-id]}
+        (database/triple-log-prefix-source! (:log db) version)
+        binding (fri/source-binding space-id fingerprint valid-bytes)
+        path (checkpoint-image-path db)
+        _ (fri/write-fri!
+           (term-store/dump-term-store (atom (:root snapshot)))
+           path binding)
+        ^bytes bytes (java.nio.file.Files/readAllBytes
+                      (.toPath (io/file path)))
+        crc (doto (CRC32.) (.update bytes))]
+    {:version version
+     :watermark valid-bytes
+     :created-at (System/currentTimeMillis)
+     :crc (.getValue crc)
+     :bytes (alength bytes)}))
+
+(defn- checkpoint-payload! [request snapshot]
+  (require-unit! (t/rpc-request-payload-value request))
+  (try
+    (let [{:keys [version watermark created-at crc bytes]}
+          (write-checkpoint-image! @active-store snapshot)]
+      (rpc/rpc-record! :rpc/checkpoint
+                       [version watermark created-at crc bytes]))
+    (catch Throwable error
+      (server-fail! :rpc/checkpoint-unavailable
+                    "JVM Store snapshot image could not be written"
+                    {:cause (.getMessage error)}))))
+
+(defn- handle-checkpoint! [request cancellation]
+  (require-unit! (t/rpc-request-payload-value request))
+  (sequence-commit!
+   request cancellation
+   (fn [_db]
+     {:kind :checkpoint})))
+
 (defn- status-payload [snapshot]
   (let [db (database/store-view @active-store (:root snapshot))
         state (:status (database/database-recovery-state db))
@@ -1922,8 +1967,17 @@
         (deliver (:completion ticket)
                  (if-let [error (:error result)]
                    {:error error :version (:version result)}
-                   {:value (:value result) :version (:version result)
-                    :published-version (:version snapshot)}))))
+                   (if (= :checkpoint (:kind (:value result)))
+                     (try
+                       {:value (checkpoint-payload!
+                                (:request ticket) snapshot)
+                        :version (:version snapshot)
+                        :published-version (:version snapshot)}
+                       (catch Throwable checkpoint-error
+                         {:error checkpoint-error
+                          :version (:version snapshot)}))
+                     {:value (:value result) :version (:version result)
+                      :published-version (:version snapshot)}))))))
     (catch Throwable error
       (doseq [ticket tickets]
         (deliver (:completion ticket)
@@ -1979,6 +2033,7 @@
       (throw (commit-sequencer-stopped-error)))
     (let [completion (promise)
           ticket {:mutation mutation
+                  :request request
                   :completion completion
                   :bytes (request-body-bytes request)
                   :enqueued-ns (System/nanoTime)}]
@@ -2005,6 +2060,7 @@
       :rpc/lease-release (handle-lease-release! request cancellation)
       :rpc/lease-check {:payload (handle-lease-check! payload cancellation snapshot)}
       :rpc/validate {:payload (handle-validate! payload cancellation snapshot)}
+      :rpc/checkpoint (handle-checkpoint! request cancellation)
       (server-fail! :rpc/unsupported-operation
                     "operation is not part of Store RPC v2" {}))))
 

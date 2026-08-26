@@ -5,10 +5,12 @@
          '[store.datalog :as datalog]
          '[store.kernel :as kernel]
          '[store.query :as query]
+         '[store.store :as term-store]
          '[store.types :as t])
 
 (load-file "server.clj")
 (load-file "tests/native_rpc_client.clj")
+(require '[fri-port :as fri])
 
 (def failures (atom []))
 (def request-id (atom 0))
@@ -139,8 +141,8 @@
   (check! "listener starts on STORERPC v2"
           (some? (eventually #(request! port space :rpc/version wire/rpc-unit))))
 
-    (check! "operation disposition is exhaustive for the thirteen v2 operations"
-          (and (= 13 (count server/native-rpc-operations))
+  (check! "operation disposition is exhaustive for the fourteen v2 operations"
+          (and (= 14 (count server/native-rpc-operations))
                (every? #(= :supported (server/native-op-disposition %))
                        server/native-rpc-operations)
                (every? #(= :unsupported (server/native-op-disposition %))
@@ -184,6 +186,32 @@
                  (= 0 (t/triple-t3 coordinate))
                  (= 1 (t/triple-t3 (t/triple-t1 coordinate)))
                  (= 1 (t/rpcresponse-served-version response))))
+    (let [checkpoint (request! port space :rpc/checkpoint wire/rpc-unit)
+          [version watermark created-at crc bytes]
+          (fields (payload checkpoint) :rpc/checkpoint 5)
+          image (io/file (str log-path ".snapshot"))
+          source (database/triple-log-prefix-source! log-path version)
+          cache (fri/open-fri!
+                 (.getPath image)
+                 (fri/source-binding (:space-id source)
+                                     (:fingerprint source)
+                                     (:valid-bytes source)))
+          restored (term-store/new-term-store space)]
+      (fri/restore-store! cache restored)
+      (check! "JVM checkpoint is a sequencer-consistent derived image"
+              (and (nil? (error-code checkpoint))
+                   (= 1 version (t/rpcresponse-served-version checkpoint))
+                   (pos? watermark)
+                   (pos? created-at)
+                   (<= 0 crc 4294967295)
+                   (pos? bytes)
+                   (.isFile image)
+                   (= bytes (.length image))
+                   (= watermark (fri/source-position cache))
+                   (= (database/live-propositions @server/active-store)
+                      (database/live-propositions {:term-store restored
+                                                   :space-id space
+                                                   :mutation-state (atom {:status :ready})})))))
     (let [scan (request! port space :rpc/scan
                          (wire/rpc-triple-pattern! nested-subject nil nil))]
       (check! "slot-addressed scan returns the recursive proposition"
