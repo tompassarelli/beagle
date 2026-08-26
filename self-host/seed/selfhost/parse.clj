@@ -923,6 +923,8 @@
    body (mapv (fn [index] (scope-walk* (syntax-add-scope! (nth children index) scope) (get named "table") (conj (vec path) index) ctx)) body-indices)]
   (rebuild-scope-sequence! value (into [(scope-walk* (nth children 0) table (conj (vec path) 0) ctx) rendered-functions] body))))
 
+(declare binding-form-datum?)
+
 (defn- scope-walk-for-like! [value table path ctx]
   (let [children (scope-sequence-children value)
    clauses (nth children 1)
@@ -938,6 +940,12 @@
   (and (= (scope-syntax-datum! (nth items index)) ":let") (< (+ index 1) (count items)) (= (get (nth items (+ index 1)) "variant") "vector")) (let [nested (syntax-add-scopes! (nth items (+ index 1)) region-scopes)
    bindings (scope-walk-sequential-bindings! nested current (conj (vec path) 1 (+ index 1)) ctx)]
   (recur (+ index 2) (conj (conj out (nth items index)) (get bindings "value")) (get bindings "table") (into region-scopes (get bindings "scopes"))))
+  (and (< (+ index 2) (count items)) (binding-form-datum? (scope-syntax-datum! (nth items index))) (type-expression-datum? (scope-syntax-datum! (nth items (+ index 1))))) (let [declaration (syntax-add-scopes! (nth items index) region-scopes)
+   annotation (nth items (+ index 1))
+   rhs (scope-walk* (syntax-add-scopes! (nth items (+ index 2)) region-scopes) current (conj (vec path) 1 (+ index 2)) ctx)
+   scope (syntax/fresh-scope-id! "comprehension")
+   bound (scope-bind-declaration! declaration current scope "comprehension" (conj (vec path) 1 index))]
+  (recur (+ index 3) (conj (conj (conj out (get bound "value")) annotation) rhs) (get bound "table") (conj region-scopes scope)))
   (< (+ index 1) (count items)) (let [declaration (syntax-add-scopes! (nth items index) region-scopes)
    rhs (scope-walk* (syntax-add-scopes! (nth items (+ index 1)) region-scopes) current (conj (vec path) 1 (+ index 1)) ctx)
    scope (syntax/fresh-scope-id! "comprehension")
@@ -1450,6 +1458,8 @@
   (>= i n) acc
   (and (< (+ i 1) n) (= (nth items i) ":when")) (recur (+ i 2) (conj acc {"type" "when" "test" (parse-expr* (nth items (+ i 1)))}))
   (and (< (+ i 1) n) (= (nth items i) ":let")) (recur (+ i 2) (conj acc {"type" "let" "bindings" (parse-let-bindings! (nth items (+ i 1)))}))
+  (and (< (+ i 2) n) (binding-form-datum? (nth items i)) (type-expression-datum? (nth items (+ i 1)))) (let [name (parse-binding-form! (nth items i) "for/doseq binding")]
+  (recur (+ i 3) (conj acc (make-for-binding! name (parse-type* (nth items (+ i 1))) nil (parse-expr* (nth items (+ i 2)))))))
   (and (< (+ i 1) n) (bracketed? (nth items i))) (let [target (parse-seq-destructure! (nth items i))]
   (recur (+ i 2) (conj acc (make-for-binding! target nil nil (parse-expr* (nth items (+ i 1)))))))
   (and (< (+ i 1) n) (map-destructure-form? (nth items i))) (let [target (parse-map-destructure! (nth items i))]
@@ -2681,6 +2691,9 @@
   (and (= (get node "node") "recur") (= (count (get node "args")) 2))))
   (expect! "for with binding" (let [node (parse-expr* ["for" [BRACKET-TAG "x" "items"] "x"])]
   (and (= (get node "node") "for") (= (count (get node "clauses")) 1) (= (get (nth (get node "clauses") 0) "type") "binding"))))
+  (expect! "for with a flat typed binding triple" (let [node (parse-expr* ["for" [BRACKET-TAG "x" "Int" "items"] "x"])
+   binding (nth (get node "clauses") 0)]
+  (and (= (get binding "name") "x") (= (get (get binding "ann") "name") "Int"))))
   (expect! "for binding retains its local constraint" (let [node (parse-expr* ["for" [BRACKET-TAG ["x" "Int" ["positive?" "x"]] "items"] "x"])
    constraint (get (nth (get node "clauses") 0) "constraint")]
   (and (= (get constraint "node") "call") (= (get (get constraint "fn") "name") "positive?"))))
