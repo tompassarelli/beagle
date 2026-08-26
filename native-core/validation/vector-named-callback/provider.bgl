@@ -17,3 +17,8 @@
   [acc Int
    item Item] Int
   (+ acc (item-value item)))
+
+(defn conj
+  [values (Vec String)
+   value String] (Vec String)
+  (into values [value]))

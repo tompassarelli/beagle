@@ -8349,6 +8349,10 @@
           (or (= "into" callee) (= "concat" callee)))
         receiver
 
+        (and (= position 1) (set-type? types receiver)
+          (= "into" callee))
+        receiver
+
         (and (= "str/replace" callee) (< position 3))
         (type-id "String")
 
@@ -10503,6 +10507,88 @@
                 (core/->SsaValueV0 one-id (int-type-id))
                 (core/->I64Atom 1)))
             next-index ExprResultV0 (lower-checked-arith with-one owner "+" header-index one-id)
+            settled BodyStateV0 (exprresultv0-state next-index)]
+        (if (state-blocked? settled)
+          (dead-result settled)
+          (->ExprResultV0
+            (state-open-block
+              (state-close settled
+                (core/->JumpTerminator header-id
+                  [(exprresultv0-value-id next-index) next-set]))
+              exit-id [])
+            header-set set-type false))))))
+
+(defn lower-set-into
+  [types (Vec core/TypeDef)
+   owner core/NativeId
+   state BodyStateV0
+   target-id core/NativeId
+   source-id core/NativeId
+   set-type core/NativeId] ExprResultV0
+  (let [element-type core/NativeId (set-element-of types set-type)
+        vector-type (U core/NativeId Nil) (vector-type-of types element-type)
+        equality (U core/ConcreteEqualityV0 Nil) (set-element-equality-for types element-type)]
+    (cond
+      (nil? vector-type)
+      (fail-result state
+        "TODO-NATIVE-SET-INTO-VECTOR-TYPE: the program declares no vector of the set element type")
+
+      (nil? equality)
+      (fail-result state
+        "TODO-NATIVE-SET-ELEMENT-EQUALITY: into needs closed concrete element equality")
+
+      :else
+      (let [source-vector core/NativeId (state-id state owner "set-into-vector")
+            with-vector BodyStateV0 (state-emit (state-bump state)
+              (core/->SetVectorInstructionV0
+                (core/->SsaValueV0 source-vector vector-type)
+                source-id (arena-value-id owner)))
+            length-id core/NativeId (state-id with-vector owner "set-into-length")
+            with-length BodyStateV0 (state-emit (state-bump with-vector)
+              (core/->VecLengthInstruction
+                (core/->SsaValueV0 length-id (int-type-id)) source-vector))
+            zero-id core/NativeId (state-id with-length owner "set-into-zero")
+            prepared BodyStateV0 (state-emit (state-bump with-length)
+              (core/->AtomInstruction
+                (core/->SsaValueV0 zero-id (int-type-id))
+                (core/->I64Atom 0)))
+            header-id core/NativeId (state-id prepared owner "set-into-header")
+            body-id core/NativeId (state-id prepared owner "set-into-body")
+            exit-id core/NativeId (state-id prepared owner "set-into-exit")
+            header-index core/NativeId (state-id prepared owner "set-into-index")
+            header-set core/NativeId (state-id prepared owner "set-into-result")
+            entered BodyStateV0 (state-open-block
+              (state-close (state-bump prepared)
+                (core/->JumpTerminator header-id [zero-id target-id]))
+              header-id
+              [(core/->Parameter header-index (int-type-id))
+               (core/->Parameter header-set set-type)])
+            has-item core/NativeId (state-id entered owner "set-into-has-item")
+            compared BodyStateV0 (state-emit (state-bump entered)
+              (core/->CompareInstruction
+                (core/->SsaValueV0 has-item (bool-type-id))
+                (core/->CompareLtI64V0 true) header-index length-id))
+            body-state BodyStateV0 (state-open-block
+              (state-close compared
+                (core/->BranchTerminator has-item body-id exit-id))
+              body-id [])
+            item-id core/NativeId (state-id body-state owner "set-into-item")
+            with-item BodyStateV0 (state-emit (state-bump body-state)
+              (core/->VecGetInstruction
+                (core/->SsaValueV0 item-id element-type)
+                source-vector header-index))
+            next-set core/NativeId (state-id with-item owner "set-into-conj")
+            with-set BodyStateV0 (state-emit (state-bump with-item)
+              (core/->SetConjInstructionV0
+                (core/->SsaValueV0 next-set set-type)
+                header-set item-id (arena-value-id owner) equality))
+            one-id core/NativeId (state-id with-set owner "set-into-one")
+            with-one BodyStateV0 (state-emit (state-bump with-set)
+              (core/->AtomInstruction
+                (core/->SsaValueV0 one-id (int-type-id))
+                (core/->I64Atom 1)))
+            next-index ExprResultV0 (lower-checked-arith with-one owner "+"
+              header-index one-id)
             settled BodyStateV0 (exprresultv0-state next-index)]
         (if (state-blocked? settled)
           (dead-result settled)
@@ -17191,6 +17277,23 @@
                     callback-signature (U TypedFunctionV0 Nil) (if (= "ref" callback-kind)
                         (find-signature env callback-node callback-spelling)
                         nil)
+                    callback-binding (U LocalBindingV0 Nil) (source-ref-binding env state callback-node)
+                    builtin-conj Bool (and (= "ref" callback-kind)
+                      (= "conj" callback-spelling)
+                      (= "" (fact-text index callback-node "binding-id"))
+                      (nil? callback-binding)
+                      (nil? callback-signature))
+                    checked-accumulator (U core/NativeId Nil) (if builtin-conj
+                      (checked-expression-type env state (nth args 1))
+                      nil)
+                    conj-accumulator (U core/NativeId Nil) (if (and
+                          (some? checked-accumulator)
+                          (vector-type? types checked-accumulator))
+                      checked-accumulator
+                      nil)
+                    conj-element (U core/NativeId Nil) (if (some? conj-accumulator)
+                      (vector-element-of types conj-accumulator)
+                      nil)
                     callback-variadic Bool (if (= "ref" callback-kind)
                       false
                       (not
@@ -17204,16 +17307,35 @@
                     callback-owner core/NativeId (state-id state owner "reduce-callback")
                     callback-resolution ParameterResolutionV0 (if (= "ref" callback-kind)
                       (->ParameterResolutionV0
-                        (if (some? callback-signature)
+                        (cond
+                          (some? callback-signature)
                           (typedfunctionv0-parameters callback-signature)
-                          []) [] [] (some? callback-signature))
+
+                          (and builtin-conj (some? conj-accumulator)
+                            (some? conj-element))
+                          [(core/->Parameter
+                             (state-id state callback-owner "conj-accumulator")
+                             conj-accumulator)
+                           (core/->Parameter
+                             (state-id state callback-owner "conj-element")
+                             conj-element)]
+
+                          :else [])
+                        [] [] (or (some? callback-signature)
+                          (and builtin-conj (some? conj-accumulator)
+                            (some? conj-element))))
                       (resolve-parameters index callback-node callback-owner))
                     callback-parameters (Vec core/Parameter) (parameterresolutionv0-parameters callback-resolution)]
                 (cond
-                  (and (= "ref" callback-kind) (nil? callback-signature))
+                  (and (= "ref" callback-kind) (nil? callback-signature)
+                    (not builtin-conj))
                   (fail-result state
                     (str "TODO-NATIVE-REDUCE-CALLBACK: no native signature for "
                       callback-spelling))
+
+                  (and builtin-conj (nil? conj-accumulator))
+                  (fail-result state
+                    "TODO-NATIVE-REDUCE-CONJ-ACCUMULATOR: builtin conj requires an exact native vector accumulator")
 
                   (and (not (= "ref" callback-kind))
                     (not (= "fn" callback-kind)))
@@ -17243,10 +17365,16 @@
                     "TODO-NATIVE-REDUCE-CALLBACK-RETURN: callback needs a closed return annotation")
 
                   :else
-                  (let [callback-return TypeResolutionV0 (if (some? callback-signature)
+                  (let [callback-return TypeResolutionV0 (cond
+                          (some? callback-signature)
                           (->TypeResolutionV0
                             (typedfunctionv0-return-type callback-signature)
                             [] [] true)
+
+                          (some? conj-accumulator)
+                          (->TypeResolutionV0 conj-accumulator [] [] true)
+
+                          :else
                           (resolve-source-type index callback-return-source-node))
                         active-transient (U core/NativeId Nil) (bodystatev0-transient-type state)
                         active-kind String (if (nil? active-transient) ""
@@ -17377,7 +17505,8 @@
                                       element-id core/NativeId (exprresultv0-value-id element)
                                       isolated BodyStateV0 (state-enter-inline-callback
                                         (exprresultv0-state element))
-                                      callback-state BodyStateV0 (if (some? callback-signature)
+                                      callback-state BodyStateV0 (if (or
+                                          (some? callback-signature) builtin-conj)
                                         isolated
                                         (bind-source-parameter-value env owner
                                           (bind-source-parameter-value env owner
@@ -17386,11 +17515,25 @@
                                             header-accumulator accumulator-type)
                                           (nth callback-source-parameters 1) 1
                                           element-id element-type))
-                                      callback-result ExprResultV0 (if (some? callback-signature)
+                                      callback-result ExprResultV0 (cond
+                                        (some? callback-signature)
                                         (lower-static-callback-call isolated owner
                                           callback-signature
                                           [header-accumulator element-id]
                                           "reduce-callback-call")
+
+                                        builtin-conj
+                                        (let [result-id core/NativeId (state-id isolated owner
+                                                "reduce-conj")]
+                                          (->ExprResultV0
+                                            (state-emit (state-bump isolated)
+                                              (core/->VecPushInstruction
+                                                (core/->SsaValueV0 result-id accumulator-type)
+                                                header-accumulator element-id
+                                                (arena-value-id owner)))
+                                            result-id accumulator-type false))
+
+                                        :else
                                         (lower-contextual-boundary env owner
                                           callback-state callback-body-node accumulator-type
                                           accumulator-type))
@@ -19342,9 +19485,15 @@
                         (nth values 0) (nth values 1) (arena-value-id owner)))
                     result-id (nth value-types 0) false))
 
+                (and (= "into" callee) (= 2 (count values))
+                  (same-id? (nth value-types 0) (nth value-types 1))
+                  (set-type? types (nth value-types 0)))
+                (lower-set-into types owner current
+                  (nth values 0) (nth values 1) (nth value-types 0))
+
                 (= "into" callee)
                 (fail-result current
-                  "TODO-NATIVE-INTO-OPERANDS: into lowers two native vectors of the same type")
+                  "TODO-NATIVE-INTO-OPERANDS: into lowers two native vectors or closed sets of the same type")
 
                 (and (= "set" callee) (= 1 (count values))
                   (vector-type? types (nth value-types 0)))
