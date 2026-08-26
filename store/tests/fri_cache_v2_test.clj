@@ -64,7 +64,7 @@
 
 (def checks
   [["FRI2 magic/version are the only runtime format"
-    (and (= "STOREFRI2" fri/MAGIC)
+    (and (= "BEAGLEFRI2" fri/MAGIC)
          (= 2 fri/FMT)
          (= [2 0 0 0]
             (mapv #(bit-and (int %) 255) (subvec (vec bytes-one) 8 12))))]
