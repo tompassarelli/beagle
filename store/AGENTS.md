@@ -5,6 +5,17 @@ subtree; they do not describe a standalone repository, installation, product,
 or release cycle. Build, release, and cross-repository naming work is
 coordinated by Beagle.
 
+## Source authority
+
+Production Store engine semantics are authored in typed Beagle for Clojure
+(`.bclj`, `#lang beagle/clj`). This includes domain logic, durable
+representations, queries, and checkpoint semantics.
+
+A `.clj` file is generated compiler output or an explicitly named irreducible
+JVM adapter; it does not own core engine or domain logic. A `.bjs` file remains
+hosted planner, effect, or client territory and does not own production engine
+semantics unless an explicit future engine decision changes this boundary.
+
 ## External resources and licenses
 
 Before using any external resource or repository under `~/code/resources/`, re-check its
