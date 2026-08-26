@@ -66,8 +66,10 @@
   [["FRI2 magic/version are the only runtime format"
     (and (= "BEAGLEFRI2" fri/MAGIC)
          (= 2 fri/FMT)
-         (= [2 0 0 0]
-            (mapv #(bit-and (int %) 255) (subvec (vec bytes-one) 8 12))))]
+         (= [2 0]
+            (mapv #(bit-and (int %) 255)
+                  (subvec (vec bytes-one) (count fri/MAGIC)
+                          (+ (count fri/MAGIC) 2))))) ]
    ["TermCodecV1 rejects a truncated sized value"
     (= :invalid-fri-cache (error-type #(decode-term-v1! malformed-length)))]
    ["TermCodecV1 rejects an unknown tag"
