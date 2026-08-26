@@ -119,7 +119,8 @@ BEAGLE_SUITES_CHECKER_FOCUS=(
 
 # --- gate phases -----------------------------------------------------------
 #
-# The four shell phases are not suites and are selected separately.
+# The five gate phases are not suites and are selected separately. Four retain
+# shell-owned fixtures; byte-stable-emit is a direct Bun entrypoint.
 #
 # checkout-first and qualified-ref-scaffold ALWAYS run: about a second each,
 # and both are whole-checkout guards. Nothing is bought by reasoning about
@@ -244,13 +245,15 @@ beagle_selection_classify_path() {
 
         # --- gate phase fixtures --------------------------------------------
         # A phase directory under bin/test/ that the gate actually invokes
-        # selects that phase. The other 25 directories there are standalone
+        # selects that phase. The remaining directories there are standalone
         # probes this gate never runs, so editing one cannot change a gate
         # verdict.
         bin/test/racket-scope/*)          echo "phase:racket-scope" ;;
         bin/test/checkout-first/*)        echo "phase:checkout-first" ;;
         bin/test/qualified-ref-scaffold/*) echo "phase:qualified-ref-scaffold" ;;
         bin/test/consumer-smoke/*)        echo "phase:consumer-smoke" ;;
+        bin/test/byte-stable-emit/*)       echo "phase:byte-stable-emit" ;;
+        tools/task-effects/*)              echo "phase:byte-stable-emit" ;;
         bin/test/*)                       echo "none" ;;
 
         # --- racket collection scope ----------------------------------------
@@ -389,7 +392,7 @@ beagle_selection_compute() {
     for p in "${!phases[@]}"; do phase_set["$p"]=1; done
     # Report phases in gate order, never in hash order.
     BEAGLE_SELECTION_PHASES=()
-    for p in racket-scope checkout-first qualified-ref-scaffold consumer-smoke; do
+    for p in racket-scope checkout-first qualified-ref-scaffold byte-stable-emit consumer-smoke; do
         [[ -n "${phase_set[$p]+set}" ]] && BEAGLE_SELECTION_PHASES+=("$p")
     done
     return 0
@@ -420,8 +423,8 @@ beagle_selection_report() {
     mapfile -t active < <(beagle_selection_active_suites "$root")
 
     echo "beagle-test: SELECTION=narrow"
-    echo "beagle-test: phases selected (${#BEAGLE_SELECTION_PHASES[@]}/4): ${BEAGLE_SELECTION_PHASES[*]}"
-    for p in racket-scope checkout-first qualified-ref-scaffold consumer-smoke; do
+    echo "beagle-test: phases selected (${#BEAGLE_SELECTION_PHASES[@]}/5): ${BEAGLE_SELECTION_PHASES[*]}"
+    for p in racket-scope checkout-first qualified-ref-scaffold byte-stable-emit consumer-smoke; do
         if [[ " ${BEAGLE_SELECTION_PHASES[*]} " != *" $p "* ]]; then
             echo "beagle-test:   phase SKIPPED $p (no changed path is one of its inputs)"
         fi

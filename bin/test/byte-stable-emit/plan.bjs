@@ -1,0 +1,287 @@
+#lang beagle/js
+
+(ns byte-stable-emit.plan)
+
+(defrecord RepoPathV1 [relative String])
+(defrecord TempPathV1
+  [tempdirId String
+   relative String])
+(defunion PathRefV1 RepoPathV1 TempPathV1)
+
+(defrecord LiteralArgV1 [value String])
+(defrecord PathArgV1 [path PathRefV1])
+(defunion ProcessArgV1 LiteralArgV1 PathArgV1)
+
+(defrecord EnvEntryV1
+  [name String
+   value String])
+(defrecord ProcessEnvironmentV1
+  [policy String
+   entries (Vec EnvEntryV1)])
+
+(defrecord ArtifactV1
+  [artifactId String
+   artifactKind String
+   path PathRefV1
+   expectedDigest (U String Nil)
+   digestWhen String])
+
+(defrecord TempdirAllocateV1
+  [effectId String
+   dependsOn (Vec String)
+   tempdirId String
+   prefix String])
+(defrecord AtomicCopyV1
+  [effectId String
+   dependsOn (Vec String)
+   source PathRefV1
+   target PathRefV1])
+(defrecord AtomicReplaceExactV1
+  [effectId String
+   dependsOn (Vec String)
+   source PathRefV1
+   target PathRefV1
+   oldText String
+   newText String
+   expectedCount Int])
+(defrecord ProcessRunV1
+  [effectId String
+   dependsOn (Vec String)
+   argv (Vec ProcessArgV1)
+   cwd PathRefV1
+   environment ProcessEnvironmentV1
+   stdinMode String
+   stdoutArtifactId String
+   stderrArtifactId String
+   maxStdoutBytes Int
+   maxStderrBytes Int
+   acceptedStatuses (Vec Int)
+   deadlineSeconds Int
+   killGraceSeconds Int
+   terminationSignal String])
+(defunion EffectV1
+  TempdirAllocateV1
+  AtomicCopyV1
+  AtomicReplaceExactV1
+  ProcessRunV1)
+
+(defrecord ProcessAcceptedCheckV1 [effectId String])
+(defrecord ArtifactContainsCheckV1
+  [artifactId String
+   needle String])
+(defrecord ArtifactChangedLineCountCheckV1
+  [leftArtifactId String
+   rightArtifactId String
+   maximum Int])
+(defunion CaseCheckV1
+  ProcessAcceptedCheckV1
+  ArtifactContainsCheckV1
+  ArtifactChangedLineCountCheckV1)
+
+(defrecord SemanticCaseV1
+  [caseId String
+   claim String
+   checks (Vec CaseCheckV1)])
+(defrecord EffectAuthorityV1
+  [intentRef String
+   authorizationRef String
+   attemptRef String])
+(defrecord TaskEffectPlanV1
+  [schemaVersion String
+   planKind String
+   authority EffectAuthorityV1
+   artifacts (Vec ArtifactV1)
+   effects (Vec EffectV1)
+   cases (Vec SemanticCaseV1)])
+
+(defn repo-path [relative String] PathRefV1
+  (->RepoPathV1 relative))
+
+(defn temp-path
+  [tempdir-id String
+   relative String] PathRefV1
+  (->TempPathV1 tempdir-id relative))
+
+(defn literal-arg [value String] ProcessArgV1
+  (->LiteralArgV1 value))
+
+(defn path-arg [path PathRefV1] ProcessArgV1
+  (->PathArgV1 path))
+
+(defn artifact
+  [artifact-id String
+   artifact-kind String
+   path PathRefV1
+   expected-digest (U String Nil)
+   digest-when String] ArtifactV1
+  (->ArtifactV1 artifact-id artifact-kind path expected-digest digest-when))
+
+(defn environment [pltc-collects String] ProcessEnvironmentV1
+  (->ProcessEnvironmentV1
+   "replace"
+   [(->EnvEntryV1 "LANG" "C.UTF-8")
+    (->EnvEntryV1 "LC_ALL" "C.UTF-8")
+    (->EnvEntryV1 "PLTCOLLECTS" pltc-collects)]))
+
+(defn racket-process
+  [effect-id String
+   dependencies (Vec String)
+   racket-path String
+   arguments (Vec ProcessArgV1)
+   stdout-artifact-id String
+   stderr-artifact-id String
+   process-environment ProcessEnvironmentV1] EffectV1
+  (->ProcessRunV1
+   effect-id
+   dependencies
+   (into [(literal-arg racket-path)] arguments)
+   (repo-path ".")
+   process-environment
+   "null"
+   stdout-artifact-id
+   stderr-artifact-id
+   16777216
+   16777216
+   [0]
+   120
+   1
+   "SIGTERM"))
+
+(js/export
+  (defn make-byte-stable-emit-plan-v1
+    [racket-path String
+     pltc-collects String
+     authorization-ref String
+     attempt-ref String] TaskEffectPlanV1
+    (let [roundtrip PathRefV1 (repo-path "beagle-lib/private/facts-roundtrip.rkt")
+          locality PathRefV1 (repo-path "bin/test/byte-stable-emit/locality-fixture.bclj")
+          comment PathRefV1 (repo-path "bin/test/byte-stable-emit/comment-fixture.bclj")
+          corpus PathRefV1 (repo-path "beagle-test/tests/fixtures")
+          local-a PathRefV1 (temp-path "locality" "a.bclj")
+          local-b PathRefV1 (temp-path "locality" "b.bclj")
+          local-a-text PathRefV1 (temp-path "locality" "a.txt")
+          local-b-text PathRefV1 (temp-path "locality" "b.txt")
+          comment-edn PathRefV1 (temp-path "comment" "c.edn")
+          rendered-comment PathRefV1 (temp-path "comment" "rendered.bclj")
+          process-environment ProcessEnvironmentV1 (environment pltc-collects)]
+      (->TaskEffectPlanV1
+       "task-effect-plan/v1"
+       "beagle.byte-stable-emit/v1"
+       (->EffectAuthorityV1
+        "beagle:byte-stable-emit/four-claims/v1"
+        authorization-ref
+        attempt-ref)
+       [(artifact "roundtrip-program" "file" roundtrip
+                  "24063955ee22afe9c7b313736c3de2a5ab97b17aa09ce5c56dfcdbafeaa1de78"
+                  "before")
+        (artifact "fixture-corpus" "directory" corpus nil "before")
+        (artifact "locality-fixture" "file" locality
+                  "1c6beba682d7ed980fc31fb087249bb59dfda4b261a20142777ee84fa11f960c"
+                  "before")
+        (artifact "comment-fixture" "file" comment
+                  "0582cbff79e41ecb933cd4f96d8d067d7160b10825de905bd984e3f57c5cb819"
+                  "before")
+        (artifact "corpus.stdout" "file" (temp-path "corpus" "stdout") nil "after")
+        (artifact "corpus.stderr" "file" (temp-path "corpus" "stderr") nil "after")
+        (artifact "locality-a" "file" local-a nil "after")
+        (artifact "locality-b" "file" local-b nil "after")
+        (artifact "locality-a.stdout" "file" local-a-text nil "after")
+        (artifact "locality-a.stderr" "file" (temp-path "locality" "a.stderr") nil "after")
+        (artifact "locality-b.stdout" "file" local-b-text nil "after")
+        (artifact "locality-b.stderr" "file" (temp-path "locality" "b.stderr") nil "after")
+        (artifact "comment-edn" "file" comment-edn nil "after")
+        (artifact "emit-edn.stderr" "file" (temp-path "comment" "emit-edn.stderr") nil "after")
+        (artifact "rendered-comment" "file" rendered-comment nil "after")
+        (artifact "render.stderr" "file" (temp-path "comment" "render.stderr") nil "after")
+        (artifact "comment-gate.stdout" "file" (temp-path "comment" "gate.stdout") nil "after")
+        (artifact "comment-gate.stderr" "file" (temp-path "comment" "gate.stderr") nil "after")]
+       [(->TempdirAllocateV1 "temp.corpus" [] "corpus" "beagle-byte-stable-corpus-")
+        (->TempdirAllocateV1 "temp.locality" [] "locality" "beagle-byte-stable-locality-")
+        (->TempdirAllocateV1 "temp.comment" [] "comment" "beagle-byte-stable-comment-")
+        (racket-process
+         "process.corpus-gate"
+         ["temp.corpus"]
+         racket-path
+         [(path-arg roundtrip) (literal-arg "--pretty-gate") (path-arg corpus)]
+         "corpus.stdout"
+         "corpus.stderr"
+         process-environment)
+        (->AtomicCopyV1 "file.locality-copy" ["temp.locality"] locality local-a)
+        (->AtomicReplaceExactV1
+         "file.locality-edit"
+         ["temp.locality" "file.locality-copy"]
+         local-a
+         local-b
+         "(> x threshold)"
+         "(>= x threshold)"
+         2)
+        (racket-process
+         "process.locality-a"
+         ["temp.locality" "file.locality-copy"]
+         racket-path
+         [(path-arg roundtrip) (literal-arg "--pretty") (path-arg local-a)]
+         "locality-a.stdout"
+         "locality-a.stderr"
+         process-environment)
+        (racket-process
+         "process.locality-b"
+         ["temp.locality" "file.locality-edit"]
+         racket-path
+         [(path-arg roundtrip) (literal-arg "--pretty") (path-arg local-b)]
+         "locality-b.stdout"
+         "locality-b.stderr"
+         process-environment)
+        (racket-process
+         "process.emit-edn"
+         ["temp.comment"]
+         racket-path
+         [(path-arg roundtrip) (literal-arg "--emit-edn") (path-arg comment)]
+         "comment-edn"
+         "emit-edn.stderr"
+         process-environment)
+        (racket-process
+         "process.render-comment"
+         ["temp.comment" "process.emit-edn"]
+         racket-path
+         [(path-arg roundtrip) (literal-arg "--render") (path-arg comment-edn)]
+         "rendered-comment"
+         "render.stderr"
+         process-environment)
+        (racket-process
+         "process.comment-gate"
+         ["temp.comment" "process.render-comment"]
+         racket-path
+         [(path-arg roundtrip)
+          (literal-arg "--pretty-gate")
+          (path-arg (temp-path "comment" "."))]
+         "comment-gate.stdout"
+         "comment-gate.stderr"
+         process-environment)]
+       [(->SemanticCaseV1
+         "facts-source-fixed-point"
+         "facts to source reaches a byte-stable fixed point"
+         [(->ProcessAcceptedCheckV1 "process.corpus-gate")
+          (->ArtifactContainsCheckV1 "corpus.stdout" "GATE: PASS")])
+        (->SemanticCaseV1
+         "canonical-datum-round-trip"
+         "rendered source re-reads to the canonical datum"
+         [(->ProcessAcceptedCheckV1 "process.corpus-gate")
+          (->ArtifactContainsCheckV1 "corpus.stdout" "GATE: PASS")])
+        (->SemanticCaseV1
+         "one-token-locality-threshold"
+         "one token changes at most two diff marker lines"
+         [(->ProcessAcceptedCheckV1 "process.locality-a")
+          (->ProcessAcceptedCheckV1 "process.locality-b")
+          (->ArtifactChangedLineCountCheckV1
+           "locality-a.stdout"
+           "locality-b.stdout"
+           2)])
+        (->SemanticCaseV1
+         "comment-preservation"
+         "comments survive render and the result round-trips"
+         [(->ProcessAcceptedCheckV1 "process.emit-edn")
+          (->ProcessAcceptedCheckV1 "process.render-comment")
+          (->ProcessAcceptedCheckV1 "process.comment-gate")
+          (->ArtifactContainsCheckV1 "rendered-comment" "leading comment on area")
+          (->ArtifactContainsCheckV1 "rendered-comment" "trailing note")
+          (->ArtifactContainsCheckV1 "comment-gate.stdout" "GATE: PASS")])]))))

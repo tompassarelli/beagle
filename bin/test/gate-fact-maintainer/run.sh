@@ -72,6 +72,7 @@ mkdir -p \
     "$fixture_template/bin/test/racket-scope" \
     "$fixture_template/bin/test/checkout-first" \
     "$fixture_template/bin/test/qualified-ref-scaffold" \
+    "$fixture_template/bin/test/byte-stable-emit" \
     "$fixture_template/bin/test/consumer-smoke" \
     "$fixture_template/candidate"
 
@@ -97,6 +98,18 @@ for phase in racket-scope checkout-first qualified-ref-scaffold consumer-smoke; 
     cp "$fixture_template/bin/fixture-phase" \
         "$fixture_template/bin/test/$phase/run.sh"
 done
+
+cat >"$fixture_template/bin/test/byte-stable-emit/run.mjs" <<'EOF'
+import { appendFile } from "fs/promises";
+
+const root = process.env.BEAGLE_GATE_FACT_REPO_ROOT;
+await appendFile(
+  process.env.BEAGLE_GATE_FACT_TEST_AUDIT,
+  `${process.env.BEAGLE_GATE_FACT_TEST_SIDE}:phase:byte-stable-emit\n`,
+);
+console.log("fixture phase byte-stable-emit");
+if (!(await Bun.file(`${root}/candidate/selected.txt`).exists())) process.exit(1);
+EOF
 
 cat >"$fixture_template/beagle-test/tiers.rktd" <<'EOF'
 #hash((active . ("unit.rkt")) (demoted . ()) (gated . ()))
@@ -134,6 +147,7 @@ git -C "$fixture_template" add \
     bin/test/racket-scope/run.sh \
     bin/test/checkout-first/run.sh \
     bin/test/qualified-ref-scaffold/run.sh \
+    bin/test/byte-stable-emit/run.mjs \
     bin/test/consumer-smoke/run.sh \
     candidate/module.rkt \
     candidate/selected.txt \

@@ -72,6 +72,7 @@ fi
 source "$(dirname "$0")/_beagle-racket"
 
 BEAGLE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BEAGLE_TEST_BUN="$(command -v bun 2>/dev/null || true)"
 
 # --changed is consumed here; everything else is forwarded to the tier runner
 # untouched, so the runner keeps seeing exactly the argv it always saw.
@@ -158,6 +159,10 @@ declare -A BEAGLE_TEST_PHASE_DEADLINE=(
     [checkout-first]=30
     # honest <1s. Same floor reasoning, smaller work.
     [qualified-ref-scaffold]=15
+    # honest 2s once the typed planner and Rust supervisor are cached; 240s
+    # admits a cold compiler/supervisor build without turning slowness into a
+    # false product verdict.
+    [byte-stable-emit]=240
     # honest 11-20s prepared, 308s on a cold miss (load 7.1). ~2x the miss case.
     [consumer-smoke]=600
     # honest 406s (load 6.4-8.0), 16 shards. ~2.2x.
@@ -668,6 +673,14 @@ beagle_test_fact_write_declared_claims() {
             "$phase" "$(beagle_test_deadline "$phase")" "$phase" \
             "$BEAGLE_ROOT/bin/test/$phase/run.sh" || return 1
     done
+    [[ -n "$BEAGLE_TEST_BUN" ]] || {
+        echo "beagle-test: Bun is required for byte-stable-emit; enter the Beagle development shell" >&2
+        return 1
+    }
+    beagle_test_fact_write_claim \
+        "byte-stable-emit" "$(beagle_test_deadline byte-stable-emit)" \
+        "byte-stable-emit" "$BEAGLE_TEST_BUN" \
+        "$BEAGLE_ROOT/bin/test/byte-stable-emit/run.mjs" "$RACKET" || return 1
     beagle_test_fact_write_claim \
         "tier-runner" "$(beagle_test_deadline tier-runner)" "tier-runner" \
         "$runner" "$@" || return 1
@@ -721,8 +734,17 @@ if [[ "$BEAGLE_TEST_SELECT_CHANGED" == 1 ]]; then
     beagle_selection_report "$BEAGLE_ROOT"
     if [[ "$BEAGLE_SELECTION_MODE" == narrow ]]; then
         for beagle_test_phase in "${BEAGLE_SELECTION_PHASES[@]}"; do
-            run_beagle_test_phase "$beagle_test_phase" \
-                "$BEAGLE_ROOT/bin/test/$beagle_test_phase/run.sh" || exit $?
+            if [[ "$beagle_test_phase" == byte-stable-emit ]]; then
+                [[ -n "$BEAGLE_TEST_BUN" ]] || {
+                    echo "beagle-test: Bun is required for byte-stable-emit; enter the Beagle development shell" >&2
+                    exit 2
+                }
+                run_beagle_test_phase "$beagle_test_phase" "$BEAGLE_TEST_BUN" \
+                    "$BEAGLE_ROOT/bin/test/byte-stable-emit/run.mjs" "$RACKET" || exit $?
+            else
+                run_beagle_test_phase "$beagle_test_phase" \
+                    "$BEAGLE_ROOT/bin/test/$beagle_test_phase/run.sh" || exit $?
+            fi
         done
         BEAGLE_GATE_NO_CACHE="$BEAGLE_SELECTION_BYPASS_CACHE" \
         run_beagle_test_phase "tier-selected" \
@@ -743,6 +765,12 @@ run_beagle_test_phase "checkout-first" \
     "$BEAGLE_ROOT/bin/test/checkout-first/run.sh" || exit $?
 run_beagle_test_phase "qualified-ref-scaffold" \
     "$BEAGLE_ROOT/bin/test/qualified-ref-scaffold/run.sh" || exit $?
+[[ -n "$BEAGLE_TEST_BUN" ]] || {
+    echo "beagle-test: Bun is required for byte-stable-emit; enter the Beagle development shell" >&2
+    exit 2
+}
+run_beagle_test_phase "byte-stable-emit" "$BEAGLE_TEST_BUN" \
+    "$BEAGLE_ROOT/bin/test/byte-stable-emit/run.mjs" "$RACKET" || exit $?
 run_beagle_test_phase "consumer-smoke" \
     "$BEAGLE_ROOT/bin/test/consumer-smoke/run.sh" || exit $?
 run_beagle_test_shards "$@" || exit $?

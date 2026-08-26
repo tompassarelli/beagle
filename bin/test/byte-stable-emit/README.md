@@ -6,7 +6,7 @@ deterministic, local, comment-preserving formatter that lets the graph be
 canonical and text be a regenerable lowering — the precondition for the
 fact-canonical flip (move 3).
 
-## The contract (what `run.sh` gates)
+## The contract
 
 1. **Idempotent fixed-point** — `pretty(parse(pretty(x))) == pretty(x)`, byte-identical.
    Follows from purity (output depends only on the datum + width) + the round-trip.
@@ -21,10 +21,12 @@ fact-canonical flip (move 3).
    facts→source render (`render-edn` uses `datum->pretty`, keeping Turtle #6
    placement).
 
-`run.sh` proves all four: fixed-point + round-trip over the in-repo fixture corpus
-(racket-only, no store/bb), a locality receipt (one-token change → single-line
-diff), and comment preservation + rendered-text round-trip. It also fails on any
-**skipped/unparseable** file — a skip is not a pass.
+The typed `plan.bjs` plan and Bun `run.mjs` executor prove all four: fixed-point
++ round-trip over the in-repo fixture corpus (no store/bb), a locality receipt
+(one-token change → single-line diff), and comment preservation + rendered-text
+round-trip. The closed plan carries intent, authorization, attempt, exact input
+digests, bounded effects, and semantic checks. A skipped/unparseable file is not
+a pass.
 
 ## Idiomatic indentation
 
@@ -69,6 +71,8 @@ their owners, not emit bugs.
 
 ## Run
 
+The canonical route is `bin/beagle test`. For a focused invocation from source:
+
 ```
-bin/test/byte-stable-emit/run.sh
+nix develop --command bin/beagle test --changed
 ```
