@@ -30,6 +30,28 @@
   (ok? modules diagnostics overlay-digest)
   #:transparent)
 
+;; A durable Store model can carry the reader-level fact triples directly.  Keep
+;; that representation at the compiler boundary instead of forcing callers to
+;; regenerate a source file (or to hand the compiler a path that it must read
+;; again).  `facts-module-input` is deliberately just identity plus triples:
+;; Store remains authoritative for the model and this module only reconstructs
+;; the compiler's syntax input and checked result.
+(struct facts-module-input
+  (source-id triples)
+  #:transparent)
+
+;; A ProgramRoot is Store-owned semantic state.  It carries the canonical
+;; module propositions and their represented source text, but no filesystem
+;; authority.  These small boundary records mirror only the fields needed by
+;; the hosted decoder; callers may obtain them from the Store adapter without
+;; reifying a source checkout.
+(struct program-root-input
+  (space-id root-resource store-version profile propositions)
+  #:transparent)
+(struct program-model-input
+  (roots)
+  #:transparent)
+
 ;; This identity belongs only to the module checker and its interface
 ;; publication rule.  It is deliberately not a whole-compiler revision: a
 ;; backend or unrelated parser rule must not invalidate checked modules.
@@ -96,6 +118,146 @@
   (define wrapper (edn-triples->syntax triples source))
   (define stxs (drop-beagle-file-wrapper wrapper source))
   (stxs->module-source stxs source))
+
+;; In-memory counterpart to `edn->module-source`.  `triples` is the same
+;; reader-fact shape emitted by facts-roundtrip and stored by code-as-facts;
+;; unlike the EDN helper this path does not inspect a file, render text, or
+;; reread a generated source projection.
+(define (facts->module-source input)
+  (unless (facts-module-input? input)
+    (raise-argument-error 'facts->module-source "facts-module-input?" input))
+  (define source (facts-module-input-source-id input))
+  (define triples (facts-module-input-triples input))
+  (unless (or (string? source) (path? source))
+    (raise-argument-error
+     'facts->module-source
+     "(or/c string? path?) source id"
+     source))
+  (unless (list? triples)
+    (raise-argument-error 'facts->module-source "list? triples" triples))
+  (when (null? triples)
+    (error 'facts->module-source "~a: candidate facts contain no triples" source))
+  (define wrapper (edn-triples->syntax triples source))
+  (define stxs (drop-beagle-file-wrapper wrapper source))
+  (stxs->module-source stxs source))
+
+;; --- durable ProgramRoot/Model -> reader facts ----------------------------
+;; ProgramRoot's canonical propositions intentionally retain only the semantic
+;; program projection (module membership plus represented source text).  The
+;; reader-fact projection is a derived compiler input: parse the represented
+;; bytes in memory, then hand the lossless reader triples to facts-module-input.
+;; No path is opened or consulted, and the Store model remains authoritative.
+
+(define (store-triple? value)
+  (or (and (list? value) (= 3 (length value)))
+      (and (vector? value) (= 3 (vector-length value)))))
+
+(define (store-triple-part value index)
+  (if (vector? value) (vector-ref value index) (list-ref value index)))
+
+(define (store-keyword=? value name)
+  (or (equal? value (string->keyword name))
+      (equal? value (string-append ":" name))
+      (equal? value (string->symbol (string-append ":" name)))))
+
+(define (module-term=? value)
+  (or (string? value) (keyword? value) (symbol? value)))
+
+(define (module-source-id value index)
+  (define text
+    (cond
+      [(string? value) value]
+      [(keyword? value) (keyword->string value)]
+      [(symbol? value) (symbol->string value)]
+      [else (format "module-~a" index)]))
+  ;; Source ids are compiler citations, not paths to read.  Give the in-memory
+  ;; reader a known Beagle extension while retaining the semantic module name.
+  (if (regexp-match? #rx"\\.(bclj|bjs|bnix|bgl)$" text)
+      text
+      (string-append text ".bclj")))
+
+(define (program-root-propositions root)
+  (cond
+    [(program-root-input? root) (program-root-input-propositions root)]
+    [(hash? root)
+     (or (hash-ref root 'propositions #f)
+         (hash-ref root ':propositions #f)
+         (hash-ref root (string->keyword "propositions") #f))]
+    [else #f]))
+
+(define (program-root->facts-inputs root)
+  "Decode one Store-owned ProgramRoot into in-memory reader-fact inputs."
+  (define propositions (program-root-propositions root))
+  (unless (and (list? propositions)
+               (andmap store-triple? propositions))
+    (raise-argument-error
+     'program-root->facts-inputs
+     "program-root-input? or a hash with a list of Store Triples"
+     root))
+  (define modules
+    (for/list ([proposition (in-list propositions)]
+               #:when
+               (and (store-triple? proposition)
+                    (store-keyword=?
+                     (store-triple-part proposition 1) "represented_by")))
+      (define module (store-triple-part proposition 0))
+      (define source (store-triple-part proposition 2))
+      (unless (module-term=? module)
+        (error 'program-root->facts-inputs
+               "represented source has a non-module subject: ~v" module))
+      (unless (string? source)
+        (error 'program-root->facts-inputs
+               "represented source for ~v is not a String" module))
+      (list module source)))
+  (when (null? modules)
+    (error 'program-root->facts-inputs
+           "ProgramRoot contains no represented source modules"))
+  (define seen (make-hash))
+  (for/list ([module-source (in-list modules)] [index (in-naturals)])
+    (define module (first module-source))
+    (define source (second module-source))
+    (define source-id (module-source-id module index))
+    (when (hash-has-key? seen source-id)
+      (error 'program-root->facts-inputs
+             "ProgramRoot contains duplicate module source id ~a" source-id))
+    (hash-set! seen source-id #t)
+    (with-handlers ([exn:fail?
+                     (lambda (error)
+                       (raise
+                        (exn:fail
+                         (format "~a: ~a" source-id (exn-message error))
+                         (exn-continuation-marks error))))])
+      (define stxs
+        (read-beagle-syntax/bytes
+         source-id
+         (string->bytes/utf-8 source)
+         #:source-id source-id))
+      ;; `stx->facts` retains native Racket leaf values.  Store's durable
+      ;; reader-fact wire uses the canonical EDN spelling (for example, a
+      ;; symbol leaf is stored as a String), so normalize in memory through
+      ;; the same line encoder used by the facts round-trip gate.
+      (define wrapper (datum->syntax #f (cons 'beagle-file stxs)))
+      (define triples
+        (for/list ([line (in-list (stx->edn-lines wrapper))])
+          (call-with-input-string line read)))
+      (facts-module-input source-id triples))))
+
+(define (model->facts-inputs model)
+  "Decode a Store model (one or more ProgramRoots) into reader facts."
+  (cond
+    [(program-model-input? model)
+     (define roots (program-model-input-roots model))
+     (unless (and (list? roots) (pair? roots))
+       (raise-argument-error 'model->facts-inputs "program-model-input?" model))
+     (append-map program-root->facts-inputs roots)]
+    [(program-root-input? model) (program-root->facts-inputs model)]
+    [(and (list? model) (andmap program-root-input? model))
+     (append-map program-root->facts-inputs model)]
+    [else
+     (raise-argument-error
+      'model->facts-inputs
+      "program-model-input?, program-root-input?, or list of ProgramRoots"
+      model)]))
 
 (struct candidate-overlay (by-namespace by-source) #:transparent)
 
@@ -1066,9 +1228,48 @@
      #:capture-types? capture-types?
      #:shadow-facts? shadow-facts?)))
 
+;; Check compiler input carried by a durable model directly.  The result and
+;; all checking/emission options intentionally match `check-edn-overlay`; only
+;; acquisition differs, and no source text or EDN path is consulted.
+(define (check-facts-overlay inputs
+                             #:check-profile [check-profile 2]
+                             #:check-namespaces [check-namespaces #f]
+                             #:check-sources [check-sources #f]
+                             #:emit? [emit? #t]
+                             #:capture-types? [capture-types? #f]
+                             #:shadow-facts? [shadow-facts? #f])
+  (let/ec abort
+    (define sources
+      (for/list ([input (in-list inputs)])
+        (with-handlers
+            ([(lambda (_value) #t)
+              (lambda (value)
+                (abort
+                 (failed-result
+                  (and (facts-module-input? input)
+                       (facts-module-input-source-id input))
+                  'read
+                  value)))])
+          (facts->module-source input))))
+    (check-module-overlay
+     sources
+     #:check-profile check-profile
+     #:check-namespaces check-namespaces
+     #:check-sources check-sources
+     #:emit? emit?
+     #:capture-types? capture-types?
+     #:shadow-facts? shadow-facts?)))
+
 (provide
  MODULE-CHECK-RULE-IDENTITY-V1
+ (struct-out facts-module-input)
+ (struct-out program-root-input)
+ (struct-out program-model-input)
+ facts->module-source
+ program-root->facts-inputs
+ model->facts-inputs
  check-edn-overlay
+ check-facts-overlay
  check-module-overlay
  check-module-overlay/incremental
  check-module-source-closure

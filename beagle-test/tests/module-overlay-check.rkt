@@ -1541,3 +1541,74 @@
   (check-regexp-match
    #rx"arg 1 expected Int, got String"
    (diagnostic-text result)))
+
+(test-case "durable model facts enter the checker without a source reread"
+  ;; Acquire the reader facts once, then remove the physical source before
+  ;; checking.  The in-memory path must still produce the same checked module;
+  ;; a hidden source/render round-trip would fail here.
+  (define source-file (make-temporary-file "beagle-model-input-~a.bclj"))
+  (dynamic-wind
+   void
+   (lambda ()
+     (write-text!
+      source-file
+      (string-append
+       "#lang beagle/clj\n"
+       "(ns model.direct)\n"
+       "(defn add [(x Int)] Int (+ x 1))\n"))
+     (define stxs (read-beagle-syntax source-file))
+     (define triples
+       (for/list ([line
+                   (in-list
+                    (datum->edn-lines
+                     (cons 'beagle-file (map syntax->datum stxs))))])
+         (read (open-input-string line))))
+     (delete-file source-file)
+     (define result
+       (check-facts-overlay
+        (list (facts-module-input "model/direct.bclj" triples))
+        #:emit? #t))
+     (check-true (overlay-check-result-ok? result) (diagnostic-text result))
+     (define module (car (overlay-check-result-modules result)))
+     (check-equal? (checked-overlay-module-namespace module) 'model.direct)
+     (check-true (string-contains?
+                  (checked-overlay-module-emitted module)
+                  "defn add")))
+   (lambda ()
+     (when (file-exists? source-file)
+       (delete-file source-file)))))
+
+(test-case "ProgramRoot decodes represented modules to reader facts in memory"
+  (define source
+    (string-append
+     "#lang beagle/clj\n"
+     "(ns model.rooted)\n"
+     "(defn add [(x Int)] Int (+ x 1))\n"))
+  (define root
+    (program-root-input
+     "model-space"
+     "root-1"
+     7
+     ':program
+     (list
+      (list "model.rooted" ':member_of ':modules)
+      (list "model.rooted" ':represented_by source))))
+  (define inputs (program-root->facts-inputs root))
+  (check-equal? (length inputs) 1)
+  (check-equal? (length (model->facts-inputs (program-model-input (list root)))) 1)
+  (check-equal? (facts-module-input-source-id (car inputs))
+                "model.rooted.bclj")
+  (define result (check-facts-overlay inputs #:emit? #t))
+  (check-true (overlay-check-result-ok? result) (diagnostic-text result))
+  (check-equal?
+   (checked-overlay-module-namespace
+    (car (overlay-check-result-modules result)))
+   'model.rooted))
+
+(test-case "model decoder rejects a root without represented source"
+  (check-exn
+   #rx"contains no represented source modules"
+   (lambda ()
+     (program-root->facts-inputs
+      (program-root-input "space" "root" 1 ':program
+                          (list (list "model.empty" ':member_of ':modules)))))))
