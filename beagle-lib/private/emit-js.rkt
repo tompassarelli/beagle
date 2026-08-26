@@ -211,10 +211,14 @@
     [(instance?)
      (and (= n 2)
           (or (symbol? (car args)) (qualified-ref? (car args)))
-          (runtime-render-call
-           "record_instance_p"
-           (list (format "~v" (normalized-js-identity (car args) #:record? #t))
-                 (emit-expr (cadr args)))))]
+          (if (set-member? (current-js-externs) (car args))
+              (format "(~a instanceof ~a)"
+                      (emit-expr (cadr args))
+                      (emit-expr (car args)))
+              (runtime-render-call
+               "record_instance_p"
+               (list (format "~v" (normalized-js-identity (car args) #:record? #t))
+                     (emit-expr (cadr args))))))]
     [(count)
      (if (= n 1)
        (let ([coll (car args)])
@@ -877,6 +881,7 @@
 (define current-js-record-ns (make-parameter (hasheq)))
 (define current-js-record-validator-refs (make-parameter (hasheq)))
 (define current-js-record-constructors (make-parameter (set)))
+(define current-js-externs (make-parameter (set)))
 (define current-js-scalar-fns (make-parameter (set)))
 (define current-js-symbol-ns (make-parameter (hasheq)))
 (define current-js-namespace (make-parameter 'beagle.user))
@@ -2078,6 +2083,8 @@
                   (build-record-validator-reference-table prog)]
                  [current-js-record-constructors
                   (build-record-constructor-set prog)]
+                 [current-js-externs
+                  (list->set (hash-keys (program-externs prog)))]
                  [current-js-scalar-fns (build-scalar-fns prog)]
                  [current-js-symbol-ns (program-imported-symbol-ns prog)]
                  [current-js-namespace (program-namespace prog)]

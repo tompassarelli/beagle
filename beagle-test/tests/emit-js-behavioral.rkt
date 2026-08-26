@@ -1185,6 +1185,17 @@ console.assert(my__x === 2, 'my_x should be 2, got ' + my__x);
       console.log(JSON.stringify([classify(Point(1)), classify(Circle(2)), classify({}), classify(null)]));"
      "[[true,false,false],[false,true,false],[false,false,false],[false,false,false]]")
 
+   (check-js-output "instance? uses foreign JavaScript constructors"
+     (list '(declare-extern Error Any)
+           '(defn preserve-error [(value Any)] Any
+              (if (instance? Error value) value nil)))
+     "const original = new Error('lease lost');
+      const preserved = preserve_error(original);
+      console.log(preserved === original);
+      console.log(preserved.message);
+      console.log(preserve_error({}) === null);"
+     "true\nlease lost\ntrue")
+
    ;; --- edge cases ----------------------------------------------------------
 
    (check-js-output "inc and dec"
