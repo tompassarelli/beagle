@@ -3009,9 +3009,8 @@ bb -cp "$compiled:$semantic_read_classpath" -e '
 
 ;; The commander benchmark measured 5.49s serial for 118 functions versus
 ;; roughly 40s of fixed worker-process startup.  Linear extrapolation puts the
-;; crossover near 118 * 40 / 5.49 = 860 functions; 1024 is a conservative
-;; default that leaves margin for non-linear startup and host variance.
-(def emission-parallel-threshold 1024)
+;; crossover near 118 * 40 / 5.49 = 860 functions.
+(def emission-parallel-threshold 860)
 
 (defn emission-parallel? [program]
   (let [function-count (count (core/nativecoreprogram-functions program))
