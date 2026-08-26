@@ -1,0 +1,80 @@
+#lang beagle/clj
+
+(ns clojure-to-beagle-vslice.converter)
+
+(def REJECTION String "rejected: unsafe, malformed, or unsupported Clojure input")
+
+(defrecord NamespaceIR [name String])
+
+(defrecord FunctionIR
+  [name String
+   parameter String
+   prefix String])
+
+(defrecord ModuleIR
+  [namespace NamespaceIR
+   function FunctionIR])
+
+(defn reject! [] Any
+  (throw (ex-info REJECTION {})))
+
+(defn safe-read-forms! [source String] Any
+  (try
+    (binding [*read-eval* false]
+      (read-string (str "[" source "\n]")))
+    (catch Throwable _
+      (reject!))))
+
+(defn canonical-namespace! [form Any] NamespaceIR
+  (if (and (seq? form)
+           (= 2 (count form))
+           (= "ns" (str (first form)))
+           (symbol? (second form)))
+    (->NamespaceIR (str (second form)))
+    (reject!)))
+
+(defn canonical-function! [form Any] FunctionIR
+  (if (and (seq? form)
+           (= 4 (count form))
+           (= "defn" (str (first form)))
+           (symbol? (second form))
+           (vector? (nth form 2))
+           (= 1 (count (nth form 2)))
+           (symbol? (first (nth form 2)))
+           (seq? (nth form 3))
+           (= 3 (count (nth form 3)))
+           (= "str" (str (first (nth form 3))))
+           (string? (second (nth form 3)))
+           (= (first (nth form 2)) (nth (nth form 3) 2)))
+    (->FunctionIR (str (second form))
+                  (str (first (nth form 2)))
+                  (second (nth form 3)))
+    (reject!)))
+
+(defn canonicalize! [forms Any] ModuleIR
+  (if (and (vector? forms) (= 2 (count forms)))
+    (->ModuleIR (canonical-namespace! (first forms))
+                (canonical-function! (second forms)))
+    (reject!)))
+
+(defn emit-beagle [module ModuleIR] String
+  (let [namespace (moduleir-namespace module)
+        function (moduleir-function module)]
+    (str "#lang beagle/clj\n\n"
+         "(ns " (namespaceir-name namespace) ")\n\n"
+         "(defn " (functionir-name function)
+         " [" (functionir-parameter function) " String] String\n"
+         "  (str " (pr-str (functionir-prefix function)) " "
+         (functionir-parameter function) "))\n")))
+
+(defn -main [& args] Nil
+  (try
+    (if (= 1 (count args))
+      (print (emit-beagle (canonicalize! (safe-read-forms! (slurp (first args))))))
+      (throw (ex-info "usage" {})))
+    (catch Throwable _
+      (binding [*out* *err*]
+        (println REJECTION))
+      (System/exit 2))))
+
+(apply -main *command-line-args*)
