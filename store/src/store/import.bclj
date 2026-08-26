@@ -220,7 +220,7 @@
 (defn- safe-file->triples [path String] (Vec t/Triple)
   (try
     (file->triples path (store.rt/slurp path))
-    (catch (error Exception)
+    (catch Exception error
       (warn (str path " — skipped (could not parse): " (.getMessage error)))
       [])))
 
