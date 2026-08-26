@@ -15,6 +15,14 @@ emitted_converter="$artifact_dir/converter.clj"
 cmp "$artifact_dir/first.bclj" "$artifact_dir/second.bclj"
 
 "$repo_dir/bin/beagle-check" "$artifact_dir/first.bclj"
+"$repo_dir/bin/beagle-build" "$artifact_dir/first.bclj" "$artifact_dir/generated.clj"
+
+original_result="$(ORACLE_PATH="$slice_dir/input.clj" "$clojure_bin" -M -e \
+  '(do (load-file (System/getenv "ORACLE_PATH")) (print (demo.offset/tail-offset "abcdef" 1)))')"
+generated_result="$(ORACLE_PATH="$artifact_dir/generated.clj" "$clojure_bin" -M -e \
+  '(do (load-file (System/getenv "ORACLE_PATH")) (print (demo.offset/tail-offset "abcdef" 1)))')"
+test "$original_result" = "cdef"
+test "$generated_result" = "$original_result"
 
 assert_rejected() {
   local name="$1"
@@ -38,6 +46,23 @@ assert_rejected malformed $'(ns demo.greeter\n' "$repo_dir"
 assert_rejected unsupported \
   $'(ns demo.greeter)\n\n(def greeting "Hello")\n' "$repo_dir"
 
+printf '%s' \
+  $'(ns demo.offset)\n\n(defn tail-offset [text amount]\n  (let [offset (mystery amount 1)]\n    (subs text offset)))\n' \
+  >"$artifact_dir/unresolved.clj"
+for run in first second; do
+  if "$clojure_bin" -M "$emitted_converter" "$artifact_dir/unresolved.clj" \
+      >"$artifact_dir/unresolved.$run.stdout" \
+      2>"$artifact_dir/unresolved.$run.stderr"; then
+    echo "unresolved input was accepted" >&2
+    exit 1
+  fi
+  test ! -s "$artifact_dir/unresolved.$run.stdout"
+done
+cmp "$artifact_dir/unresolved.first.stderr" \
+  "$artifact_dir/unresolved.second.stderr"
+test "$(cat "$artifact_dir/unresolved.first.stderr")" = \
+  "clojure-to-beagle[E_TYPE_UNRESOLVED] <input>:4:16 function/body/let/binding/value: no declared contract for call mystery"
+
 reader_cp="$artifact_dir/reader-cp"
 reader_marker="$artifact_dir/reader-executed"
 mkdir -p "$reader_cp"
@@ -55,3 +80,5 @@ test ! -e "$reader_marker"
 
 printf 'byte-identical output:\n'
 cat "$artifact_dir/first.bclj"
+printf 'byte-identical diagnostic:\n'
+cat "$artifact_dir/unresolved.first.stderr"

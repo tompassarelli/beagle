@@ -1,4 +1,5 @@
-(ns demo.greeter)
+(ns demo.offset)
 
-(defn greet [name]
-  (str "Hello, " name))
+(defn tail-offset [text amount]
+  (let [offset (+ amount 1)]
+    (subs text offset)))

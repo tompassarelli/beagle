@@ -3,13 +3,37 @@
 (ns clojure-to-beagle-vslice.converter)
 
 (def REJECTION String "rejected: unsafe, malformed, or unsupported Clojure input")
+(def READER-EOF Keyword :clojure-to-beagle/reader-eof)
+
+(defrecord SourceSpan
+  [line Int
+   column Int])
+
+(defrecord ConstraintIR
+  [path String
+   subject String
+   required-type String
+   evidence String
+   span SourceSpan])
 
 (defrecord NamespaceIR [name String])
 
+(defrecord BindingIR
+  [name String
+   operator String
+   parameter String
+   literal Int
+   inferred-type String
+   span SourceSpan])
+
 (defrecord FunctionIR
   [name String
-   parameter String
-   prefix String])
+   string-parameter String
+   integer-parameter String
+   binding BindingIR
+   result-operator String
+   result-type String
+   constraints (Vec ConstraintIR)])
 
 (defrecord ModuleIR
   [namespace NamespaceIR
@@ -18,17 +42,45 @@
 (defn reject! [] Any
   (throw (ex-info REJECTION {})))
 
-(defn reject-tagged-reader! [_tag Any _value Any] Any
+(defn reject-tagged-reader!
+  [_tag Any
+   _value Any] Any
   (reject!))
+
+(defn fail-diagnostic! [message String] Any
+  (throw (ex-info message {:converter-diagnostic true})))
 
 (defn safe-read-forms! [source String] Any
   (try
     (binding [*read-eval* false
               *data-readers* {}
               *default-data-reader-fn* reject-tagged-reader!]
-      (read-string (str "[" source "\n]")))
+      (let [reader (clojure.lang.LineNumberingPushbackReader.
+                    (java.io.StringReader. source))]
+        (loop [forms (Vec Any) []]
+          (let [form (clojure.core/read {:eof READER-EOF} reader)]
+            (if (= READER-EOF form)
+              forms
+              (recur (conj forms form)))))))
     (catch Throwable _
       (reject!))))
+
+(defn source-span! [form Any] SourceSpan
+  (let [form-meta (meta form)
+        line (get form-meta :line)
+        column (get form-meta :column)]
+    (if (and (integer? line) (integer? column))
+      (->SourceSpan line column)
+      (reject!))))
+
+(defn unresolved-call!
+  [path String
+   form Any] Any
+  (let [span (source-span! form)]
+    (fail-diagnostic!
+     (str "clojure-to-beagle[E_TYPE_UNRESOLVED] <input>:"
+          (sourcespan-line span) ":" (sourcespan-column span) " " path
+          ": no declared contract for call " (str (first form))))))
 
 (defn canonical-namespace! [form Any] NamespaceIR
   (if (and (seq? form)
@@ -44,16 +96,81 @@
            (= "defn" (str (first form)))
            (symbol? (second form))
            (vector? (nth form 2))
-           (= 1 (count (nth form 2)))
+           (= 2 (count (nth form 2)))
            (symbol? (first (nth form 2)))
+           (symbol? (second (nth form 2)))
+           (not= (first (nth form 2)) (second (nth form 2)))
            (seq? (nth form 3))
            (= 3 (count (nth form 3)))
-           (= "str" (str (first (nth form 3))))
-           (string? (second (nth form 3)))
-           (= (first (nth form 2)) (nth (nth form 3) 2)))
-    (->FunctionIR (str (second form))
-                  (str (first (nth form 2)))
-                  (second (nth form 3)))
+           (= "let" (str (first (nth form 3))))
+           (vector? (second (nth form 3)))
+           (= 2 (count (second (nth form 3))))
+           (symbol? (first (second (nth form 3))))
+           (seq? (second (second (nth form 3))))
+           (= 3 (count (second (second (nth form 3)))))
+           (symbol? (first (second (second (nth form 3)))))
+           (seq? (nth (nth form 3) 2))
+           (= 3 (count (nth (nth form 3) 2)))
+           (symbol? (first (nth (nth form 3) 2))))
+    (let [parameters (nth form 2)
+          string-parameter (first parameters)
+          integer-parameter (second parameters)
+          let-form (nth form 3)
+          bindings (second let-form)
+          binding-name (first bindings)
+          binding-value (second bindings)
+          result (nth let-form 2)]
+      (if (not= "+" (str (first binding-value)))
+        (unresolved-call! "function/body/let/binding/value" binding-value)
+        (if (not= "subs" (str (first result)))
+          (unresolved-call! "function/body/let/result" result)
+          (if (and (= integer-parameter (second binding-value))
+                   (integer? (nth binding-value 2))
+                   (= string-parameter (second result))
+                   (= binding-name (nth result 2))
+                   (not= binding-name string-parameter)
+                   (not= binding-name integer-parameter))
+            (let [binding-span SourceSpan (source-span! binding-value)
+                  result-span SourceSpan (source-span! result)
+                  constraints (Vec ConstraintIR) [(->ConstraintIR
+                    "function/parameters/0"
+                    (str string-parameter)
+                    "String"
+                    "builtin:subs/argument-0"
+                    result-span)
+                   (->ConstraintIR
+                    "function/parameters/1"
+                    (str integer-parameter)
+                    "Int"
+                    "builtin:+/argument-0"
+                    binding-span)
+                   (->ConstraintIR
+                    "function/body/let/binding"
+                    (str binding-name)
+                    "Int"
+                    "builtin:+/return"
+                    binding-span)
+                   (->ConstraintIR
+                    "function/return"
+                    (str (second form))
+                    "String"
+                    "builtin:subs/return"
+                    result-span)]]
+              (->FunctionIR
+               (str (second form))
+               (str string-parameter)
+               (str integer-parameter)
+               (->BindingIR
+                (str binding-name)
+                "+"
+                (str integer-parameter)
+                (nth binding-value 2)
+                "Int"
+                binding-span)
+               "subs"
+               "String"
+               constraints))
+            (reject!)))))
     (reject!)))
 
 (defn canonicalize! [forms Any] ModuleIR
@@ -64,22 +181,34 @@
 
 (defn emit-beagle [module ModuleIR] String
   (let [namespace (moduleir-namespace module)
-        function (moduleir-function module)]
+        function (moduleir-function module)
+        binding (functionir-binding function)]
     (str "#lang beagle/clj\n\n"
          "(ns " (namespaceir-name namespace) ")\n\n"
          "(defn " (functionir-name function)
-         " [" (functionir-parameter function) " String] String\n"
-         "  (str " (pr-str (functionir-prefix function)) " "
-         (functionir-parameter function) "))\n")))
+         " [" (functionir-string-parameter function) " String "
+         (functionir-integer-parameter function) " Int] "
+         (functionir-result-type function) "\n"
+         "  (let [" (bindingir-name binding) " "
+         (bindingir-inferred-type binding) " (" (bindingir-operator binding) " "
+         (bindingir-parameter binding) " " (bindingir-literal binding) ")]\n"
+         "    (" (functionir-result-operator function) " "
+         (functionir-string-parameter function) " "
+         (bindingir-name binding) ")))\n")))
+
+(defn diagnostic-message [error Any] String
+  (if (= true (get (ex-data error) :converter-diagnostic))
+    (ex-message error)
+    REJECTION))
 
 (defn -main [& args] Nil
   (try
     (if (= 1 (count args))
       (print (emit-beagle (canonicalize! (safe-read-forms! (slurp (first args))))))
       (throw (ex-info "usage" {})))
-    (catch Throwable _
+    (catch Throwable error
       (binding [*out* *err*]
-        (println REJECTION))
+        (println (diagnostic-message error)))
       (System/exit 2))))
 
 (apply -main *command-line-args*)
