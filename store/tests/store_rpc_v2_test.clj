@@ -12,7 +12,7 @@
     (f)
     nil
     (catch clojure.lang.ExceptionInfo e
-      (:store/code (ex-data e)))))
+      (:store-rpc/code (ex-data e)))))
 
 (defn hex-bytes [text]
   (byte-array
@@ -64,10 +64,10 @@
 
 (def four-packet-golden
   (str
-   "4652414d5250430002000000010077000000080706050403020101090000006d73612d737061636506050000007175657279012900000000000000011900000001070106000000637572736f720605000000616674657202070000000000000001dc050000070105000000416c6963650702d6ffffffffffffff03000000000000f83f08c059cc690000000015cd5b0705"
-   "4652414d5250430002000000020096000000080706050403020101090000006d73612d7370616365060500000071756572792a00000000000000010200000001070106000000637572736f720605000000616674657202070000000000000000010608000000636f6e666c69637401010d00000076657273696f6e206d6f766564010401070105000000416c6963650702d6ffffffffffffff03000000000000f83f08c059cc690000000015cd5b0705"
-   "4652414d52504300020000000300000000000900000000000000"
-   "4652414d52504300020000000400250000000a0000000000000001090000006d73612d737061636506070000006368616e6765642b00000000000000000000"))
+   "53544f524552504302000000010077000000080706050403020101090000006d73612d737061636506050000007175657279012900000000000000011900000001070106000000637572736f720605000000616674657202070000000000000001dc050000070105000000416c6963650702d6ffffffffffffff03000000000000f83f08c059cc690000000015cd5b0705"
+   "53544f524552504302000000020096000000080706050403020101090000006d73612d7370616365060500000071756572792a00000000000000010200000001070106000000637572736f720605000000616674657202070000000000000000010608000000636f6e666c69637401010d00000076657273696f6e206d6f766564010401070105000000416c6963650702d6ffffffffffffff03000000000000f83f08c059cc690000000015cd5b0705"
+   "53544f5245525043020000000300000000000900000000000000"
+   "53544f5245525043020000000400250000000a0000000000000001090000006d73612d737061636506070000006368616e6765642b00000000000000000000"))
 
 (def cursor (t/triple "cursor" :after 7))
 (def payload
@@ -76,24 +76,24 @@
             true))
 (def request-id 0x0102030405060708)
 (def request-packet
-  (wire/rpc-request-packet
+  (wire/store-rpc-request-packet
    request-id
    (wire/rpc-request!
     "msa-space" :query 41 (wire/rpc-page-request! 25 cursor) 1500 payload)))
 (def response-packet
-  (wire/rpc-response-packet
+  (wire/store-rpc-response-packet
    request-id
    (wire/rpc-response!
     "msa-space" :query 42
     (wire/rpc-page-response! 2 cursor false)
     (wire/rpc-error! :conflict true "version moved" false)
     payload)))
-(def cancel-packet (wire/rpc-cancel-packet 9))
+(def cancel-packet (wire/store-rpc-cancel-packet 9))
 (def event-packet
-  (wire/rpc-event-packet
+  (wire/store-rpc-event-packet
    10 (wire/rpc-response! "msa-space" :changed 43 nil nil nil)))
 (def packets [request-packet response-packet cancel-packet event-packet])
-(def encoded-packets (mapv wire/encode-rpc-packet-v2! packets))
+(def encoded-packets (mapv wire/store-rpc-encode-packet-v2! packets))
 (def encoded-golden (concat-bytes encoded-packets))
 
 (let [actual (bytes-hex encoded-golden)
@@ -108,20 +108,20 @@
           (= four-packet-golden actual)))
 
 (check! "all four packet kinds decode to their closed packets"
-        (= packets (mapv wire/decode-rpc-packet-v2! encoded-packets)))
+        (= packets (mapv wire/store-rpc-decode-packet-v2! encoded-packets)))
 (check! "cancel has a zero-byte body"
         (= 26 (alength ^bytes (nth encoded-packets 2))))
 (check! "request id preserves all signed-long bits"
         (= -1
-           (t/rpcpacketv2-request-id
-            (wire/decode-rpc-packet-v2!
-             (wire/encode-rpc-packet-v2! (wire/rpc-cancel-packet -1))))))
+           (t/storerpcpacketv2-request-id
+            (wire/store-rpc-decode-packet-v2!
+             (wire/store-rpc-encode-packet-v2! (wire/store-rpc-cancel-packet -1))))))
 (check! "false remains a present optional error-detail Term"
         (false?
          (t/rpc-error-detail-value
           (t/rpcresponse-error
-           (t/rpcpacketv2-response
-            (wire/decode-rpc-packet-v2! (nth encoded-packets 1)))))))
+           (t/storerpcpacketv2-response
+            (wire/store-rpc-decode-packet-v2! (nth encoded-packets 1)))))))
 
 (doseq [[label value expected]
         [["String" "é" "0102000000c3a9"]
@@ -169,22 +169,22 @@
 (check! "per-Term 65,536-node cap is enforced before body allocation"
         (= :term-codec-node-limit
            (thrown-code
-            #(wire/encode-rpc-packet-v2!
-              (wire/rpc-request-packet
+            #(wire/store-rpc-encode-packet-v2!
+              (wire/store-rpc-request-packet
                1 (wire/rpc-request! "s" :op nil nil nil
                                     (shared-ternary-term 10)))))))
 (check! "SpaceId 4,096-byte cap is enforced during encode preflight"
         (= :term-codec-string-limit
            (thrown-code
-            #(wire/encode-rpc-packet-v2!
-              (wire/rpc-request-packet
+            #(wire/store-rpc-encode-packet-v2!
+              (wire/store-rpc-request-packet
                1 (wire/rpc-request! (apply str (repeat 4097 "s"))
                                     :op nil nil nil true))))))
 (check! "one-MiB body cap is enforced before body allocation"
         (= :rpc-packet-too-large
            (thrown-code
-            #(wire/encode-rpc-packet-v2!
-              (wire/rpc-request-packet
+            #(wire/store-rpc-encode-packet-v2!
+              (wire/store-rpc-request-packet
                1 (wire/rpc-request! "s" :op nil nil nil
                                     (.repeat "x" wire/rpc-v2-max-string-bytes)))))))
 (check! "open-map request payloads are rejected at the closed Term boundary"
@@ -193,8 +193,8 @@
 
 (let [request-bytes (first encoded-packets)
       simple-page-response
-      (wire/encode-rpc-packet-v2!
-       (wire/rpc-response-packet
+      (wire/store-rpc-encode-packet-v2!
+       (wire/store-rpc-response-packet
         1 (wire/rpc-response! "s" :op 0
                               (wire/rpc-page-response! 0 nil false)
                               nil nil)))
@@ -208,48 +208,48 @@
                                  (- (alength ^bytes simple-page-response) 3) 2)]
   (check! "bad magic is typed"
           (= :rpc-invalid-magic
-             (thrown-code #(wire/decode-rpc-packet-v2!
+             (thrown-code #(wire/store-rpc-decode-packet-v2!
                             (altered-byte request-bytes 0 0)))))
   (check! "unsupported version is typed"
           (= :rpc-unsupported-version
-             (thrown-code #(wire/decode-rpc-packet-v2!
+             (thrown-code #(wire/store-rpc-decode-packet-v2!
                             (altered-byte request-bytes 8 1)))))
   (check! "unknown packet kind is typed"
           (= :rpc-invalid-kind
-             (thrown-code #(wire/decode-rpc-packet-v2!
+             (thrown-code #(wire/store-rpc-decode-packet-v2!
                             (altered-byte request-bytes 12 9)))))
   (check! "nonzero v2 flags are rejected"
           (= :rpc-invalid-flags
-             (thrown-code #(wire/decode-rpc-packet-v2!
+             (thrown-code #(wire/store-rpc-decode-packet-v2!
                             (altered-byte request-bytes 13 1)))))
   (check! "short declared body is typed as truncated"
           (= :rpc-truncated
-             (thrown-code #(wire/decode-rpc-packet-v2! truncated))))
+             (thrown-code #(wire/store-rpc-decode-packet-v2! truncated))))
   (check! "bytes beyond declared body are rejected"
           (= :rpc-trailing-bytes
-             (thrown-code #(wire/decode-rpc-packet-v2! extra))))
+             (thrown-code #(wire/store-rpc-decode-packet-v2! extra))))
   (check! "bytes left by the body decoder are rejected"
           (= :rpc-trailing-bytes
-             (thrown-code #(wire/decode-rpc-packet-v2! extra-in-body))))
+             (thrown-code #(wire/store-rpc-decode-packet-v2! extra-in-body))))
   (check! "presence bytes accept only 0 or 1"
           (= :rpc-invalid-presence
-             (thrown-code #(wire/decode-rpc-packet-v2! invalid-presence))))
+             (thrown-code #(wire/store-rpc-decode-packet-v2! invalid-presence))))
   (check! "boolean bytes accept only 0 or 1"
           (= :rpc-invalid-boolean
-             (thrown-code #(wire/decode-rpc-packet-v2! invalid-bool))))
+             (thrown-code #(wire/store-rpc-decode-packet-v2! invalid-bool))))
   (check! "bad Term tag is typed"
           (= :term-codec-bad-tag
-             (thrown-code #(wire/decode-rpc-packet-v2!
+             (thrown-code #(wire/store-rpc-decode-packet-v2!
                             (altered-byte request-bytes 40 99)))))
   (check! "invalid UTF-8 is typed"
           (= :term-codec-invalid-utf8
              (thrown-code
-              #(wire/decode-rpc-packet-v2!
+              #(wire/store-rpc-decode-packet-v2!
                 (-> request-bytes
                     (altered-byte 31 0xc3)
                     (altered-byte 32 0x28)))))))
 
-(let [cancel (wire/encode-rpc-packet-v2! cancel-packet)
+(let [cancel (wire/store-rpc-encode-packet-v2! cancel-packet)
       nonempty (put-u32-le! (appended-byte cancel 0) 14 1)
       too-large-header (put-u32-le!
                         (java.util.Arrays/copyOf ^bytes cancel 26)
@@ -263,18 +263,18 @@
       oversized-space (concat-bytes [request-header space-prefix])]
   (check! "cancel rejects a nonempty body"
           (= :rpc-invalid-shape
-             (thrown-code #(wire/decode-rpc-packet-v2! nonempty))))
+             (thrown-code #(wire/store-rpc-decode-packet-v2! nonempty))))
   (check! "declared body cap is checked before truncation or allocation"
           (= :rpc-packet-too-large
-             (thrown-code #(wire/decode-rpc-packet-v2! too-large-header))))
+             (thrown-code #(wire/store-rpc-decode-packet-v2! too-large-header))))
   (check! "SpaceId length is rejected before its bytes are allocated/read"
           (= :term-codec-string-limit
-             (thrown-code #(wire/decode-rpc-packet-v2! oversized-space)))))
+             (thrown-code #(wire/store-rpc-decode-packet-v2! oversized-space)))))
 
-(let [oversized (byte-array (inc wire/rpc-v2-max-packet-bytes))]
+(let [oversized (byte-array (inc wire/store-rpc-v2-max-packet-bytes))]
   (check! "physical packet cap is checked before ByteBuffer/body allocation"
           (= :rpc-packet-too-large
-             (thrown-code #(wire/decode-rpc-packet-v2! oversized)))))
+             (thrown-code #(wire/store-rpc-decode-packet-v2! oversized)))))
 
 (let [bad-instant (hex-bytes "08000000000000000000ca9a3b")]
   (check! "noncanonical Instant nanos are rejected"

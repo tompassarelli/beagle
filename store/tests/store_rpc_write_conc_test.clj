@@ -33,7 +33,7 @@
 (defn payload [response] (t/rpc-response-payload-value response))
 (defn error-code [response]
   (some-> response t/rpcresponse-error t/rpcerror-code))
-(defn fields [value tag count-value] (wire/rpc-packet-fields! value tag count-value))
+(defn fields [value tag count-value] (wire/rpc-record-fields! value tag count-value))
 (defn values-list [value] (wire/rpc-list-values! value))
 
 (defn action-results [response]

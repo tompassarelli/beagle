@@ -30,7 +30,7 @@
             :else (do (Thread/sleep 25) (recur (inc attempt)))))))
 
 (defn fields [value tag count-value]
-  (wire/rpc-packet-fields! value tag count-value))
+  (wire/rpc-record-fields! value tag count-value))
 
 (defn values-list [value]
   (wire/rpc-list-values! value))
@@ -161,7 +161,7 @@
             (and (= :ready state) (= 0 live-count) (= :rpc/jvm engine)
                  (= [0 0 0 0] [hits misses bytes evictions]))))
 
-  (let [cancel-bytes (wire/encode-rpc-packet-v2! (wire/rpc-cancel-packet 44))]
+  (let [cancel-bytes (wire/store-rpc-encode-packet-v2! (wire/store-rpc-cancel-packet 44))]
     (aset-byte cancel-bytes 14 (unchecked-byte 255))
     (aset-byte cancel-bytes 15 (unchecked-byte 255))
     (aset-byte cancel-bytes 16 (unchecked-byte 255))
@@ -820,7 +820,7 @@
 
     (let [cancellation {:cancelled (atom false) :query-control (atom nil)}]
       (swap! server/active-requests assoc 777 cancellation)
-      (server/handle-rpc-packet! (wire/rpc-cancel-packet 777)
+      (server/handle-rpc-packet! (wire/store-rpc-cancel-packet 777)
                                       {:cancelled (atom false)
                                        :query-control (atom nil)})
       (swap! server/active-requests dissoc 777)
@@ -994,8 +994,8 @@
            accepted-request
            {:cancelled (atom false) :query-control (atom nil)})
           encoded-accepted
-          (wire/encode-rpc-packet-v2!
-           (wire/rpc-response-packet 8001 accepted))
+          (wire/store-rpc-encode-packet-v2!
+           (wire/store-rpc-response-packet 8001 accepted))
           results (action-results accepted)
           coordinates
           (mapv #(nth % 2) results)
@@ -1055,22 +1055,22 @@
            long-space :rpc/assert nil nil nil
            (wire/rpc-write! proposition wire/rpc-subject-any nil))
           encoded-request
-          (wire/encode-rpc-packet-v2! (wire/rpc-request-packet 9001 request))
+          (wire/store-rpc-encode-packet-v2! (wire/store-rpc-request-packet 9001 request))
           response
           (server/handle-rpc-request!
            request {:cancelled (atom false) :query-control (atom nil)})
           encoded-response
-          (wire/encode-rpc-packet-v2!
-           (wire/rpc-response-packet 9001 response))
+          (wire/store-rpc-encode-packet-v2!
+           (wire/store-rpc-response-packet 9001 response))
           [[input-index changed coordinate]] (action-results response)
           version
           (request! long-port long-space :rpc/version wire/rpc-unit)]
       (check! "near-max legal proposition commits with an encodable receipt"
               (and (nil? (error-code response))
                    (>= (alength encoded-request)
-                       (- wire/rpc-v2-max-packet-bytes 8192))
-                   (<= (alength encoded-request) wire/rpc-v2-max-packet-bytes)
-                   (<= (alength encoded-response) wire/rpc-v2-max-packet-bytes)
+                       (- wire/store-rpc-v2-max-packet-bytes 8192))
+                   (<= (alength encoded-request) wire/store-rpc-v2-max-packet-bytes)
+                   (<= (alength encoded-response) wire/store-rpc-v2-max-packet-bytes)
                    (= 0 input-index)
                    changed
                    (t/occurrence-coordinate? coordinate)

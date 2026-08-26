@@ -81,7 +81,7 @@
   (some-> response t/rpcresponse-error t/rpcerror-code))
 
 (defn row-count [response]
-  (let [[rows] (wire/rpc-packet-fields!
+  (let [[rows] (wire/rpc-record-fields!
                 (t/rpc-response-payload-value response) :query/rows 1)]
     (count (wire/rpc-list-values! rows))))
 

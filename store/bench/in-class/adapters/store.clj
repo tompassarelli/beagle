@@ -78,10 +78,10 @@
   (some-> response t/rpcresponse-error t/rpcerror-code))
 
 (defn query-rows [response]
-  (let [[values] (wire/rpc-packet-fields! (t/rpc-response-payload-value response)
+  (let [[values] (wire/rpc-record-fields! (t/rpc-response-payload-value response)
                                           :query/rows 1)]
     (mapv (fn [row]
-            (let [[row-values] (wire/rpc-packet-fields! row :query/row 1)]
+            (let [[row-values] (wire/rpc-record-fields! row :query/row 1)]
               (wire/rpc-list-values! row-values)))
           (wire/rpc-list-values! values))))
 

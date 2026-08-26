@@ -49,7 +49,7 @@
    {:cancelled (atom false) :query-control (atom nil)}))
 
 (defn scan-values [response]
-  (let [[values] (wire/rpc-packet-fields!
+  (let [[values] (wire/rpc-record-fields!
                   (t/rpc-response-payload-value response) :rpc/triples 1)]
     (wire/rpc-list-values! values)))
 
@@ -96,9 +96,9 @@
                     (wire/rpc-write! proposition wire/rpc-subject-any nil))
           [[_ changed coordinate]]
           (let [[results]
-                (wire/rpc-packet-fields!
+                (wire/rpc-record-fields!
                  (t/rpc-response-payload-value response) :rpc/mutation-result 1)]
-            (mapv #(wire/rpc-packet-fields! % :rpc/action-result 3)
+            (mapv #(wire/rpc-record-fields! % :rpc/action-result 3)
                   (wire/rpc-list-values! results)))]
       (check! "active write returns logical version and occurrence coordinate"
               (and changed (= 1 (t/rpcresponse-served-version response))

@@ -187,13 +187,13 @@ lease_probe='
              (rt/native-request-to! "127.0.0.1" port
                (wire/rpc-request! space op nil nil nil payload)))
       acquired (call :rpc/lease-acquire (wire/rpc-lease-acquire! :package "holder" 5000))
-      [fence _] (wire/rpc-packet-fields! (t/rpc-response-payload-value acquired) :lease/grant 2)
+      [fence _] (wire/rpc-record-fields! (t/rpc-response-payload-value acquired) :lease/grant 2)
       renewed (call :rpc/lease-renew (wire/rpc-lease-renew! fence 10000))
-      [next-fence _] (wire/rpc-packet-fields! (t/rpc-response-payload-value renewed) :lease/grant 2)
+      [next-fence _] (wire/rpc-record-fields! (t/rpc-response-payload-value renewed) :lease/grant 2)
       old-check (call :rpc/lease-check fence)
-      [old-valid _] (wire/rpc-packet-fields! (t/rpc-response-payload-value old-check) :lease/check 2)
+      [old-valid _] (wire/rpc-record-fields! (t/rpc-response-payload-value old-check) :lease/check 2)
       released (call :rpc/lease-release next-fence)
-      [released?] (wire/rpc-packet-fields! (t/rpc-response-payload-value released) :lease/released 1)]
+      [released?] (wire/rpc-record-fields! (t/rpc-response-payload-value released) :lease/released 1)]
   (if (and (nil? (t/rpcresponse-error acquired))
            (not= fence next-fence) (false? old-valid) released?)
     (println "lease-ok")

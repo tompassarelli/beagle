@@ -14,8 +14,8 @@
 (defn emit! [name entry operation payload]
   (let [request (wire/rpc-request! space operation nil nil nil payload)
         bytes
-        (wire/encode-rpc-packet-v2!
-         (wire/rpc-request-packet (swap! request-id inc) request))
+        (wire/store-rpc-encode-packet-v2!
+         (wire/store-rpc-request-packet (swap! request-id inc) request))
         filename (str name ".bin")]
     (io/copy bytes (io/file output-directory filename))
     (swap! manifest conj

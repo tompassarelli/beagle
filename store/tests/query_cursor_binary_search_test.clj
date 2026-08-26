@@ -23,7 +23,7 @@
             (>= attempt 200) nil
             :else (do (Thread/sleep 25) (recur (inc attempt)))))))
 
-(defn fields [value tag count-value] (wire/rpc-packet-fields! value tag count-value))
+(defn fields [value tag count-value] (wire/rpc-record-fields! value tag count-value))
 (defn values-list [value] (wire/rpc-list-values! value))
 (defn payload [response] (t/rpc-response-payload-value response))
 (defn error-code [response] (some-> response t/rpcresponse-error t/rpcerror-code))

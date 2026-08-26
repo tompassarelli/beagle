@@ -185,8 +185,8 @@
       (with-open [socket (java.net.Socket.)]
         (.connect socket (java.net.InetSocketAddress. "127.0.0.1" (int port)) 1000)
         (let [output (.getOutputStream socket)]
-          (.write output (wire/encode-rpc-packet-v2!
-                          (wire/rpc-request-packet
+          (.write output (wire/store-rpc-encode-packet-v2!
+                          (wire/store-rpc-request-packet
                            900001
                            (wire/rpc-request!
                             space :rpc/query nil nil 60000

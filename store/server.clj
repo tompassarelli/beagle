@@ -186,7 +186,7 @@
   "Errors reach the client as a response field, not a thrown exception, so the
    only place an error code is observable is the encoded response packet."
   [packet]
-  (if-let [error (some-> packet t/rpcpacketv2-response t/rpcresponse-error)]
+  (if-let [error (some-> packet t/storerpcpacketv2-response t/rpcresponse-error)]
     [:error (t/rpcerror-code error)]
     [:ok nil]))
 
@@ -499,8 +499,8 @@
 
 (defn- require-encodable-rpc-response!
   [request served-version payload]
-  (rpc/encode-rpc-packet-v2!
-   (rpc/rpc-response-packet
+  (rpc/store-rpc-encode-packet-v2!
+   (rpc/store-rpc-response-packet
     0
     (rpc/rpc-response!
      (t/rpcrequest-space request)
@@ -1922,8 +1922,8 @@
 
 (defn- request-body-bytes [request]
   (- (alength ^bytes
-              (rpc/encode-rpc-packet-v2!
-               (rpc/rpc-request-packet 0 request)))
+              (rpc/store-rpc-encode-packet-v2!
+               (rpc/store-rpc-request-packet 0 request)))
      rpc/rpc-v2-header-bytes))
 
 (defn- take-commit-cohort! [^LinkedBlockingQueue queue first-ticket]
@@ -1977,7 +1977,7 @@
                          {:error checkpoint-error
                           :version (:version snapshot)}))
                      {:value (:value result) :version (:version result)
-                      :published-version (:version snapshot)}))))))
+                      :published-version (:version snapshot)})))))
     (catch Throwable error
       (doseq [ticket tickets]
         (deliver (:completion ticket)
@@ -2132,7 +2132,7 @@
 (defn- validate-stream-header! [header]
   (dotimes [index 8]
     (when-not (= (bit-and 255 (int (aget header index)))
-                 (bit-and 255 (int (aget rpc/rpc-v2-magic index))))
+                 (bit-and 255 (int (aget rpc/store-rpc-v2-magic index))))
       (server-fail! :rpc-invalid-magic "Store RPC magic does not match" {})))
   (let [buffer (doto (ByteBuffer/wrap header) (.order ByteOrder/LITTLE_ENDIAN))]
     (.position buffer 8)
@@ -2157,7 +2157,7 @@
 (defn read-rpc-packet! [^InputStream input]
   (let [first-byte (.read input)]
     (when-not (neg? first-byte)
-      (when-not (= first-byte (bit-and 255 (int (aget rpc/rpc-v2-magic 0))))
+      (when-not (= first-byte (bit-and 255 (int (aget rpc/store-rpc-v2-magic 0))))
         (server-fail! :rpc-invalid-magic "Store RPC magic does not match" {}))
       (let [header (byte-array rpc/rpc-v2-header-bytes)]
         (aset-byte header 0 (unchecked-byte first-byte))
@@ -2170,14 +2170,14 @@
           (let [packet (byte-array (+ rpc/rpc-v2-header-bytes body-length))]
             (System/arraycopy header 0 packet 0 rpc/rpc-v2-header-bytes)
             (System/arraycopy body 0 packet rpc/rpc-v2-header-bytes body-length)
-            (rpc/decode-rpc-packet-v2! packet)))))))
+            (rpc/store-rpc-decode-packet-v2! packet)))))))
 
 (defn- write-rpc-packet! [^OutputStream output packet]
   (let [bytes
         (try
-          (rpc/encode-rpc-packet-v2! packet)
+          (rpc/store-rpc-encode-packet-v2! packet)
           (catch Throwable error
-            (let [response (t/rpcpacketv2-response packet)
+            (let [response (t/storerpcpacketv2-response packet)
                   code (or (:store/code (ex-data error)) :rpc/internal-error)
                   fallback
                   (rpc/rpc-response!
@@ -2188,9 +2188,9 @@
                     (or (.getMessage error)
                         "native RPC response is not encodable") nil)
                    nil)]
-              (rpc/encode-rpc-packet-v2!
-               (rpc/rpc-response-packet
-                (t/rpcpacketv2-request-id packet) fallback)))))]
+              (rpc/store-rpc-encode-packet-v2!
+               (rpc/store-rpc-response-packet
+                (t/storerpcpacketv2-request-id packet) fallback)))))]
     (.write output bytes)
     (.flush output)
     (alength ^bytes bytes)))
@@ -2343,14 +2343,14 @@
     (swap! active-requests assoc request-id cancellation)))
 
 (defn handle-rpc-packet! [packet cancellation]
-  (case (t/rpcpacketv2-kind packet)
+  (case (t/storerpcpacketv2-kind packet)
     :request
-    (rpc/rpc-response-packet
-     (t/rpcpacketv2-request-id packet)
-     (handle-rpc-request! (t/rpcpacketv2-request packet) cancellation))
+    (rpc/store-rpc-response-packet
+     (t/storerpcpacketv2-request-id packet)
+     (handle-rpc-request! (t/storerpcpacketv2-request packet) cancellation))
     :cancel
     (do
-      (when-let [target (get @active-requests (t/rpcpacketv2-request-id packet))]
+      (when-let [target (get @active-requests (t/storerpcpacketv2-request-id packet))]
         (cancel-state! target :client-cancelled))
       nil)
     (server-fail! :rpc-invalid-kind
@@ -2367,13 +2367,13 @@
           (when (.isConnected socket)
             (.setSoTimeout socket 0))
           (when packet
-            (if (= :cancel (t/rpcpacketv2-kind packet))
+            (if (= :cancel (t/storerpcpacketv2-kind packet))
               (let [result (handle-rpc-packet! packet (cancellation-state))]
                 (record-request! :rpc/cancel (- (System/nanoTime) started)
                                  :ok nil nil)
                 result)
-              (let [request-id (t/rpcpacketv2-request-id packet)
-                    operation (t/rpcrequest-op (t/rpcpacketv2-request packet))
+              (let [request-id (t/storerpcpacketv2-request-id packet)
+                    operation (t/rpcrequest-op (t/storerpcpacketv2-request packet))
                     cancellation (cancellation-state)]
                 (register-request! request-id cancellation)
                 (future
