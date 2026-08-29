@@ -210,6 +210,7 @@
           (.connect s
                     (java.net.InetSocketAddress. ^String host (int port))
                     (server-timeout-ms "BEAGLE_STORE_SERVER_CONNECT_TIMEOUT_MS" 2000))
+          (.setTcpNoDelay s true)
           (server-tls-handshake! s)
           s
           (catch Throwable error
@@ -220,6 +221,7 @@
           (.connect s
                     (java.net.InetSocketAddress. ^String host (int port))
                     (server-timeout-ms "BEAGLE_STORE_SERVER_CONNECT_TIMEOUT_MS" 2000))
+          (.setTcpNoDelay s true)
           s
           (catch Throwable error
             (try (.close s) (catch Throwable _ nil))
@@ -292,7 +294,7 @@
                          :body-length body-length})))
       (int body-length))))
 
-(defn store-rpc-read-packet! [input]
+(defn- store-rpc-read-frame! [input]
   (let [header (byte-array rpc/rpc-v2-header-bytes)]
     (when-not (read-rpc-exact! input header 0 rpc/rpc-v2-header-bytes)
       (throw (ex-info "Store RPC response ended inside its header"
@@ -305,38 +307,178 @@
                         {:type :rpc-truncated})))
       (System/arraycopy header 0 packet 0 rpc/rpc-v2-header-bytes)
       (System/arraycopy body 0 packet rpc/rpc-v2-header-bytes body-length)
-      (rpc/store-rpc-decode-packet-v2! packet))))
+      packet)))
+
+(defn store-rpc-read-packet! [input]
+  (rpc/store-rpc-decode-packet-v2! (store-rpc-read-frame! input)))
+
+(defn open-native-session-to!
+  "Open one reusable, serial Store RPC session to host/port. The returned
+   Socket is Closeable; callers own its lifetime."
+  [host port]
+  (server-socket host port))
+
+(defn open-native-session! [port]
+  (open-native-session-to! (connect-host) port))
+
+(defn- write-native-session-request! [socket output request]
+  (let [request-id (next-rpc-request-id)
+        timeout (max (server-timeout-ms "BEAGLE_STORE_SERVER_READ_TIMEOUT_MS" 15000)
+                     (+ 1000 (or (terms/rpcrequest-timeout-ms request) 0)))]
+    (.setSoTimeout socket timeout)
+    (.write output
+            (rpc/store-rpc-encode-packet-v2!
+             (rpc/store-rpc-request-packet request-id request)))
+    (.flush output)
+    request-id))
+
+(defn- validate-native-response-route! [route request-id request]
+  (when-not (= :response (rpc/storerpcresponseroute-kind route))
+    (throw (ex-info "Store RPC request received a non-response packet"
+                    {:type :rpc-invalid-kind})))
+  (when-not (= request-id (rpc/storerpcresponseroute-request-id route))
+    (throw (ex-info "Store RPC response request-id does not match"
+                    {:type :rpc-request-id-mismatch})))
+  (when-not (and (= (terms/rpcrequest-space request)
+                    (rpc/storerpcresponseroute-space route))
+                 (= (terms/rpcrequest-op request)
+                    (rpc/storerpcresponseroute-op route)))
+    (throw (ex-info "Store RPC response identity does not match its request"
+                    {:type :rpc-response-mismatch})))
+  route)
+
+(defn- validate-native-response! [packet request-id request]
+  (let [response (terms/storerpcpacketv2-response packet)]
+    (when-not (= :response (terms/storerpcpacketv2-kind packet))
+      (throw (ex-info "Store RPC request received a non-response packet"
+                      {:type :rpc-invalid-kind})))
+    (when-not (= request-id (terms/storerpcpacketv2-request-id packet))
+      (throw (ex-info "Store RPC response request-id does not match"
+                      {:type :rpc-request-id-mismatch})))
+    (when-not (and (= (terms/rpcrequest-space request)
+                      (terms/rpcresponse-space response))
+                   (= (terms/rpcrequest-op request)
+                      (terms/rpcresponse-op response)))
+      (throw (ex-info "Store RPC response identity does not match its request"
+                      {:type :rpc-response-mismatch})))
+    response))
+
+(defn- decode-native-routed-response! [frame request-id request route]
+  (let [response
+        (validate-native-response!
+         (rpc/store-rpc-decode-packet-v2! frame) request-id request)]
+    (when-not (and (= (terms/rpcresponse-served-version response)
+                      (rpc/storerpcresponseroute-served-version route))
+                   (= (terms/rpcresponse-page response)
+                      (rpc/storerpcresponseroute-page route))
+                   (= (boolean (terms/rpcresponse-error response))
+                      (rpc/storerpcresponseroute-failed route)))
+      (throw (ex-info "Store RPC decoded response does not match its routed prefix"
+                      {:type :rpc-response-route-mismatch})))
+    response))
+
+(defn native-session-request!
+  "Send one request on an open Store RPC session. Calls on one session are
+   serialized, and any transport or identity failure closes the unusable stream."
+  [socket request]
+  (locking socket
+    (try
+      (let [request-id
+            (write-native-session-request! socket (.getOutputStream socket) request)]
+        (validate-native-response!
+         (store-rpc-read-packet! (.getInputStream socket)) request-id request))
+      (catch Throwable error
+        (try (.close socket) (catch Throwable _ nil))
+        (throw error)))))
+
+(defn- native-request-with-page-cursor [request cursor]
+  (let [page (terms/rpcrequest-page request)]
+    (rpc/rpc-request!
+     (terms/rpcrequest-space request)
+     (terms/rpcrequest-op request)
+     (terms/rpcrequest-expected-version request)
+     (rpc/rpc-page-request! (terms/rpcpagerequest-limit page) cursor)
+     (terms/rpcrequest-timeout-ms request)
+     (terms/rpc-request-payload-value request))))
+
+(defn native-session-pages!
+  "Drain a paged request on one open session. At most two bounded response
+   frames are decoded concurrently; every decoded packet is returned in order."
+  [socket request]
+  (locking socket
+    (let [initial-page (terms/rpcrequest-page request)
+          active-decodes (atom #{})]
+      (try
+        (when-not initial-page
+          (throw (ex-info "Store RPC page drain requires a paged request"
+                          {:type :rpc-page-required})))
+        (let [initial-cursor (terms/rpc-page-request-cursor-value initial-page)]
+          (loop [current-request request
+                 seen-cursors (cond-> #{} initial-cursor (conj initial-cursor))
+                 pending []
+                 responses []]
+            (let [request-id
+                  (write-native-session-request!
+                   socket (.getOutputStream socket) current-request)
+                  frame (store-rpc-read-frame! (.getInputStream socket))
+                  route
+                  (validate-native-response-route!
+                   (rpc/store-rpc-decode-response-route-v2! frame)
+                   request-id current-request)
+                  page (rpc/storerpcresponseroute-page route)]
+              (when-not page
+                (throw (ex-info "Store RPC page drain received no page metadata"
+                                {:type :rpc-page-missing})))
+              (let [decode-work
+                    (future
+                      (decode-native-routed-response!
+                       frame request-id current-request route))
+                    _ (swap! active-decodes conj decode-work)
+                    next-pending (conj pending decode-work)]
+                (if (terms/rpcpageresponse-done page)
+                  (into responses
+                        (mapv (fn [work]
+                                (try
+                                  @work
+                                  (finally
+                                    (swap! active-decodes disj work))))
+                              next-pending))
+                  (let [next-cursor
+                        (terms/rpc-page-response-cursor-value page)]
+                    (when (nil? next-cursor)
+                      (throw (ex-info "Store RPC nonterminal page omitted its cursor"
+                                      {:type :rpc-page-cursor-missing})))
+                    (when (contains? seen-cursors next-cursor)
+                      (throw (ex-info "Store RPC page cursor repeated"
+                                      {:type :rpc-page-cursor-repeated})))
+                    (let [[remaining-pending next-responses]
+                          (if (< (count next-pending) 2)
+                            [next-pending responses]
+                            (let [work (first next-pending)
+                                  response
+                                  (try
+                                    @work
+                                    (finally
+                                      (swap! active-decodes disj work)))]
+                              [(subvec next-pending 1)
+                               (conj responses response)]))]
+                      (recur (native-request-with-page-cursor
+                              current-request next-cursor)
+                             (conj seen-cursors next-cursor)
+                             remaining-pending
+                             next-responses))))))))
+        (catch Throwable error
+          (doseq [work @active-decodes]
+            (future-cancel work))
+          (try (.close socket) (catch Throwable _ nil))
+          (throw error))))))
 
 (defn native-request-to!
   "Send one closed Store RPC request to host/port and return its RpcResponse.
    The response id, space, and operation must match the request exactly."
   [host port request]
-  (let [request-id (next-rpc-request-id)]
-    (with-open [socket (server-socket host port)]
-      (let [timeout (max (server-timeout-ms "BEAGLE_STORE_SERVER_READ_TIMEOUT_MS" 15000)
-                         (+ 1000 (or (terms/rpcrequest-timeout-ms request) 0)))
-            output (.getOutputStream socket)]
-        (.setSoTimeout socket timeout)
-        (.write output
-                (rpc/store-rpc-encode-packet-v2!
-                 (rpc/store-rpc-request-packet request-id request)))
-        (.flush output)
-        (let [packet (store-rpc-read-packet! (.getInputStream socket))
-              response (terms/storerpcpacketv2-response packet)]
-          (when-not (= :response (terms/storerpcpacketv2-kind packet))
-            (throw (ex-info "Store RPC request received a non-response packet"
-                            {:type :rpc-invalid-kind})))
-          (when-not (= request-id
-                       (terms/storerpcpacketv2-request-id packet))
-            (throw (ex-info "Store RPC response request-id does not match"
-                            {:type :rpc-request-id-mismatch})))
-          (when-not (and (= (terms/rpcrequest-space request)
-                            (terms/rpcresponse-space response))
-                         (= (terms/rpcrequest-op request)
-                            (terms/rpcresponse-op response)))
-            (throw (ex-info "Store RPC response identity does not match its request"
-                            {:type :rpc-response-mismatch})))
-          response)))))
+  (with-open [session (open-native-session-to! host port)]
+    (native-session-request! session request)))
 
 (defn native-request! [port request]
   (native-request-to! (connect-host) port request))

@@ -5,6 +5,7 @@
          '[store.datalog :as datalog]
          '[store.kernel :as kernel]
          '[store.query :as query]
+         '[store.rt :as rt]
          '[store.store :as term-store]
          '[store.types :as t])
 
@@ -140,6 +141,19 @@
 (try
   (check! "listener starts on STORERPC v2"
           (some? (eventually #(request! port space :rpc/version wire/rpc-unit))))
+
+  (with-open [session (rt/open-native-session! port)]
+    (let [version
+          (rt/native-session-request!
+           session (wire/rpc-request! space :rpc/version nil nil nil wire/rpc-unit))
+          status
+          (rt/native-session-request!
+           session (wire/rpc-request! space :rpc/status nil nil nil wire/rpc-unit))]
+      (check! "one STORERPC session carries serial requests with exact identities"
+              (and (nil? (error-code version))
+                   (nil? (error-code status))
+                   (= :rpc/version (t/rpcresponse-op version))
+                   (= :rpc/status (t/rpcresponse-op status))))))
 
   (check! "operation disposition is exhaustive for the fourteen v2 operations"
           (and (= 14 (count server/native-rpc-operations))
@@ -712,6 +726,18 @@
         (check! "unpaged scan and occurrences past the depth bound still fail typed"
                 (and (= :term-depth-exceeded (error-code unpaged-scan))
                      (= :term-depth-exceeded (error-code unpaged-occurrences)))))
+
+      (with-open [session (rt/open-native-session! port)]
+        (let [responses
+              (rt/native-session-pages!
+               session
+               (wire/rpc-request!
+                space :rpc/scan nil (wire/rpc-page-request! 100 nil)
+                nil scan-payload))
+              rows (into [] (mapcat #(triples-result % :rpc/triples)) responses)]
+          (check! "product page drain decodes multiple responses in order"
+                  (and (< 1 (count responses))
+                       (= (scan-reference) rows)))))
 
       (let [visited (atom 0)
             live database/live-propositions

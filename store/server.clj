@@ -2398,41 +2398,75 @@
     (server-fail! :rpc-invalid-kind
                   "listener accepts request and cancel packets only" {})))
 
+(defn- start-connection-request! [^Socket socket packet output started]
+  (let [request-id (t/storerpcpacketv2-request-id packet)
+        operation (t/rpcrequest-op (t/storerpcpacketv2-request packet))
+        cancellation (cancellation-state)]
+    (register-request! request-id cancellation)
+    {:cancellation cancellation
+     :task
+     (future
+       (try
+         (let [response (handle-rpc-packet! packet cancellation)
+               response-bytes (write-rpc-packet! output response)
+               [outcome code] (response-outcome response)]
+           (record-request! operation (- (System/nanoTime) started)
+                            outcome code response-bytes))
+         (catch Throwable error
+           (record-request! operation (- (System/nanoTime) started)
+                            :error (admission-error-code error) nil)
+           ;; A failed response leaves no valid frame for this session. Closing
+           ;; wakes the connection reader and makes the failure immediate.
+           (try (.close socket) (catch Throwable _ nil))
+           (throw error))
+         (finally
+           (swap! active-requests dissoc request-id))))}))
+
+(defn- await-connection-request! [pending disconnected?]
+  (when pending
+    (when (and disconnected? (not (realized? (:task pending))))
+      (cancel-state! (:cancellation pending) :client-disconnected))
+    (try
+      @(:task pending)
+      (catch Throwable error
+        (when-not disconnected?
+          (throw error)))))
+  nil)
+
 (defn serve-connection! [^Socket socket]
   (with-open [socket socket]
+    (.setTcpNoDelay socket true)
     (let [input (.getInputStream socket)
           output (.getOutputStream socket)
-          opened (System/nanoTime)]
+          opened (System/nanoTime)
+          pending-request (atom nil)]
       (try
-        (let [packet (read-rpc-packet! input)
-              started (System/nanoTime)]
-          (when (.isConnected socket)
-            (.setSoTimeout socket 0))
-          (when packet
-            (if (= :cancel (t/storerpcpacketv2-kind packet))
-              (let [result (handle-rpc-packet! packet (cancellation-state))]
-                (record-request! :rpc/cancel (- (System/nanoTime) started)
-                                 :ok nil nil)
-                result)
-              (let [request-id (t/storerpcpacketv2-request-id packet)
-                    operation (t/rpcrequest-op (t/storerpcpacketv2-request packet))
-                    cancellation (cancellation-state)]
-                (register-request! request-id cancellation)
-                (future
-                  (try
-                    (when (neg? (.read input))
-                      (cancel-state! cancellation :client-disconnected))
-                    (catch Throwable _
-                      (cancel-state! cancellation :client-disconnected))))
-                (try
-                  (let [response (handle-rpc-packet! packet cancellation)
-                        response-bytes (write-rpc-packet! output response)
-                        [outcome code] (response-outcome response)]
-                    (record-request! operation (- (System/nanoTime) started)
-                                     outcome code response-bytes))
-                  (finally
-                    (swap! active-requests dissoc request-id)))))))
+        (loop [first-packet? true]
+          (let [packet (read-rpc-packet! input)
+                started (System/nanoTime)]
+            (when (and first-packet? (.isConnected socket))
+              (.setSoTimeout socket 0))
+            (if-not packet
+              (do
+                (await-connection-request! @pending-request true)
+                (reset! pending-request nil))
+              (if (= :cancel (t/storerpcpacketv2-kind packet))
+                (do
+                  (handle-rpc-packet! packet (cancellation-state))
+                  (record-request! :rpc/cancel (- (System/nanoTime) started)
+                                   :ok nil nil)
+                  (recur false))
+                (do
+                  ;; A connection may carry many framed requests, but executes
+                  ;; only one at a time so one client cannot bypass admission.
+                  (await-connection-request! @pending-request false)
+                  (reset! pending-request nil)
+                  (reset! pending-request
+                          (start-connection-request! socket packet output started))
+                  (recur false))))))
         (catch Throwable error
+          (await-connection-request! @pending-request true)
+          (reset! pending-request nil)
           ;; Beagle Packet-level failures never reach handle-rpc-request!, so without
           ;; this arm a malformed or duplicated request is served invisibly.
           (let [code (admission-error-code error)]

@@ -90,17 +90,19 @@
 (def query-page-limit 200)
 
 (defn paged-query! []
-  (loop [cursor nil rows []]
-    (let [response (request! space-id :rpc/query q-join-request
-                             :page (wire/rpc-page-request! query-page-limit cursor))]
-      (if (error-code response)
-        {:error (error-code response) :rows rows}
-        (let [page (t/rpcresponse-page response)
-              next-cursor (t/rpc-page-response-cursor-value page)
-              all-rows (into rows (query-rows response))]
-          (if (t/rpcpageresponse-done page)
-            {:error nil :rows all-rows}
-            (recur next-cursor all-rows)))))))
+  (with-open [session (rt/open-native-session! port)]
+    (reduce
+     (fn [result response]
+       (if-let [error (error-code response)]
+         (reduced (assoc result :error error))
+         (update result :rows into (query-rows response))))
+     {:error nil :rows []}
+     (rt/native-session-pages!
+      session
+      (wire/rpc-request!
+       space-id :rpc/query nil
+       (wire/rpc-page-request! query-page-limit nil)
+       nil q-join-request)))))
 
 (defn write! [subject value]
   (request! space-id :rpc/assert

@@ -578,7 +578,23 @@
    expected (bit-and 255 (int (aget store-rpc-v2-magic index)))]
   (recur (+ index 1) (and valid (= actual expected)))) valid)))
 
-(defn store-rpc-decode-packet-v2! [bytes]
+(defrecord StoreRpcResponseRoute [kind request-id space op served-version page failed])
+
+(defn storerpcresponseroute-kind [r] (:kind r))
+
+(defn storerpcresponseroute-request-id [r] (:request-id r))
+
+(defn storerpcresponseroute-space [r] (:space r))
+
+(defn storerpcresponseroute-op [r] (:op r))
+
+(defn storerpcresponseroute-served-version [r] (:served-version r))
+
+(defn storerpcresponseroute-page [r] (:page r))
+
+(defn storerpcresponseroute-failed [r] (:failed r))
+
+(defn- decode-store-rpc-header! [bytes]
   (let [byte-count (alength bytes)]
   (if (> byte-count store-rpc-v2-max-packet-bytes) (rpc-fail! :rpc-packet-too-large "Store RPC packet exceeds the configured byte limit") nil)
   (if (< byte-count rpc-v2-header-bytes) (rpc-fail! :rpc-truncated "Store RPC packet ended inside its header") nil)
@@ -596,13 +612,36 @@
   (if (> body-length rpc-v2-max-body-bytes) (rpc-fail! :rpc-packet-too-large "Store RPC declared body exceeds the configured byte limit") nil)
   (if (< (.remaining buffer) body-length) (rpc-fail! :rpc-truncated "Store RPC body is shorter than declared") nil)
   (if (> (.remaining buffer) body-length) (rpc-fail! :rpc-trailing-bytes "Store RPC packet has bytes beyond its declared body") nil)
+  [buffer kind body-length request-id]))))
+
+(defn ^StoreRpcResponseRoute store-rpc-decode-response-route-v2! [bytes]
+  (let [header (decode-store-rpc-header! bytes)
+   buffer (nth header 0)
+   kind (nth header 1)
+   request-id (nth header 3)]
+  (if (or (= kind :response) (= kind :event)) nil (rpc-fail! :rpc-invalid-kind "Store RPC route requires a response or event packet"))
   (let [nodes (atom 0)
+   space (rpc-read-space-term! buffer nodes)
+   op (rpc-read-keyword-term! buffer nodes "response op")
+   served-version (rpc-read-i64-le! buffer "served-version")
+   page? (rpc-read-presence! buffer "response page presence")
+   page (if page? (read-rpc-page-response! buffer nodes) nil)
+   failed (rpc-read-presence! buffer "response error presence")]
+  (->StoreRpcResponseRoute kind request-id space op served-version page failed))))
+
+(defn store-rpc-decode-packet-v2! [bytes]
+  (let [header (decode-store-rpc-header! bytes)
+   buffer (nth header 0)
+   kind (nth header 1)
+   body-length (nth header 2)
+   request-id (nth header 3)
+   nodes (atom 0)
    packet (cond
   (= kind :request) (store-rpc-request-packet request-id (read-rpc-request! buffer nodes))
   (= kind :response) (store-rpc-response-packet request-id (read-rpc-response! buffer nodes))
   (= kind :event) (store-rpc-event-packet request-id (read-rpc-response! buffer nodes))
   :else (if (= body-length 0) (store-rpc-cancel-packet request-id) (rpc-fail! :rpc-invalid-shape "Store RPC cancel body must be exactly empty")))]
-  (if (zero? (.remaining buffer)) packet (rpc-fail! :rpc-trailing-bytes "Store RPC body decoder left trailing bytes")))))))
+  (if (zero? (.remaining buffer)) packet (rpc-fail! :rpc-trailing-bytes "Store RPC body decoder left trailing bytes"))))
 
 (def rpc-unit :rpc/unit)
 
