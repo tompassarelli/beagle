@@ -158,6 +158,9 @@
   (.get buffer bytes)
   (strict-utf8-string! bytes context))))))
 
+(defn- triple-from-proven-terms [t1 t2 t3]
+  (t/->Triple t1 t2 t3))
+
 (defn- decode-term-core! [buffer depth max-string-bytes max-nodes max-depth counter]
   (if (> depth max-depth) (codec-fail! :term-depth-exceeded "recursive Term exceeds the TermCodecV1 depth bound") (do
   (codec-node! counter max-nodes)
@@ -174,7 +177,7 @@
   (= tag 5) true
   (= tag 6) (let [spelling (read-sized-text-core! buffer max-string-bytes "Keyword atom")]
   (if (empty? spelling) (codec-fail! :term-codec-invalid-keyword "Keyword atom spelling must be nonempty") (keyword spelling)))
-  (= tag 7) (t/triple (decode-term-core! buffer (+ depth 1) max-string-bytes max-nodes max-depth counter) (decode-term-core! buffer (+ depth 1) max-string-bytes max-nodes max-depth counter) (decode-term-core! buffer (+ depth 1) max-string-bytes max-nodes max-depth counter))
+  (= tag 7) (triple-from-proven-terms (decode-term-core! buffer (+ depth 1) max-string-bytes max-nodes max-depth counter) (decode-term-core! buffer (+ depth 1) max-string-bytes max-nodes max-depth counter) (decode-term-core! buffer (+ depth 1) max-string-bytes max-nodes max-depth counter))
   (= tag 8) (do
   (codec-ensure! buffer 12 "Instant atom")
   (let [seconds (.getLong buffer)
@@ -625,7 +628,7 @@
   (if (> (count values) rpc-v2-max-list-values) (do
   (rpc-fail! :term-depth-exceeded "RPC list length exceeds the TermCodecV1 depth bound")))
   (reduce (fn [tail value] (require-rpc-term! value "RPC list value")
-  (t/triple :rpc/list value tail)) rpc-list-end (reverse values)))
+  (triple-from-proven-terms :rpc/list value tail)) rpc-list-end (reverse values)))
 
 (defn rpc-list-values! [value]
   (loop [cursor value
@@ -637,9 +640,8 @@
   (and (t/triple? cursor) (= :rpc/list (t/triple-t1 cursor))) (let [head (t/triple-t2 cursor)
    tail (t/triple-t3 cursor)]
   (require-rpc-term! head "RPC list head")
-  (require-rpc-term! tail "RPC list tail")
   (recur tail (conj result head) (+ count-value 1)))
-  :else (rpc-fail! :rpc-invalid-list "RPC list must end with :rpc/list-end"))))
+  :else (if (and (> count-value 0) (not (t/term? cursor))) (rpc-fail! :rpc-invalid-term "RPC list tail must be a Term") (rpc-fail! :rpc-invalid-list "RPC list must end with :rpc/list-end")))))
 
 (defn rpc-some! [value]
   (require-rpc-term! value "RPC option value")

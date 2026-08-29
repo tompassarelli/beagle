@@ -263,6 +263,15 @@
           (.get buffer bytes)
           (strict-utf8-string! bytes context))))))
 
+;; Recursive Term cannot cross a module boundary as a precise type.  Keep the
+;; unchecked record constructor behind this private proof boundary: callers
+;; supply only terms already established by bounded decoding or validation.
+(defn- triple-from-proven-terms
+  [t1 Any
+   t2 Any
+   t3 Any] t/Triple
+  (t/->Triple t1 t2 t3))
+
 (defn- decode-term-core!
   [buffer Any
    depth Int
@@ -291,7 +300,7 @@
                             "Keyword atom spelling must be nonempty")
                (keyword spelling)))]
           [(= tag 7)
-           (t/triple
+           (triple-from-proven-terms
             (decode-term-core! buffer (+ depth 1) max-string-bytes
                                max-nodes max-depth counter)
             (decode-term-core! buffer (+ depth 1) max-string-bytes
@@ -980,7 +989,7 @@
             [tail Any
              value Any] Any
             (require-rpc-term! value "RPC list value")
-            (t/triple :rpc/list value tail))
+            (triple-from-proven-terms :rpc/list value tail))
           rpc-list-end (reverse values)))
 
 (defn rpc-list-values! [value Any] (Vec Any)
@@ -995,10 +1004,12 @@
        (let [head (t/triple-t2 cursor)
              tail (t/triple-t3 cursor)]
          (require-rpc-term! head "RPC list head")
-         (require-rpc-term! tail "RPC list tail")
          (recur tail (conj result head) (+ count-value 1)))]
-      [:else (rpc-fail! :rpc-invalid-list
-                        "RPC list must end with :rpc/list-end")])))
+      [:else
+       (if (and (> count-value 0) (not (t/term? cursor)))
+         (rpc-fail! :rpc-invalid-term "RPC list tail must be a Term")
+         (rpc-fail! :rpc-invalid-list
+                    "RPC list must end with :rpc/list-end"))])))
 
 (defn rpc-some! [value Any] t/Triple
   (require-rpc-term! value "RPC option value")
