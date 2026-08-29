@@ -817,9 +817,25 @@ console.log(JSON.stringify(snapshot()));"
                   (catch ExceptionInfo error
                     (do (println "catch") (recur (+ attempt 1))))
                   (finally (println "finally")))
+                (println "after")
                 (+ attempt 10))))
      "console.log(retry());"
-     "catch\nfinally\nfinally\n11")
+     "catch\nfinally\nfinally\nafter\n11")
+
+   (check-js-output "later loop forms escape the preceding catch"
+     (list `(defn escape-later [] Int
+              (loop [attempt Int 0]
+                (try
+                  attempt
+                  (catch ExceptionInfo error
+                    (if (< attempt 0)
+                      (recur (+ attempt 1))
+                      (do (println "recaught") attempt)))
+                  (finally (println "escape-finally")))
+                (throw (ex-info "later" ,(mt)))
+                (+ attempt 10))))
+     "try { escape_later(); } catch (error) { console.log('escaped'); }"
+     "escape-finally\nescaped")
 
    ;; --- for / map / filter --------------------------------------------------
 

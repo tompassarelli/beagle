@@ -90,6 +90,13 @@
   (set-box! b (add1 n))
   n)
 
+(define loop-try-counter (make-parameter (box 0)))
+(define (next-loop-try-id!)
+  (define b (loop-try-counter))
+  (define n (unbox b))
+  (set-box! b (add1 n))
+  n)
+
 ;; --- special float values ---------------------------------------------------
 
 (define (emit-js-number n)
@@ -211,7 +218,7 @@
     [(instance?)
      (and (= n 2)
           (or (symbol? (car args)) (qualified-ref? (car args)))
-          (if (set-member? (current-js-externs) (car args))
+          (if (set-member? (current-js-declared-externs) (car args))
               (format "(~a instanceof ~a)"
                       (emit-expr (cadr args))
                       (emit-expr (car args)))
@@ -881,7 +888,7 @@
 (define current-js-record-ns (make-parameter (hasheq)))
 (define current-js-record-validator-refs (make-parameter (hasheq)))
 (define current-js-record-constructors (make-parameter (set)))
-(define current-js-externs (make-parameter (set)))
+(define current-js-declared-externs (make-parameter (set)))
 (define current-js-scalar-fns (make-parameter (set)))
 (define current-js-symbol-ns (make-parameter (hasheq)))
 (define current-js-namespace (make-parameter 'beagle.user))
@@ -2074,6 +2081,7 @@
                  [logical-counter (box 0)]
                  [constrained-binding-counter (box 0)]
                  [catch-counter (box 0)]
+                 [loop-try-counter (box 0)]
                  [current-js-record-fields (build-record-field-table prog)]
                  [current-js-union-members (build-union-member-table prog)]
                  [current-js-record-field-bindings
@@ -2083,8 +2091,8 @@
                   (build-record-validator-reference-table prog)]
                  [current-js-record-constructors
                   (build-record-constructor-set prog)]
-                 [current-js-externs
-                  (list->set (hash-keys (program-externs prog)))]
+                 [current-js-declared-externs
+                  (list->set (hash-keys (program-declared-externs prog)))]
                  [current-js-scalar-fns (build-scalar-fns prog)]
                  [current-js-symbol-ns (program-imported-symbol-ns prog)]
                  [current-js-namespace (program-namespace prog)]
@@ -4640,7 +4648,7 @@
                             (rename-env-set-binder
                              (current-rename-env) c authored-name name)])
                         (format
-                         "case ~a: {\n        const ~a = ~a;\n        ~a\n      }"
+                         "case ~a: {\n        const ~a = ~a;\n        ~a\n        break;\n      }"
                          index name caught-name
                          (emit-tail-body
                           (catch-clause-body c) "        "))))))])
@@ -4964,9 +4972,22 @@
                  (format " { ~a }" (emit-value "null"))
                  ""))]
     [(and (try-form? e) (expr-contains-recur? e))
-     (emit-js-try-statement
-      e
-      (lambda (body _indent) (emit-loop-body-seq body)))]
+     ;; A loop sequence continuation belongs after the try statement. Applying
+     ;; it inside a body or catch runs later forms before `finally` and exposes
+     ;; them to this try's catch dispatch. Recur still emits `continue`, so JS
+     ;; runs `finally` before the next loop iteration; normal paths materialize
+     ;; one result and resume only after the entire try/catch/finally completes.
+     (define result-name
+       (format "_loop_try_result_~a" (next-loop-try-id!)))
+     (define (emit-result-body body _indent)
+       (emit-loop-body-sequence
+        body bind-names
+        (lambda (value-str)
+          (format "~a = ~a;" result-name value-str))))
+     (format "{ let ~a; ~a ~a }"
+             result-name
+             (emit-js-try-statement e emit-result-body)
+             (emit-value result-name))]
     [(and (do-form? e) (body-contains-recur? (do-form-body e)))
      (emit-loop-body-seq (do-form-body e))]
     [(recur-form? e)

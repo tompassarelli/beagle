@@ -149,7 +149,9 @@
 
         '(define-target js)
         `(defn rename-character ,(br '(character Character)) Character
-           (with character ,(br ':name "renamed")))))
+           (with character ,(br ':name "renamed")))
+        '(defn character-instance? [(value Any)] Bool
+           (instance? Character value))))
      (define referred-consumer
        (parse-program
         (map (lambda (form) (datum->syntax #f form))
@@ -180,6 +182,16 @@
         referred-result))
       1
       (format "referred provider validator must be called exactly once:\n~a"
+              referred-result))
+     (check-true
+      (string-contains?
+       referred-result
+       "record_instance_p(\"interface.provider/Character\", value)")
+      (format "referred nominal record lost provider identity:\n~a"
+              referred-result))
+     (check-false
+      (string-contains? referred-result "value instanceof Character")
+      (format "referred nominal record was treated as a host constructor:\n~a"
               referred-result)))
 
    (test-case "multiword record accessor definition matches canonical calls"

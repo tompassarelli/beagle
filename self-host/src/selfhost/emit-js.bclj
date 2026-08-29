@@ -23,10 +23,14 @@
 
 (def record-fields Any (atom {}))        ; record/variant name -> field-name vector
 (def record-field-bindings Any (atom {})); record/variant name -> complete field declarations
+(def record-namespaces Any (atom {}))    ; imported record name -> provider namespace
 (def scalar-fns Any (atom {}))           ; scalar ctor/accessor names erased at call sites
+(def declared-externs Any (atom {}))     ; explicit foreign names (checked refs disambiguate imports)
 (def match-counter Any (atom 0))
 (def logical-counter Any (atom 0))
 (def constrained-binding-counter Any (atom 0))
+(def loop-try-counter Any (atom 0))
+(def current-namespace Any (atom "beagle.user"))
 (def bound-vars Any (atom {}))           ; name(string) -> true : in-scope binding
 (def type-env Any (atom {}))             ; name(string) -> serialized annotation
 (def rename-env Any (atom {}))            ; source name -> installed hidden JS name
@@ -38,6 +42,7 @@
 (def pattern-default-renames Any (atom nil))
 (def bc-get-used Any (atom false))        ; exact core.js import demanded by kw-access poly reads
 (def bc-range-used Any (atom false))      ; exact core.js import demanded by range
+(def bc-record-instance-used Any (atom false)) ; exact core.js import demanded by instance?
 (def inline-scope Any (atom {}))         ; names inlined in return/stmt position
 (def ctx Any (atom "stmt"))              ; "stmt" | "expr" (only doseq reads it)
 (def checked-program-ref Any (atom false))
@@ -48,6 +53,7 @@
 (def body-stmts-ref Any (atom nil))
 (def stmt-inline-ref Any (atom nil))
 (def form-ref Any (atom nil))
+(def loop-stmt-ref Any (atom nil))
 
 (defn emit-expr*! [e Any] String
   (let [f (Fn [Any] String) (deref emit-expr-ref)]
@@ -67,6 +73,12 @@
 
 (defn emit-form* [f Any] String
   (let [g (Fn [Any] String) (deref form-ref)] (g f)))
+
+(defn emit-loop-stmt*
+  [e Any
+   bind-names Any
+   emit-value Any] String
+  (let [f Any (deref loop-stmt-ref)] (f e bind-names emit-value)))
 
 ;; --- bound-var / inline-scope helpers -----------------------------------------
 
@@ -309,6 +321,21 @@
   [values Any
    ref Any] Bool
   (contains? values (reference-key ref)))
+
+(defn declared-extern-reference? [ref Any] Bool
+  (and (map? ref)
+    (= (get ref "node") "ref")
+    (nil? (get ref "providerId"))
+    (qualified-set-member? (deref declared-externs) ref)))
+
+(defn normalized-record-identity [ref Any] String
+  (let [provider-id (get ref "providerId")
+        imported-namespace (get (deref record-namespaces) (reference-key ref))
+        provider (cond
+                   (string? provider-id) provider-id
+                   (string? imported-namespace) imported-namespace
+                   :else (deref current-namespace))]
+    (str provider "/" (get ref "name"))))
 
 (defn resolved-name [name Any] String
   (if (qualified-reference? name)
@@ -2028,6 +2055,10 @@
         (= node "let") (anyb (get e "body"))
         (= node "do") (anyb (get e "body"))
         (= node "cond") (> (count (filterv (fn [c Any] Bool (anyb (get c "body"))) (get e "clauses"))) 0)
+        (= node "try") (or (anyb (get e "body"))
+                           (> (count (filterv
+                                      (fn [c Any] Bool (anyb (get c "body")))
+                                      (get e "catches"))) 0))
         (= node "when-let") (anyb (get e "body"))
         (= node "if-let") (or (expr-contains-recur? (get e "then"))
                               (let [el (get e "else")] (if (absent? el) false (expr-contains-recur? el))))
@@ -2035,6 +2066,46 @@
 
 (defn body-contains-recur? [body Any] Bool
   (> (count (filterv (fn [e Any] Bool (expr-contains-recur? e)) body)) 0))
+
+(defn fresh-loop-try-sym! [] String
+  (let [n (deref loop-try-counter)]
+    (swap! loop-try-counter inc)
+    (str "_loop_try_result_" n)))
+
+(defn emit-js-try-statement-with!
+  [e Any
+   emit-tail-body Any] String
+  (let [body-str (emit-tail-body (get e "body") "  ")
+        catch-strs (mapv
+                     (fn [c Any] String
+                       (with-bound! [(get c "name")]
+                         (fn [] String
+                           (str "catch (" (mangle-name (get c "name")) ") {\n    "
+                             (emit-tail-body (get c "body") "    ") "\n  }"))))
+                     (get e "catches"))
+        fin (get e "finally")
+        finally-str (if (absent? fin)
+                      ""
+                      (str " finally {\n    " (emit-body-stmts fin "    ") "\n  }"))]
+    (str "try {\n    " body-str "\n  } " (str/join " " catch-strs) finally-str)))
+
+(defn emit-loop-body-sequence!
+  [forms Any
+   bind-names Any
+   emit-value Any] String
+  (cond
+    (= 0 (count forms)) (emit-value "null")
+    (= 1 (count forms))
+      (emit-loop-stmt* (nth forms 0) bind-names emit-value)
+    (expr-contains-recur? (nth forms 0))
+      (emit-loop-stmt*
+        (nth forms 0) bind-names
+        (fn [value-str String] String
+          (str value-str "; "
+            (emit-loop-body-sequence! (subvec forms 1) bind-names emit-value))))
+    :else
+      (str (emit-expr-stmt! (nth forms 0)) " "
+        (emit-loop-body-sequence! (subvec forms 1) bind-names emit-value))))
 
 (defn build-sequential-binding-contexts
   [bindings Any
@@ -2169,12 +2240,8 @@
                 binding-strs (get info "strs")]
             (with-emission-env! (get info "bound") (get info "types") (get info "renames")
               (fn [] Any
-                (let [forms body
-                      n (count forms)
-                      side (subvec forms 0 (- n 1))
-                      side-str (str/join " " (mapv (fn [x Any] String (emit-expr-stmt! x)) side))
-                      tail (emit-loop-stmt-with! (nth forms (- n 1)) bind-names emit-value)]
-                  (str (str/join " " binding-strs) " " (if (> n 1) (str side-str " ") "") tail)))))
+                (str (str/join " " binding-strs) " "
+                  (emit-loop-body-sequence! body bind-names emit-value)))))
         (and (= node "cond")
              (> (count (filterv (fn [c Any] Bool (body-contains-recur? (get c "body"))) (get e "clauses"))) 0))
           (let [clauses (get e "clauses")
@@ -2183,11 +2250,7 @@
                           (or (and (map? t) (= (get t "node") "ref") (= (get t "name") "else"))
                               (and (map? t) (= (get t "node") "literal") (= (get t "kind") "keyword") (= (get t "value") "else")))))
                 seq-body (fn [forms Any] String
-                           (let [n (count forms)
-                                 side (subvec forms 0 (- n 1))
-                                 side-str (str/join " " (mapv (fn [x Any] String (emit-expr-stmt! x)) side))]
-                             (str (if (> n 1) (str side-str " ") "")
-                                  (emit-loop-stmt-with! (nth forms (- n 1)) bind-names emit-value))))
+                           (emit-loop-body-sequence! forms bind-names emit-value))
                 parts (mapv (fn [c Any] String
                               (if (else? c)
                                 (str "{ " (seq-body (get c "body")) " }")
@@ -2195,12 +2258,20 @@
                 has-else (> (count (filterv else? clauses)) 0)]
             (str (str/join " else " parts)
                  (if has-else "" (str " else { " (emit-value "null") " }"))))
+        (and (= node "try") (expr-contains-recur? e))
+          (let [result-name (fresh-loop-try-sym!)
+                emit-result-body (fn
+                                   [body Any
+                                    _indent String] String
+                                   (emit-loop-body-sequence!
+                      body bind-names
+                      (fn [value-str String] String
+                        (str result-name " = " value-str ";"))))]
+            (str "{ let " result-name "; "
+              (emit-js-try-statement-with! e emit-result-body) " "
+              (emit-value result-name) " }"))
         (and (= node "do") (body-contains-recur? (get e "body")))
-          (let [forms (get e "body")
-                n (count forms)
-                side (subvec forms 0 (- n 1))
-                side-str (str/join " " (mapv (fn [x Any] String (emit-expr-stmt! x)) side))]
-            (str side-str " " (emit-loop-stmt-with! (nth forms (- n 1)) bind-names emit-value)))
+          (emit-loop-body-sequence! (get e "body") bind-names emit-value)
         (= node "recur") (emit-recur-stmts! e bind-names)
         :else (emit-value (emit-expr*! e))))))
 
@@ -2268,6 +2339,18 @@
           ;; bgl/promote erases: the JS heap already outlives every epoch.
           (and (qualified-reference=? fn-expr "bgl" "promote") (= 1 n))
             (emit-expr*! (nth args 0))
+          (and (= fname "instance?") (= 2 n)
+               (map? (nth args 0))
+               (= (get (nth args 0) "node") "ref"))
+            (let [record-ref (nth args 0)
+                  value-str (emit-expr*! (nth args 1))]
+              (if (declared-extern-reference? record-ref)
+                (str "(" value-str " instanceof " (emit-expr*! record-ref) ")")
+                (do
+                  (reset! bc-record-instance-used true)
+                  (str "$$bc$record_instance_p("
+                    (js-string-lit (normalized-record-identity record-ref))
+                    ", " value-str ")"))))
           qualified?
             (str (emit-call-fn-name fn-expr) "(" (emit-args-list args) ")")
           (and (or (= fname "=") (= fname "==")) (>= n 2))
@@ -2452,8 +2535,10 @@
                              (get iteration-info "types")
                              (get iteration-info "renames")
                              (fn [] Any
-                               (str/join "\n    "
-                                 (mapv (fn [x Any] String (emit-loop-stmt! x bind-names)) body))))
+                               (emit-loop-body-sequence!
+                                 body bind-names
+                                 (fn [value-str String] String
+                                   (str "return " value-str ";")))))
                   prefix (if has-await "async " "")
                   result (str "(" prefix "() => { " (str/join " " bind-strs) " while (true) {\n    "
                            (str/join " " iteration-setups)
@@ -2538,17 +2623,9 @@
         ;; unlike clj which reconstructs the surface form.
         (= node "threading") (emit-expr*! (get e "desugared"))
         (= node "try")
-          (let [body-str (emit-body-return* (get e "body") "  ")
-                catch-strs (mapv (fn [c Any] String
-                                   (with-bound! [(get c "name")]
-                                     (fn [] String
-                                       (str "catch (" (mangle-name (get c "name")) ") {\n    "
-                                            (emit-body-return* (get c "body") "    ") "\n  }")))) (get e "catches"))
-                fin (get e "finally")
-                finally-str (if (absent? fin) "" (str " finally {\n    " (emit-body-stmts fin "    ") "\n  }"))
-                has-await (or (contains-await? (get e "body"))
+          (let [has-await (or (contains-await? (get e "body"))
                               (> (count (filterv (fn [c Any] Bool (contains-await? (get c "body"))) (get e "catches"))) 0))]
-            (iife (str "try {\n    " body-str "\n  } " (str/join " " catch-strs) finally-str) has-await))
+            (iife (emit-js-try-statement-with! e emit-body-return*) has-await))
         (= node "condp")
           (let [pred (emit-expr*! (get e "pred"))
                 test-val (emit-expr*! (get e "test"))
@@ -2845,6 +2922,7 @@
   (reset! body-stmts-ref emit-body-stmts)
   (reset! stmt-inline-ref emit-stmt-inline!)
   (reset! form-ref emit-form!)
+  (reset! loop-stmt-ref emit-loop-stmt-with!)
   nil)
 
 (defn emit-program! [prog Any] String
@@ -2853,11 +2931,24 @@
   (reset! record-fields
     (structuralize-reference-table
       (get prog "importedRecordFieldOrder" {})))
+  (reset! record-namespaces
+    (structuralize-reference-table
+      (get prog "importedRecordNamespaces" {})))
   (reset! record-field-bindings {})
   (reset! scalar-fns {})
+  (reset! declared-externs
+    (structuralize-reference-table
+      (reduce
+        (fn
+          [names Any
+           extern Any] Any
+          (assoc names (get extern "name") true))
+        {} (get prog "externs"))))
   (reset! match-counter 0)
   (reset! logical-counter 0)
   (reset! constrained-binding-counter 0)
+  (reset! loop-try-counter 0)
+  (reset! current-namespace (get prog "namespace"))
   (reset! type-env {})
   (reset! rename-env {})
   (reset! module-bindings (build-module-bindings (get prog "requires")))
@@ -2866,6 +2957,7 @@
   (reset! loop-binding-contexts nil)
   (reset! bc-get-used false)
   (reset! bc-range-used false)
+  (reset! bc-record-instance-used false)
   (reset! inline-scope {})
   (reset! ctx "stmt")
   (reset! checked-program-ref
@@ -2886,7 +2978,11 @@
                                ["equivV as $$bc$equiv"] [])
                              (into
                                (if (deref bc-get-used) ["get as $$bc$get"] [])
-                               (if (deref bc-range-used) ["range as $$bc$range"] [])))
+                               (into
+                                 (if (deref bc-range-used) ["range as $$bc$range"] [])
+                                 (if (deref bc-record-instance-used)
+                                   ["record_instance_p as $$bc$record_instance_p"]
+                                   []))))
           runtime-import (if (= 0 (count runtime-bindings)) ""
                            (str "import { " (str/join ", " runtime-bindings)
                                 " } from 'beagle/core.js';\n"))]
@@ -2919,11 +3015,15 @@
 (defn run-tests! [] Int
   (install-refs!)
   (reset! record-fields {})
+  (reset! record-namespaces {})
   (reset! record-field-bindings {})
   (reset! scalar-fns {})
+  (reset! declared-externs {})
   (reset! match-counter 0)
   (reset! logical-counter 0)
   (reset! constrained-binding-counter 0)
+  (reset! loop-try-counter 0)
+  (reset! current-namespace "beagle.user")
   (reset! bound-vars {})
   (reset! type-env {})
   (reset! rename-env {})
@@ -2931,6 +3031,8 @@
   (reset! public-esm-module-bindings {})
   (reset! loop-binding-contexts nil)
   (reset! bc-get-used false)
+  (reset! bc-range-used false)
+  (reset! bc-record-instance-used false)
   (reset! inline-scope {})
   (reset! ctx "stmt")
   (reset! checked-program-ref false)
