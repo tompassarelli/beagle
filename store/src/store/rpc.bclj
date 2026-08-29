@@ -71,7 +71,7 @@
           bytes
           (codec-fail! :term-codec-invalid-utf8
                        (str label " encoded to an unexpected byte length"))))
-      (catch (_ CharacterCodingException)
+      (catch CharacterCodingException _
         (codec-fail! :term-codec-invalid-utf8
                      (str label " is not valid UTF-8 text"))))))
 
@@ -83,7 +83,7 @@
                     (.onMalformedInput CodingErrorAction/REPORT)
                     (.onUnmappableCharacter CodingErrorAction/REPORT))]
       (str (.decode decoder (ByteBuffer/wrap bytes))))
-    (catch (_ CharacterCodingException)
+    (catch CharacterCodingException _
       (codec-fail! :term-codec-invalid-utf8
                    (str label " is not valid UTF-8")))))
 
@@ -714,7 +714,7 @@
        (write-rpc-response! body response)]
       [:else nil])
     (if (= body-size (.size body))
-      (let [out (ByteArrayOutputStream. (+ rpc-v2-header-bytes body-size))]
+      (let [out ByteArrayOutputStream (ByteArrayOutputStream. (+ rpc-v2-header-bytes body-size))]
         (.write out store-rpc-v2-magic)
         (rpc-write-u16-le! out rpc-v2-major)
         (rpc-write-u16-le! out rpc-v2-minor)

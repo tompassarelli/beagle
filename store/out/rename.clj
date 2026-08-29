@@ -1,6 +1,7 @@
 (ns rename
   (:require [store.store :as c]
             [store.types :as t]
+            [resolve-core :as rc]
             [clojure.edn :as edn]
             [clojure.string :as str]))
 
@@ -31,12 +32,12 @@
 (defn ^String load-edn! [ctx file->nodes next-offset ^String path]
   (let [lines (str/split-lines (slurp path))
    heads (filterv (fn [^String l] (str/starts-with? l "@file")) lines)
-   src (subs (nth heads 0) 6)
+   ^String src (subs (nth heads 0) 6)
    loaded (load-lines (deref next-offset) lines)]
   (swap! file->nodes assoc src (vec (:nodes loaded)))
   (reset! next-offset (inc (int (:top loaded))))
   (if (pos? (count (vec (:operations loaded)))) (do
-  (c/commit-transaction! ctx (vec (:operations loaded)))))
+  (c/commit-boundary! ctx (vec (:operations loaded)) (c/commit-metadata "store.codegraph/rename-load-v1" "store/CommitOperationV1" "codegraph-v1"))))
   src))
 
 (defn live-index [ctx]
@@ -48,9 +49,11 @@
 (defn ^Boolean symbol-leaf? [index node]
   (pos? (count (filterv (fn [p] (and (= kind-pred (t/triple-t2 p)) (= symbol-kind (t/triple-t3 p)))) (propositions-of index node)))))
 
-(defn field-child [index node ^String fname]
-  (let [hits (filterv (fn [p] (= fname (t/triple-t2 p))) (propositions-of index node))]
-  (if (empty? hits) 0 (let [child (t/triple-t3 (nth hits 0))]
+(defn field-child [index node position]
+  (let [rows (reduce (fn [acc p] (let [key (rc/ord-parse (t/triple-t2 p))]
+  (if (nil? key) acc (conj acc [key (t/triple-t3 p)])))) [] (propositions-of index node))
+   ordered (vec (sort-by (fn [row] (nth row 0)) rc/ord-cmp rows))]
+  (if (or (neg? position) (>= position (count ordered))) 0 (let [child (nth (nth ordered position) 1)]
   (if (integer? child) (int child) 0)))))
 
 (defn sym-val [index node]
@@ -58,8 +61,8 @@
   (if (empty? hits) nil (t/triple-t3 (nth hits 0)))) nil))
 
 (defn binding-name [index node]
-  (let [h (sym-val index (field-child index node "f0"))]
-  (if (and (not (nil? h)) (contains? binding-heads h)) (sym-val index (field-child index node "f1")) nil)))
+  (let [h (sym-val index (field-child index node 0))]
+  (if (and (not (nil? h)) (contains? binding-heads h)) (sym-val index (field-child index node 1)) nil)))
 
 (defn module-bindings [index file->nodes ^String src]
   (set (filterv (fn [nm] (not (nil? nm))) (mapv (fn [node] (binding-name index node)) (vec (get (deref file->nodes) src []))))))
@@ -85,9 +88,9 @@
 (defn -main [& $beagle$rest$host]
   (let [args (vec $beagle$rest$host)]
   (let [argv (vec args)
-   old-name (str (nth argv 0))
-   new-name (str (nth argv 1))
-   target-substr (str (nth argv 2))
+   ^String old-name (str (nth argv 0))
+   ^String new-name (str (nth argv 1))
+   ^String target-substr (str (nth argv 2))
    edn-files (vec (drop 3 argv))
    ctx (c/new-term-store space-id)
    file->nodes (atom {})
@@ -108,7 +111,7 @@
    preserved (count (filterv (fn [p] (let [node (t/triple-t1 p)]
   (and (not (contains? target-nodes node)) (symbol-leaf? index node)))) targets))
    _edit (if (pos? (count operations)) (do
-  (c/commit-transaction! ctx operations)))
+  (c/commit-boundary! ctx operations (c/commit-metadata "store.codegraph/rename-v1" "store/CommitOperationV1" "codegraph-v1"))))
    projected (live-index ctx)
    outs (mapv (fn [^String s] (out-path s)) srcs)]
   (doseq [i (range (count srcs))]

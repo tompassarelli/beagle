@@ -265,7 +265,7 @@
    t2 (known-term-handle store (t/triple-t2 term))
    t3 (known-term-handle store (t/triple-t3 term))
    handles [t1 t2 t3]
-   all-known (loop [position 0]
+   ^Boolean all-known (loop [position 0]
   (if (>= position (count handles)) true (if (some? (nth handles position)) (recur (inc position)) false)))]
   (if all-known (let [position (find-triple-position (store-triples store) (store-triple-slots store) (t/->TripleRow (if (some? t1) t1 0) (if (some? t2) t2 0) (if (some? t3) t3 0)))]
   (if (>= position 0) (do
@@ -335,7 +335,7 @@
   (if (>= position 0) (if (store-fold-open store) (deref (nth (store-active-cells store) position)) (t/activebucket-positions (nth (store-active-buckets store) position))) empty-ids)))
 
 (defn- set-active-positions! [store handle positions]
-  (let [folding (store-fold-open store)
+  (let [^Boolean folding (store-fold-open store)
    known (find-active-bucket-position store handle)]
   (if (>= known 0) (if folding (do
   (reset! (nth (store-active-cells store) known) positions)
@@ -534,7 +534,7 @@
 
 (defn- exact-occurrence-position [store coordinate]
   (if (not (t/occurrence-coordinate? coordinate)) -1 (let [transaction (t/triple-t1 coordinate)
-   space (t/triple-t1 transaction)
+   ^String space (t/triple-t1 transaction)
    sequence (t/triple-t3 transaction)
    ordinal (t/triple-t3 coordinate)
    transactions (store-transactions store)
@@ -737,7 +737,7 @@
    rows (t/termstoredump-triples data)
    transactions (t/termstoredump-transactions data)
    operations (t/termstoredump-operations data)
-   dump-space (t/termstoredump-space-id data)
+   ^String dump-space (t/termstoredump-space-id data)
    next-sequence-value (t/termstoredump-next-sequence data)]
   (if (not (and (valid-space-id? dump-space) (and (>= next-sequence-value 1) (and (every? (fn [row] (valid-atom-row? row)) atoms) (and (valid-triple-rows? (count atoms) rows) (valid-history-rows? transactions operations (count rows) next-sequence-value)))))) (term-store-load-error :invalid-term-store-dump "store: invalid TermStore dump") (if (not (= (space-id ctx) dump-space)) (term-store-load-error :space-mismatch "store: TermStore dump belongs to a different space") (let [loaded (t/->TermStore dump-space (atom next-sequence-value) (atom atoms) (atom rows) (atom transactions) (atom operations) (atom empty-ids) (atom empty-active-buckets) (atom empty-active-cells) (atom false) (atom (build-atom-term-slots! atoms (term-slots-width-for (count atoms)))) (atom (build-triple-term-slots! rows (term-slots-width-for (count rows)))) (atom (slots/fresh-slots initial-slots)))]
   (reset! ctx (rebuild-operation-state! loaded))
@@ -753,7 +753,7 @@
   (if (and (valid-space-id? (t/termstore-space-id store)) (and (>= next-sequence-value 1) (and (every? (fn [row] (valid-atom-row? row)) atoms) (and (valid-triple-rows? (count atoms) rows) (valid-history-rows? transactions operations (count rows) next-sequence-value))))) ctx (throw (ex-info "store: invalid TermStore dump" {:type :invalid-term-store-dump})))))
 
 (defn load-term-store! [ctx data]
-  (let [result (load-term-store-result! ctx data)]
+  (let [^TermStoreLoadResult result (load-term-store-result! ctx data)]
   (if (termstoreloadresult-ok result) ctx (let [code (termstoreloadresult-code result)
    message (termstoreloadresult-message result)]
   (throw (ex-info (if message message "store: TermStore load failed") {:type (if code code :invalid-term-store-dump)}))))))

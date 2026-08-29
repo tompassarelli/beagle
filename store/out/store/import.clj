@@ -70,7 +70,7 @@
   (if (some? identity) identity (str "@" spelling)))))
 
 (defn- ^String predicate-name [^PredicateRegistry registry ^String spelling]
-  (let [identity (predicate-id registry spelling)
+  (let [^String identity (predicate-id registry spelling)
    canonical (get (predicateregistry-canonical registry) identity)]
   (if (some? canonical) canonical (strip-at identity))))
 
@@ -89,7 +89,7 @@
   (if (some? explicit) explicit (if (fallback-ref? registry predicate) "ref" "literal"))))
 
 (defn- normalize-predicate-triples [triples]
-  (let [registry (predicate-registry triples)
+  (let [^PredicateRegistry registry (predicate-registry triples)
    normalized (mapv (fn [value] (let [predicate (predicate-name registry (triple-predicate value))
    right (triple-right value)
    normalized-right (if (and (= "ref" (value-kind-of registry triples predicate)) (not (str/starts-with? right "@"))) (str "@" right) right)]
@@ -111,13 +111,13 @@
   :else (recur (+ i 1))))]
   (if (< subject-index 0) (do
   (if (str/blank? (doc-head doc)) nil (warn (str path " — no @subject line found in head; dropping " n " head line(s)")))
-  []) (let [subject (str/trim (nth lines subject-index))
+  []) (let [^String subject (str/trim (nth lines subject-index))
    triples (loop [i (+ subject-index 1)
    acc []]
   (if (>= i n) acc (let [line (str/trim (nth lines i))]
   (if (str/blank? line) (recur (+ i 1) acc) (let [pair (store.rt/split-kv line)]
   (recur (+ i 1) (conj acc (t/triple subject (nth pair 0) (parse-obj (nth pair 1))))))))))
-   body (doc-body doc)]
+   ^String body (doc-body doc)]
   (if (str/blank? body) triples (conj triples (t/triple subject "body" body)))))))
 
 (defn- safe-file->triples [^String path]

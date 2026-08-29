@@ -76,13 +76,13 @@
   (json/parse-string (rpc (:sidecar-port state) line) true))
 
 (defn sidecar-up-with-state? [state DefcheckState] Bool
-  (try (:ok (sidecar-with-state state "ping")) (catch (_ Exception) false)))
+  (try (:ok (sidecar-with-state state "ping")) (catch Exception _ false)))
 
 (defn ensure-sidecar-with-state! "Ping the warm checker; if down and *autostart?*, launch bin/beagle-store-defcheck and\n  block (≤30s) until it announces ready. Idempotent. Returns true when up." [state DefcheckState] Bool
   (or (sidecar-up-with-state? state)
     (when (:autostart? state)
       (let [launcher (str repo-root "/bin/beagle-store-defcheck")]
-        (let [pb (ProcessBuilder. ["setsid" launcher (str (:sidecar-port state))])]
+        (let [pb Any (ProcessBuilder. ["setsid" launcher (str (:sidecar-port state))])]
           (.redirectOutput pb (java.io.File. "/dev/null"))
           (.redirectError pb (java.io.File. "/dev/null"))
           (.start pb))
@@ -136,13 +136,13 @@
     (try
       (sidecar-with-state state
         (str "render " epath " " (src-path-with-state state module)))
-      (catch (_ Exception) nil))
+      (catch Exception _ nil))
     epath))
 
 (defn prime-gwdir-with-state! "Populate <gwdir> with a .bclj for every live module (warm, via the sidecar).\n  Idempotent + cheap to repeat. Call once when an arena's server comes up\n  (and internally by whole-tree-check, so cross-refs resolve current text)." [state DefcheckState] String
   (ensure-sidecar-with-state! state)
   (doseq [m (live-modules-with-state state)]
-    (try (refresh-sibling-with-state! state m) (catch (_ Exception) nil)))
+    (try (refresh-sibling-with-state! state m) (catch Exception _ nil)))
   (gwdir-with-state state))
 
 (def parse-kinds (Set String)
@@ -221,7 +221,7 @@
                                                             v Any] Any
                                                            v)]
       (loop [acc (Vec Any) []]
-        (let [f (try (clojure.core/read opts rdr) (catch (t Throwable) {:store.defcheck/read-error (or (.getMessage t) (str (class t)))}))]
+        (let [f (try (clojure.core/read opts rdr) (catch Throwable t {:store.defcheck/read-error (or (.getMessage t) (str (class t)))}))]
           (cond
             (and (map? f) (:store.defcheck/read-error f))
             {:forms acc :read-error (:store.defcheck/read-error f)}
@@ -337,11 +337,10 @@
 (defn- lev
   [a Any
    b Any] Int
-  (let [a (str a)
-        b (str b)
-        m Int
-        count a n
-        Int (count b)]
+  (let [a String (str a)
+        b String (str b)
+        m Int (count a)
+        n Int (count b)]
     (if (or (zero? m) (zero? n))
       (max m n)
       (loop [i Int 1
@@ -546,13 +545,14 @@
                 tail (if named? (drop 2 form) (drop 1 form))]
             (walk-fn-tail rec ls0 tail))
           (contains? binding-vec-heads h)
-          (let [bvec (second form) [ls _] Any (reduce (fn
-                                                        [pair Any
-                                                         binding-pair Any] Any
-                                                        (let [ls (nth pair 0)
-                                                              pat (nth binding-pair 0)
-                                                              e (nth binding-pair 1)]
-                                                          (rec e ls) [(into ls (pattern-locals pat)) nil])) [locals nil] (partition 2 (if (vector? bvec) bvec [])))]
+          (let [bvec Any (second form)
+                [ls _] Any (reduce (fn
+                                     [pair Any
+                                      binding-pair Any] Any
+                                     (let [ls (nth pair 0)
+                                           pat (nth binding-pair 0)
+                                           e (nth binding-pair 1)]
+                                       (rec e ls) [(into ls (pattern-locals pat)) nil])) [locals nil] (partition 2 (if (vector? bvec) bvec [])))]
             (doseq [b (drop 2 form)] (rec b ls)))
           (or (= h (quote for)) (= h (quote doseq)))
           (let [bvec (if (vector? (second form)) (second form) [])
@@ -615,7 +615,8 @@
             (when (symbol? h)
               (classify h locals)
               (when-let [ar (and (not (contains? locals h)) (get-in defs [:arities (symbol (name h))]))]
-                (let [n (count (rest form)) {:keys [fixed variadic]} Any ar]
+                (let [n Int (count (rest form))
+                      {:keys [fixed variadic]} Any ar]
                   (when (and arity-check? (seq fixed) (not (contains? fixed n)) (or (nil? variadic) (< n variadic)))
                     (emit (arity-error module def-name h n ar))))))
             (let [child-locals (into locals (mapcat (fn [x Any] Any (when (vector? x) (arglist-locals x))) (rest form)))]
@@ -683,7 +684,7 @@
     (ensure-sidecar-fn)
     (let [errs (check-errors-fn module)]
       (when (seq errs) (assoc (pick-primary name errs) :errors errs)))
-    (catch (e Exception)
+    (catch Exception e
       {:ok
        false
        :stage
@@ -708,7 +709,7 @@
           :gate
           :errors
           (mapv (fn [e Any] Any (assoc e :stage :gate)) all))))
-    (catch (e Exception)
+    (catch Exception e
       {:ok
        false
        :stage

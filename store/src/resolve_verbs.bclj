@@ -429,7 +429,7 @@
         within (some (fn [a Int] Any
                                                                                                                                                                                                                                                               (when-not (contains? other-nodes a) (let [ac (rv/node->canon ctx view BOUND REFERS FIXED a)
                                                                                                                                                                                                                                                                                                         s (rv/node->str ctx view BOUND REFERS FIXED a)]
-                                                                                                                                                                                                                                                                                                    (when (and (<= (count s) 800) (= ac (try (datum->canon (edn/read-string s)) (catch (_ Throwable) nil))) (= 1 (count (rv/anchor-match-sites ctx view BOUND REFERS FIXED root ac)))) s)))) (reverse chain))
+                                                                                                                                                                                                                                                                                                    (when (and (<= (count s) 800) (= ac (try (datum->canon (edn/read-string s)) (catch Throwable _ nil))) (= 1 (count (rv/anchor-match-sites ctx view BOUND REFERS FIXED root ac)))) s)))) (reverse chain))
         ctx-str (let [s (rv/node->str ctx view BOUND REFERS FIXED parent)] (if (<= (count s) 200) s (str (subs s 0 197) "...")))]
     {:n idx :breadcrumb breadcrumb :within within :context ctx-str}))
 
@@ -592,13 +592,13 @@
             (when (= (enode (nth forms ai)) mover-form)
               (warn (str "REJECTED — reorder `" name "` :after itself is a no-op; no facts mutated."))
               (reject 3)))))
-      (let [others (vec (remove (fn [e Any] Bool (= (enode e) mover-form)) forms))
+      (let [others (Vec Any) (vec (remove (fn [e Any] Bool (= (enode e) mover-form)) forms))
             a-pos Int (if front? -1 (nn (first (vec (keep-indexed (fn
                                                                     [i Int
                                                                      e Any] Any
                                                                     (when (= (enode e) anchor-form) i)) others)))))
-            lo (if (< a-pos 0) nil (:path (ekey (nth others a-pos))))
-            hi (if (< a-pos 0) (:path (ekey (first others))) (when (< (+ a-pos 1) (count others)) (:path (ekey (nth others (+ a-pos 1))))))]
+            lo (U (Vec Int) Nil) (if (< a-pos 0) nil (:path (ekey (nth others a-pos))))
+            hi (U (Vec Int) Nil) (if (< a-pos 0) (:path (ekey (first others))) (when (< (+ a-pos 1) (count others)) (:path (ekey (nth others (+ a-pos 1))))))]
         (let [retire (:retire v)
               emit (:emit v)]
           (retire (ecid mover-entry))
@@ -697,14 +697,14 @@
     (when (and (seq? datum) (not (contains? rc/TOPLEVEL-VALUE-DEFS (str (first datum)))))
       (warn (str "REJECTED — insert-form head `" (first datum) "` not a value def."))
       (reject 3))
-    (let [wof (:wrapper-of v)
-          dbind (:def-binding v)
-          ffv (:form-for-victim v)
-          src (first target-srcs)
-          wrap (wof src)
-          forms (vec (wrap-forms v (nn wrap)))
-          anchor-bind (dbind src after-name)
-          anchor-form (when (some? anchor-bind) (ffv src anchor-bind))
+    (let [wof Any (:wrapper-of v)
+          dbind Any (:def-binding v)
+          ffv Any (:form-for-victim v)
+          src Any (first target-srcs)
+          wrap Any (wof src)
+          forms (Vec Any) (vec (wrap-forms v (nn wrap)))
+          anchor-bind Any (dbind src after-name)
+          anchor-form Any (when (some? anchor-bind) (ffv src anchor-bind))
           i Int (nn (when (some? anchor-form) (first (vec (keep-indexed (fn
                                                                           [n Int
                                                                            e Any] Any
@@ -1096,15 +1096,15 @@
 (defn run-cli!
   [env Any
    args (Vec String)] Any
-  (let [mode (first args)
+  (let [mode (U String Nil) (first args)
         fi (U Int Nil) (first (vec (keep-indexed (fn
                                                    [i Int
                                                     arg String] Int?
                                                    (if (= arg "--within-file") i nil)) args)))
-        stripped (if (nil? fi) args (vec (concat (take fi args) (drop (+ fi 2) args))))
-        skip (cond (= mode "resolve") 1 (= mode "rename") 4 (= mode "delete") 3 (= mode "reorder") 4 (= mode "callgraph") 1 (= mode "upsert-form") 3 (= mode "set-body") 4 (= mode "replace-in-body") 5 :else 1)
-        edn-paths (vec (drop skip stripped))
-        resolve-edn (get env :resolve-edn)]
+        stripped (Vec String) (if (nil? fi) args (vec (concat (take fi args) (drop (+ fi 2) args))))
+        skip Int (cond (= mode "resolve") 1 (= mode "rename") 4 (= mode "delete") 3 (= mode "reorder") 4 (= mode "callgraph") 1 (= mode "upsert-form") 3 (= mode "set-body") 4 (= mode "replace-in-body") 5 :else 1)
+        edn-paths (Vec String) (vec (drop skip stripped))
+        resolve-edn Any (get env :resolve-edn)]
     (resolve-edn edn-paths
       (fn [] Any
         (let [warn (fn [line Any] Any (binding [*out* *err*] (println line)))

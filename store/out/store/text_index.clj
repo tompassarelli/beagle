@@ -131,7 +131,7 @@
   (if error (->TextCandidateSourceResult false nil error) (->TextCandidateSourceResult true (->TextCandidateSource rows postings weight) (no-text-error)))))
 
 (defn ^TextCandidateSource build-source! [propositions maximum]
-  (let [result (build-source-result! propositions maximum)
+  (let [^TextCandidateSourceResult result (build-source-result! propositions maximum)
    source (source-result-source result)]
   (if source source (raise-text-error (source-result-error result)))))
 
@@ -147,7 +147,7 @@
   (recur (inc position) (if (< (count candidate) (count best)) candidate best))))))))
 
 (defn ^TextHandlesResult indexed-handles-result! [^TextCandidateSource source needle]
-  (let [needle-result (needle-tokens-result! needle)]
+  (let [^TextNeedleResult needle-result (needle-tokens-result! needle)]
   (if (not (textneedleresult-ok needle-result)) (->TextHandlesResult false [] (textneedleresult-error needle-result)) (let [tokens (textneedleresult-tokens needle-result)
    postings (textcandidatesource-postings source)
    posting-vectors (mapv (fn [^String token] (get postings token [])) tokens)
@@ -157,23 +157,23 @@
   (->TextHandlesResult true handles (no-text-error))))))
 
 (defn indexed-handles! [^TextCandidateSource source needle]
-  (let [result (indexed-handles-result! source needle)]
+  (let [^TextHandlesResult result (indexed-handles-result! source needle)]
   (if (handles-result-ok? result) (handles-result-handles result) (raise-text-error (handles-result-error result)))))
 
 (defn ^TextHandlesResult scan-handles-result! [^TextCandidateSource source needle]
-  (let [needle-result (needle-tokens-result! needle)]
+  (let [^TextNeedleResult needle-result (needle-tokens-result! needle)]
   (if (not (textneedleresult-ok needle-result)) (->TextHandlesResult false [] (textneedleresult-error needle-result)) (let [tokens (textneedleresult-tokens needle-result)
    rows (textcandidatesource-rows source)
    handles (loop [handle 0
    matches []]
   (if (>= handle (count rows)) matches (let [value (t/triple-t3 (nth rows handle))
-   matched (if (string? value) (let [haystack (token-set! value)]
+   ^Boolean matched (if (string? value) (let [haystack (token-set! value)]
   (every? (fn [^String token] (contains? haystack token)) tokens)) false)]
   (recur (inc handle) (if matched (conj matches handle) matches)))))]
   (->TextHandlesResult true handles (no-text-error))))))
 
 (defn scan-handles! [^TextCandidateSource source needle]
-  (let [result (scan-handles-result! source needle)]
+  (let [^TextHandlesResult result (scan-handles-result! source needle)]
   (if (handles-result-ok? result) (handles-result-handles result) (raise-text-error (handles-result-error result)))))
 
 (defn- rows-for-handles [^TextCandidateSource source needle handles]
@@ -182,17 +182,17 @@
   [(t/triple-t1 proposition) (t/triple-t2 proposition) needle])) handles)))
 
 (defn ^TextRowsResult indexed-rows-result! [^TextCandidateSource source needle]
-  (let [result (indexed-handles-result! source needle)]
+  (let [^TextHandlesResult result (indexed-handles-result! source needle)]
   (if (handles-result-ok? result) (->TextRowsResult true (rows-for-handles source needle (handles-result-handles result)) (no-text-error)) (->TextRowsResult false [] (handles-result-error result)))))
 
 (defn ^TextRowsResult scan-rows-result! [^TextCandidateSource source needle]
-  (let [result (scan-handles-result! source needle)]
+  (let [^TextHandlesResult result (scan-handles-result! source needle)]
   (if (handles-result-ok? result) (->TextRowsResult true (rows-for-handles source needle (handles-result-handles result)) (no-text-error)) (->TextRowsResult false [] (handles-result-error result)))))
 
 (defn indexed-rows! [^TextCandidateSource source needle]
-  (let [result (indexed-rows-result! source needle)]
+  (let [^TextRowsResult result (indexed-rows-result! source needle)]
   (if (rows-result-ok? result) (rows-result-rows result) (raise-text-error (rows-result-error result)))))
 
 (defn scan-rows! [^TextCandidateSource source needle]
-  (let [result (scan-rows-result! source needle)]
+  (let [^TextRowsResult result (scan-rows-result! source needle)]
   (if (rows-result-ok? result) (rows-result-rows result) (raise-text-error (rows-result-error result)))))

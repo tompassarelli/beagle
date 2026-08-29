@@ -46,7 +46,7 @@
    gctx (c/new-term-store space-id)
    operations (vec (concat (mapv (fn [e] (c/assert-operation (t/triple (nth e 0) calls-pred (nth e 1)))) name-edges) (mapv (fn [nm] (c/assert-operation (t/triple nm hamt-pred hamt-mark))) (vec hamt-names))))
    _load (if (pos? (count operations)) (do
-  (c/commit-transaction! gctx operations)))
+  (c/commit-boundary! gctx operations (c/commit-metadata "store.codegraph/jurisdiction-load-v1" "store/CommitOperationV1" "codegraph-v1"))))
    db (d/run-rules! (c/live-propositions gctx) [(d/rule "forces" [(d/variable "x")] [(d/relation-literal d/triple-relation [(d/variable "x") (d/constant calls-pred) (d/variable "y")]) (d/relation-literal d/triple-relation [(d/variable "y") (d/constant hamt-pred) (d/constant hamt-mark)])]) (d/rule "forces" [(d/variable "x")] [(d/relation-literal d/triple-relation [(d/variable "x") (d/constant calls-pred) (d/variable "y")]) (d/relation-literal "forces" [(d/variable "y")])])])
    forced (vec (distinct (vec (sort (filterv (fn [x] (not (nil? x))) (mapv (fn [row] (nth row 0)) (d/facts db "forces")))))))]
   (if (pos? (count forced)) (doseq [nm forced]
@@ -70,7 +70,7 @@
   (let [ctx (c/new-term-store space-id)
    operations (regime-operations rep-defs)
    _load (if (pos? (count operations)) (do
-  (c/commit-transaction! ctx operations)))]
+  (c/commit-boundary! ctx operations (c/commit-metadata "store.codegraph/jurisdiction-load-v1" "store/CommitOperationV1" "codegraph-v1"))))]
   (println "\n---- Q1. defs that SHIP THE HAMT (pull persistent runtime) ----")
   (doseq [nm (defs-with-regime ctx "hamt")]
   (println "  HAMT  " nm))

@@ -42,7 +42,7 @@
    withdrawals (c/withdrawals store-atom)
    asof (let [candidate (:as-of opts)]
   (if (integer? candidate) candidate nil))
-   prov? (boolean (:provenance opts))
+   ^Boolean prov? (boolean (:provenance opts))
    max-depth (clamp (:max-depth opts) default-max-depth)
    max-nodes (clamp (:max-nodes opts) default-max-nodes)
    state (atom 0)]
@@ -95,7 +95,7 @@
   :else []))
           (recur-target [target subpattern depth visited] (if (> (inc depth) max-depth) {:store/id (nm-of target) :store/truncated true} (node target (nm-of target) subpattern (inc depth) visited)))
           (elem [acc left depth visited element] (cond
-  (= element :*) (reduce (fn [result predicate] (let [pname (s/predicate-name schema predicate)]
+  (= element :*) (reduce (fn [result predicate] (let [^String pname (s/predicate-name schema predicate)]
   (if (reserved-pred? pname) result (let [value (values pname predicate left)]
   (if (nil? value) result (assoc result pname value)))))) acc (distinct (mapv (fn [event] (t/triple-t2 (event-proposition event))) (subject-events left))))
   (and (string? element) (str/starts-with? element "_")) (let [predicate (pid-of (subs element 1))]

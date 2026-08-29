@@ -181,7 +181,7 @@
    *default-data-reader-fn* (fn [_tag v] v)]
   (loop [acc []]
   (let [f (try
-  (read opts rdr)
+  (clojure.core/read opts rdr)
   (catch Throwable t
     {:store.defcheck/read-error (or (.getMessage t) (str (class t)))}))]
   (cond
@@ -191,7 +191,7 @@
 
 (def special-forms (set (map symbol ["def" "if" "do" "let" "let*" "fn" "fn*" "loop" "loop*" "recur" "throw" "try" "catch" "finally" "quote" "var" "monitor-enter" "monitor-exit" "new" "set!" "." "&" "deftype*" "reify*" "case*" "letfn*" "import*" "clojure.core/import*" "unquote" "unquote-splicing"])))
 
-(def core-names (delay (set (map (comp symbol name) (keys (ns-publics 'clojure.core))))))
+(def core-names (delay (set (map (comp symbol name) (set (keys (clojure.core/ns-publics 'clojure.core)))))))
 
 (def def-heads (set (map symbol ["def" "defn" "defn-" "defonce" "def-" "defmacro" "definline" "defmulti" "defmethod" "deftype" "defrecord" "defprotocol" "declare" "defstruct" "extend-type" "extend-protocol" "extend"])))
 
@@ -263,7 +263,7 @@
   (let [empty' {:aliases #{} :refers #{} :ns-names #{} :imports #{} :refer-all? false}
    add-import (fn [acc spec] (cond
   (symbol? spec) (update acc :imports conj (symbol (peek (str/split (name spec) DOT-RE))))
-  (sequential? spec) (update acc :imports into (map (fn* [%1] (symbol (name %1))) (rest spec)))
+  (sequential? spec) (update acc :imports into (map (fn [imported] (symbol (name imported))) (rest spec)))
   :else acc))
    handle-clause (fn [acc clause] (if (seq? clause) (let [k (first clause)]
   (cond
@@ -280,13 +280,13 @@
   :else acc)) acc)) empty' forms)))
 
 (defn- lev [a b]
-  (let [a (str a)
-   b (str b)
+  (let [^String a (str a)
+   ^String b (str b)
    m (count a)
    n (count b)]
   (if (or (zero? m) (zero? n)) (max m n) (loop [i 1
    prev (vec (range (inc n)))]
-  (if (> i m) (peek prev) (recur (inc i) (reduce (fn [cur j] (conj cur (if (= (.charAt a (dec i)) (.charAt b (dec j))) (nth prev (dec j)) (inc (min (nth prev j) (peek cur) (nth prev (dec j))))))) [i] (range 1 (inc n)))))))))
+  (if (> i m) (peek prev) (recur (inc i) (reduce (fn [cur j] (conj cur (if (= (.charAt a (dec i)) (.charAt b (dec j))) (nth prev (dec j)) (inc (min (nth prev j) (peek cur) (nth prev (dec j))))))) [i] (vec (range 1 (inc n))))))))))
 
 (defn- nearest [sym candidates]
   (let [s (name sym)

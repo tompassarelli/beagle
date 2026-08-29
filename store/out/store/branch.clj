@@ -148,7 +148,7 @@
   (apply str (mapv (fn [value] (format "%02x" (bit-and (int value) 255))) (vec (.digest (MessageDigest/getInstance "SHA-256") bytes)))))
 
 (defn- branch-revision-preimage! [^String space-id ^String history-sha256 sequence]
-  (let [out (ByteArrayOutputStream.)]
+  (let [^ByteArrayOutputStream out (ByteArrayOutputStream.)]
   (revision-write-text! out branch-revision-format)
   (revision-write-text! out space-id)
   (revision-write-text! out history-sha256)
@@ -160,14 +160,14 @@
   (zero? (count space-id)) (fail "branch revision SpaceId must be nonempty" :invalid-branch-revision)
   (not (valid-segment-name? history-sha256)) (fail "branch revision history is not a SHA-256 hex digest" :invalid-branch-revision)
   (neg? sequence) (fail "branch revision sequence must not be negative" :invalid-branch-revision)
-  :else (let [identity (str "sha256:" (sha256-hex (branch-revision-preimage! space-id history-sha256 sequence)))]
+  :else (let [^String identity (str "sha256:" (sha256-hex (branch-revision-preimage! space-id history-sha256 sequence)))]
   (->BranchRevision space-id history-sha256 sequence identity))))
 
 (defn- ^String segment-line [^SegmentRecord segment]
   (str "segment " (segmentrecord-sha256 segment) " " (segmentrecord-start-sequence segment) " " (segmentrecord-end-sequence segment) " " (segmentrecord-byte-count segment) "\n"))
 
 (defn ^String print-ref [^RefDocument document]
-  (let [body (str ref-format "\n" "space " (refdocument-space-id document) "\n" (apply str (mapv (fn [^SegmentRecord segment] (segment-line segment)) (refdocument-segments document))))]
+  (let [^String body (str ref-format "\n" "space " (refdocument-space-id document) "\n" (apply str (mapv (fn [^SegmentRecord segment] (segment-line segment)) (refdocument-segments document))))]
   (str body "crc " (format "%08x" (crc32-of body)) "\n")))
 
 (defn ^String ref-identity [^RefDocument document]
@@ -178,7 +178,7 @@
 
 (defn- ^SegmentRecord parse-segment-line [^String line known]
   (let [fields (vec (str/split line #" "))]
-  (if (not= 5 (count fields)) (fail (str "branch ref segment line is malformed: " line) :invalid-branch-ref) (let [sha256 (nth fields 1)]
+  (if (not= 5 (count fields)) (fail (str "branch ref segment line is malformed: " line) :invalid-branch-ref) (let [^String sha256 (nth fields 1)]
   (cond
   (not (valid-segment-name? sha256)) (fail (str "branch ref segment name is not a SHA-256 hex digest: " sha256) :invalid-branch-ref)
   (contains? known sha256) (fail (str "branch ref lists the same segment twice: " sha256) :invalid-branch-ref)
@@ -193,17 +193,17 @@
   (not= ref-format (nth lines 0)) (fail (str "branch ref format is unsupported: " (nth lines 0)) :unsupported-branch-ref-version)
   (not (str/starts-with? (nth lines 1) "space ")) (fail "branch ref does not name its SpaceId" :invalid-branch-ref)
   (not (str/starts-with? (nth lines (dec (count lines))) "crc ")) (fail "branch ref does not end with its CRC line" :invalid-branch-ref)
-  :else (let [space-id (subs (nth lines 1) 6)
-   body (apply str (mapv (fn [^String line] (str line "\n")) (subvec lines 0 (dec (count lines)))))
-   stored (subs (nth lines (dec (count lines))) 4)]
+  :else (let [^String space-id (subs (nth lines 1) 6)
+   ^String body (apply str (mapv (fn [^String line] (str line "\n")) (subvec lines 0 (dec (count lines)))))
+   ^String stored (subs (nth lines (dec (count lines))) 4)]
   (cond
   (zero? (count space-id)) (fail "branch ref SpaceId must be nonempty" :invalid-branch-ref)
   (not= stored (format "%08x" (crc32-of body))) (fail "branch ref CRC does not match" :invalid-branch-ref)
   :else (let [segments (loop [index 2
    known #{}
    acc []]
-  (if (>= index (dec (count lines))) acc (let [line (nth lines index)]
-  (if (not (str/starts-with? line "segment ")) (fail (str "branch ref contains an unknown line: " line) :invalid-branch-ref) (let [segment (parse-segment-line line known)]
+  (if (>= index (dec (count lines))) acc (let [^String line (nth lines index)]
+  (if (not (str/starts-with? line "segment ")) (fail (str "branch ref contains an unknown line: " line) :invalid-branch-ref) (let [^SegmentRecord segment (parse-segment-line line known)]
   (recur (inc index) (conj known (segmentrecord-sha256 segment)) (conj acc segment)))))))]
   (->RefDocument space-id segments)))))))
 
@@ -217,7 +217,7 @@
   (if (pos? end) end (recur (dec index))))))))
 
 (defn ^String print-fork-marker [^ForkMarker marker]
-  (let [body (str fork-marker-format "\n" "parent " (forkmarker-parent marker) "\n" "child " (forkmarker-child marker) "\n" "segment " (forkmarker-segment marker) "\n")]
+  (let [^String body (str fork-marker-format "\n" "parent " (forkmarker-parent marker) "\n" "child " (forkmarker-child marker) "\n" "segment " (forkmarker-segment marker) "\n")]
   (str body "crc " (format "%08x" (crc32-of body)) "\n")))
 
 (defn ^ForkMarker parse-fork-marker [^String text]
@@ -226,10 +226,10 @@
   (not= 5 (count lines)) (fail "fork marker does not carry its three fields and CRC" :invalid-fork-marker)
   (not= fork-marker-format (nth lines 0)) (fail (str "fork marker format is unsupported: " (nth lines 0)) :unsupported-fork-marker-version)
   (not (and (str/starts-with? (nth lines 1) "parent ") (str/starts-with? (nth lines 2) "child ") (str/starts-with? (nth lines 3) "segment "))) (fail "fork marker does not name its parent, child, and segment" :invalid-fork-marker)
-  :else (let [body (apply str (mapv (fn [^String line] (str line "\n")) (subvec lines 0 4)))
-   parent (subs (nth lines 1) 7)
-   child (subs (nth lines 2) 6)
-   segment (subs (nth lines 3) 8)]
+  :else (let [^String body (apply str (mapv (fn [^String line] (str line "\n")) (subvec lines 0 4)))
+   ^String parent (subs (nth lines 1) 7)
+   ^String child (subs (nth lines 2) 6)
+   ^String segment (subs (nth lines 3) 8)]
   (cond
   (not= (nth lines 4) (str "crc " (format "%08x" (crc32-of body)))) (fail "fork marker CRC does not match" :invalid-fork-marker)
   (not (and (valid-branch-name? parent) (valid-branch-name? child) (not= parent child))) (fail "fork marker does not name two usable branches" :invalid-fork-marker)
@@ -237,7 +237,7 @@
   :else (->ForkMarker parent child segment))))))
 
 (defn ^String print-reseal-marker [^ResealMarker marker]
-  (let [body (str reseal-marker-format "\n" "branch " (resealmarker-branch marker) "\n" "segment " (resealmarker-segment marker) "\n" "ref " (resealmarker-ref-identity marker) "\n")]
+  (let [^String body (str reseal-marker-format "\n" "branch " (resealmarker-branch marker) "\n" "segment " (resealmarker-segment marker) "\n" "ref " (resealmarker-ref-identity marker) "\n")]
   (str body "crc " (format "%08x" (crc32-of body)) "\n")))
 
 (defn ^ResealMarker parse-reseal-marker [^String text]
@@ -246,10 +246,10 @@
   (not= 5 (count lines)) (fail "reseal marker does not carry its three fields and CRC" :invalid-reseal-marker)
   (not= reseal-marker-format (nth lines 0)) (fail (str "reseal marker format is unsupported: " (nth lines 0)) :unsupported-reseal-marker-version)
   (not (and (str/starts-with? (nth lines 1) "branch ") (str/starts-with? (nth lines 2) "segment ") (str/starts-with? (nth lines 3) "ref "))) (fail "reseal marker does not name its branch, segment, and ref" :invalid-reseal-marker)
-  :else (let [body (apply str (mapv (fn [^String line] (str line "\n")) (subvec lines 0 4)))
-   branch (subs (nth lines 1) 7)
-   segment (subs (nth lines 2) 8)
-   identity (subs (nth lines 3) 4)]
+  :else (let [^String body (apply str (mapv (fn [^String line] (str line "\n")) (subvec lines 0 4)))
+   ^String branch (subs (nth lines 1) 7)
+   ^String segment (subs (nth lines 2) 8)
+   ^String identity (subs (nth lines 3) 4)]
   (cond
   (not= (nth lines 4) (str "crc " (format "%08x" (crc32-of body)))) (fail "reseal marker CRC does not match" :invalid-reseal-marker)
   (not (valid-branch-name? branch)) (fail "reseal marker does not name a usable branch" :invalid-reseal-marker)

@@ -2,6 +2,6 @@
 ;; the red path is hot — keep red fast
 (defn red [x Any] Any x)
 (defn red-zone [y Any] Any (red y))
-(def banner Any "red flag raised")
-(def exact Any "red")
+(def banner (: "red flag raised" Any))
+(def exact (: "red" Any))
 (defn use [] Any (red (red-zone "red")))

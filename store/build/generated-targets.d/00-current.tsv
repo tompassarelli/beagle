@@ -35,6 +35,8 @@ beagle	src/store/export.bclj	out/store/export.clj
 beagle	src/store/tools.bclj	out/store/tools.clj
 beagle	src/store/authority.bclj	out/store/authority.clj
 beagle	src/store/claims.bclj	out/store/claims.clj
+beagle	src/store/dev_compile_facts.bclj	out/store/dev_compile_facts.clj
+beagle	src/store/gate_facts.bclj	out/store/gate_facts.clj
 beagle	src/store/main.bclj	out/store/main.clj
 beagle	src/pull.bclj	out/pull.clj
 beagle	src/resolve_core.bclj	out/resolve_core.clj

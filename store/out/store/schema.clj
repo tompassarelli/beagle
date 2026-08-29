@@ -130,8 +130,8 @@
 
 (defn register-predicate! [^Session s ^String spelling]
   (let [candidate (resolve-predicate s spelling)
-   canonical (if (some? candidate) (predicate-name s candidate) spelling)
-   default-alias (str ":" canonical)
+   ^String canonical (if (some? candidate) (predicate-name s candidate) spelling)
+   ^String default-alias (str ":" canonical)
    alias-ids (predicate-ids s default-alias)]
   (do
   (if (and (not (empty? alias-ids)) (or (nil? candidate) (not (and (= 1 (count alias-ids)) (= candidate (first alias-ids)))))) (do
@@ -223,7 +223,7 @@
 (defn rename-predicate! [^Session s ^String spelling ^String new-name]
   (let [resolved (resolve-predicate s spelling)
    name-ids (predicate-ids s new-name)
-   default-alias (str ":" new-name)
+   ^String default-alias (str ":" new-name)
    alias-ids (predicate-ids s default-alias)]
   (do
   (if (and (not (empty? name-ids)) (or (nil? resolved) (not (and (= 1 (count name-ids)) (= resolved (first name-ids)))))) (do

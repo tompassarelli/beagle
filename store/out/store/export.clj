@@ -56,7 +56,7 @@
   (if (some? identity) identity (str "@" spelling)))))
 
 (defn- ^String predicate-name [^PredicateRegistry registry ^String spelling]
-  (let [identity (predicate-id registry spelling)
+  (let [^String identity (predicate-id registry spelling)
    canonical (get (predicateregistry-canonical registry) identity)]
   (if (some? canonical) canonical (strip-at identity))))
 
@@ -81,17 +81,17 @@
   (if (= "ref" (value-kind-of registry triples predicate)) (if (str/starts-with? value "@") value (str "@" value)) (if (or (str/blank? value) (str/includes? value " ") (str/includes? value "\t") (str/includes? value "\n") (str/includes? value "\r") (str/starts-with? value "@") (str/starts-with? value "\"")) (store.rt/edn-quote value) value)))
 
 (defn ^String thread-md [triples ^String subject]
-  (let [registry (predicate-registry triples)
+  (let [^PredicateRegistry registry (predicate-registry triples)
    selected (subject-triples triples subject)
    present (distinct-strings (mapv (fn [value] (predicate-name registry (triple-predicate value))) selected))
    ordered (filterv (fn [^String predicate] (vec-contains? present predicate)) order)
    extra (vec (sort (filterv (fn [^String predicate] (and (not (vec-contains? order predicate)) (not (= predicate "body")))) present)))
    predicates (vec (concat ordered extra))
-   lines (reduce (fn [acc ^String predicate] (let [identity (predicate-id registry predicate)
+   lines (reduce (fn [acc ^String predicate] (let [^String identity (predicate-id registry predicate)
    values (mapv (fn [value] (triple-right value)) (filterv (fn [value] (= identity (predicate-id registry (triple-predicate value)))) selected))]
   (vec (concat acc (mapv (fn [^String value] (str predicate "  " (render-object registry triples predicate value))) values))))) [] predicates)
-   body-id (predicate-id registry "body")
+   ^String body-id (predicate-id registry "body")
    bodies (filterv (fn [value] (= body-id (predicate-id registry (triple-predicate value)))) selected)
    maybe-body (if (empty? bodies) nil (triple-right (first bodies)))
-   body (if (some? maybe-body) maybe-body "")]
+   ^String body (if (some? maybe-body) maybe-body "")]
   (str subject "\n" (str/join "\n" lines) "\n---\n" body)))

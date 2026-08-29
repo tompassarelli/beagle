@@ -208,7 +208,7 @@
    role (if (= "defunion" head) :variant :member)]
   (if (< member-start 0) base (reduce (fn [acc i] (let [raw (nth items i nil)
    nm (if (= :variant role) (union-member-datum-name raw) (protocol-member-datum-name raw))]
-  (if (nil? nm) acc (assoc acc [role nm] nm)))) base (range member-start (count items)))))))
+  (if (nil? nm) acc (assoc acc [role nm] nm)))) base (vec (range member-start (count items))))))))
 
 (defn reuse-retained-bindings [datum old-bindings]
   (if (not (seq? datum)) datum (let [items (vec datum)
@@ -227,5 +227,5 @@
   (contains? #{"definterface" "defprotocol"} head) 2
   :else -1)
    role (if (= "defunion" head) :variant :member)
-   rewritten (if (< member-start 0) with-top (reduce (fn [xs i] (replace-one xs role i)) with-top (range member-start (count with-top))))]
+   rewritten (if (< member-start 0) with-top (reduce (fn [xs i] (replace-one xs role i)) with-top (vec (range member-start (count with-top)))))]
   (copy-reader-meta (apply list rewritten) datum))))

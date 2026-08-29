@@ -456,7 +456,7 @@
   (and (= kind :request) request) (write-rpc-request! body request)
   (and (or (= kind :response) (= kind :event)) response) (write-rpc-response! body response)
   :else nil)
-  (if (= body-size (.size body)) (let [out (ByteArrayOutputStream. (+ rpc-v2-header-bytes body-size))]
+  (if (= body-size (.size body)) (let [^ByteArrayOutputStream out (ByteArrayOutputStream. (+ rpc-v2-header-bytes body-size))]
   (.write out store-rpc-v2-magic)
   (rpc-write-u16-le! out rpc-v2-major)
   (rpc-write-u16-le! out rpc-v2-minor)
@@ -570,7 +570,7 @@
 
 (defn- ^Boolean rpc-magic-valid! [buffer]
   (loop [index 0
-   valid true]
+   ^Boolean valid true]
   (if (< index 8) (let [actual (rpc-read-u8! buffer "magic")
    expected (bit-and 255 (int (aget store-rpc-v2-magic index)))]
   (recur (+ index 1) (and valid (= actual expected)))) valid)))

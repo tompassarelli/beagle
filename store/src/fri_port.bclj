@@ -77,7 +77,7 @@
           bytes Any (byte-array (.remaining buffer))]
       (.get buffer bytes)
       bytes)
-    (catch (error java.nio.charset.CharacterCodingException)
+    (catch java.nio.charset.CharacterCodingException error
       (fail (str "fri: invalid UTF-8 in " context) :invalid-fri-cache))))
 
 (defn- strict-utf8-string
@@ -88,7 +88,7 @@
             (.onMalformedInput CodingErrorAction/REPORT)
             (.onUnmappableCharacter CodingErrorAction/REPORT))]
       (str (.decode decoder (ByteBuffer/wrap bytes))))
-    (catch (error java.nio.charset.CharacterCodingException)
+    (catch java.nio.charset.CharacterCodingException error
       (fail (str "fri: invalid UTF-8 in " context) :invalid-fri-cache))))
 
 (defn- require-u32
@@ -600,9 +600,9 @@
                        :source-position source-position
                        :payload-sha payload-sha
                        :payload payload})))))))))
-    (catch (error clojure.lang.ExceptionInfo)
+    (catch clojure.lang.ExceptionInfo error
       (throw error))
-    (catch (error Throwable)
+    (catch Throwable error
       (throw (ex-info "fri: cache is truncated or malformed"
                       {:type :invalid-fri-cache :cause (str error)})))))
 

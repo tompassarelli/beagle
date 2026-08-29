@@ -40,14 +40,14 @@
   (and (t/triple? value) (and (t/transaction-coordinate? (t/triple-t1 value)) (and (= mint-ordinal (t/triple-t2 value)) (and (integer? (t/triple-t3 value)) (>= (t/triple-t3 value) 0))))))
 
 (defn mint! [builder]
-  (let [before (deref builder)
+  (let [^Builder before (deref builder)
    ordinal (builder-minted before)]
   (do
   (swap! builder assoc :minted (inc ordinal))
   (mint-coordinate (builder-coordinate before) ordinal))))
 
 (defn- append! [builder appended]
-  (if (empty? appended) (throw (ex-info "store: an empty operation vector has no write identity" {:type :empty-operation-vector})) (let [before (deref builder)
+  (if (empty? appended) (throw (ex-info "store: an empty operation vector has no write identity" {:type :empty-operation-vector})) (let [^Builder before (deref builder)
    start (count (builder-operations before))]
   (do
   (swap! builder assoc :operations (vec (concat (builder-operations before) appended)))
@@ -66,6 +66,6 @@
   (append! builder (compile-single-update view subject predicate value)))
 
 (defn commit! [ctx builder]
-  (let [current (deref builder)
+  (let [^Builder current (deref builder)
    pinned (builder-coordinate current)]
   (if (not (= (t/triple-t1 pinned) (store/space-id ctx))) (throw (ex-info "store: transaction belongs to a different space" {:type :transaction-space-mismatch})) (if (not (= (t/triple-t3 pinned) (store/next-sequence ctx))) (throw (ex-info "store: the store advanced under this transaction" {:type :transaction-sequence-drift :pinned (t/triple-t3 pinned) :observed (store/next-sequence ctx)})) (store/commit-boundary! ctx (builder-operations current) (store/commit-metadata "store.txn/v1" "store/CommitOperationV1" "store-schema-v1"))))))

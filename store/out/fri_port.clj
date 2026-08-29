@@ -80,7 +80,7 @@
   (let [encoder (doto (.newEncoder StandardCharsets/UTF_8)
   (.onMalformedInput CodingErrorAction/REPORT)
   (.onUnmappableCharacter CodingErrorAction/REPORT))
-   buffer (.encode encoder (CharBuffer/wrap value))
+   ^ByteBuffer buffer (.encode encoder (CharBuffer/wrap value))
    bytes (byte-array (.remaining buffer))]
   (.get buffer bytes)
   bytes)
@@ -125,10 +125,10 @@
   (write-u8! out (unsigned-bit-shift-right checked (* position 8))))
   nil))
 
-(defn- ensure-remaining! [buffer amount ^String context]
+(defn- ensure-remaining! [^ByteBuffer buffer amount ^String context]
   (if (and (>= amount 0) (>= (.remaining buffer) amount)) nil (fail (str "fri: truncated " context) :invalid-fri-cache)))
 
-(defn- read-u8! [buffer ^String context]
+(defn- read-u8! [^ByteBuffer buffer ^String context]
   (do
   (ensure-remaining! buffer 1 context)
   (let [position (.position buffer)
@@ -136,22 +136,22 @@
   (.position buffer (inc position))
   (bit-and 255 (int value)))))
 
-(defn- read-u16-le! [buffer ^String context]
+(defn- read-u16-le! [^ByteBuffer buffer ^String context]
   (do
   (ensure-remaining! buffer 2 context)
   (bit-and 65535 (int (.getShort buffer)))))
 
-(defn- read-u32-le! [buffer ^String context]
+(defn- read-u32-le! [^ByteBuffer buffer ^String context]
   (do
   (ensure-remaining! buffer 4 context)
   (Integer/toUnsignedLong (.getInt buffer))))
 
-(defn- read-i64-le! [buffer ^String context]
+(defn- read-i64-le! [^ByteBuffer buffer ^String context]
   (do
   (ensure-remaining! buffer 8 context)
   (.getLong buffer)))
 
-(defn- read-fixed! [buffer amount ^String context]
+(defn- read-fixed! [^ByteBuffer buffer amount ^String context]
   (do
   (ensure-remaining! buffer amount context)
   (let [bytes (byte-array amount)]
@@ -164,11 +164,11 @@
   (.write out bytes)
   nil))
 
-(defn- read-sized-bytes! [buffer ^String context]
+(defn- read-sized-bytes! [^ByteBuffer buffer ^String context]
   (let [amount (read-u32-le! buffer context)]
   (if (> amount 2147483647) (fail (str "fri: " context " length exceeds JVM bounds") :invalid-fri-cache) (read-fixed! buffer amount context))))
 
-(defn- ^String read-sized-text! [buffer ^String context]
+(defn- ^String read-sized-text! [^ByteBuffer buffer ^String context]
   (strict-utf8-string (read-sized-bytes! buffer context) context))
 
 (declare write-term-v1!)
@@ -198,7 +198,7 @@
   (write-i64-le! out (Double/doubleToLongBits (double term)) "Float atom"))
   (false? term) (write-u8! out 4)
   (true? term) (write-u8! out 5)
-  (keyword? term) (let [spelling (subs (str term) 1)]
+  (keyword? term) (let [^String spelling (subs (str term) 1)]
   (if (empty? spelling) (do
   (fail "fri: TermCodecV1 Keyword is empty" :invalid-fri-cache)))
   (write-u8! out 6)
@@ -211,7 +211,7 @@
 
 (declare read-term-v1!)
 
-(defn- read-term-v1! [buffer depth]
+(defn- read-term-v1! [^ByteBuffer buffer depth]
   (do
   (if (> depth MAX-TERM-DEPTH) (do
   (fail "fri: TermCodecV1 depth exceeds 256" :invalid-fri-cache)))
@@ -222,19 +222,19 @@
   (= tag 3) (Double/longBitsToDouble (read-i64-le! buffer "Float atom"))
   (= tag 4) false
   (= tag 5) true
-  (= tag 6) (let [spelling (read-sized-text! buffer "Keyword atom")]
+  (= tag 6) (let [^String spelling (read-sized-text! buffer "Keyword atom")]
   (if (empty? spelling) (fail "fri: TermCodecV1 Keyword is empty" :invalid-fri-cache) (keyword spelling)))
   (= tag 7) (t/triple (read-term-v1! buffer (inc depth)) (read-term-v1! buffer (inc depth)) (read-term-v1! buffer (inc depth)))
   (= tag 8) (t/instant (read-i64-le! buffer "Instant seconds") (read-u32-le! buffer "Instant nanos"))
   :else (fail "fri: unknown TermCodecV1 tag" :invalid-fri-cache)))))
 
 (defn- encode-term-v1! [term]
-  (let [out (ByteArrayOutputStream.)]
+  (let [^ByteArrayOutputStream out (ByteArrayOutputStream.)]
   (write-term-v1! out term 0)
   (.toByteArray out)))
 
 (defn- decode-term-v1! [bytes]
-  (let [buffer (doto (ByteBuffer/wrap bytes)
+  (let [^ByteBuffer buffer (doto (ByteBuffer/wrap bytes)
   (.order ByteOrder/LITTLE_ENDIAN))
    term (read-term-v1! buffer 0)]
   (if (= 0 (.remaining buffer)) term (fail "fri: trailing bytes inside TermCodecV1 row" :invalid-fri-cache))))
@@ -280,7 +280,7 @@
   nil))
 
 (defn- write-payload! [dump]
-  (let [out (ByteArrayOutputStream.)
+  (let [^ByteArrayOutputStream out (ByteArrayOutputStream.)
    atoms (t/termstoredump-atoms dump)
    triples (t/termstoredump-triples dump)
    transactions (t/termstoredump-transactions dump)
@@ -313,14 +313,14 @@
   (write-i64-le! out handle "slot index handle"))))
   (.toByteArray out)))
 
-(defn- read-count! [buffer ^String context minimum-row]
+(defn- read-count! [^ByteBuffer buffer ^String context minimum-row]
   (let [row-count (read-u32-le! buffer context)]
   (if (or (> row-count 2147483647) (> (* row-count minimum-row) (.remaining buffer))) (fail (str "fri: impossible " context) :invalid-fri-cache) row-count)))
 
-(defn- read-term-row! [buffer]
+(defn- read-term-row! [^ByteBuffer buffer]
   (decode-term-v1! (read-sized-bytes! buffer "Term row")))
 
-(defn- read-atoms! [buffer]
+(defn- read-atoms! [^ByteBuffer buffer]
   (let [row-count (read-count! buffer "AtomRow count" 5)]
   (mapv (fn [position] (let [term (read-term-row! buffer)]
   (if (t/triple? term) (fail "fri: AtomRow decoded as Triple" :invalid-fri-cache) (atom-row term)))) (vec (range row-count)))))
@@ -331,7 +331,7 @@
 (defn- required-handle [handles term]
   (if (contains? handles term) (get handles term) (fail "fri: TripleRow references a term absent from prior rows" :invalid-fri-cache)))
 
-(defn- read-triples! [buffer atoms]
+(defn- read-triples! [^ByteBuffer buffer atoms]
   (let [row-count (read-count! buffer "TripleRow count" 8)]
   (loop [position 0
    rows []
@@ -340,23 +340,23 @@
   (if (not (t/triple? term)) (fail "fri: TripleRow decoded as Atom" :invalid-fri-cache) (if (contains? handles term) (fail "fri: duplicate structural TripleRow" :invalid-fri-cache) (let [row (t/->TripleRow (required-handle handles (t/triple-t1 term)) (required-handle handles (t/triple-t2 term)) (required-handle handles (t/triple-t3 term)))]
   (recur (inc position) (conj rows row) (assoc handles term (triple-handle position)))))))))))
 
-(defn- read-transactions! [buffer]
+(defn- read-transactions! [^ByteBuffer buffer]
   (let [row-count (read-count! buffer "TransactionRow count" 24)]
   (mapv (fn [position] (t/->TransactionRow (read-i64-le! buffer "transaction sequence") (read-i64-le! buffer "first operation") (read-i64-le! buffer "operation count"))) (vec (range row-count)))))
 
-(defn- read-operations! [buffer]
+(defn- read-operations! [^ByteBuffer buffer]
   (let [row-count (read-count! buffer "OperationRow count" 25)]
   (mapv (fn [position] (t/->OperationRow (read-i64-le! buffer "operation transaction") (read-i64-le! buffer "operation ordinal") (code-action (read-u8! buffer "operation action")) (read-i64-le! buffer "operation handle"))) (vec (range row-count)))))
 
-(defn- read-index! [buffer width]
+(defn- read-index! [^ByteBuffer buffer width]
   (let [row-count (read-count! buffer "slot index row count" (* width 8))]
   (mapv (fn [position] (mapv (fn [field] (read-i64-le! buffer "slot index handle")) (vec (range width)))) (vec (range row-count)))))
 
-(defn- read-indexes! [buffer]
+(defn- read-indexes! [^ByteBuffer buffer]
   (mapv (fn [width] (read-index! buffer width)) [2 2 2 3 3 3]))
 
 (defn- read-payload! [payload ^String space-id]
-  (let [buffer (doto (ByteBuffer/wrap payload)
+  (let [^ByteBuffer buffer (doto (ByteBuffer/wrap payload)
   (.order ByteOrder/LITTLE_ENDIAN))
    dump-version (read-u16-le! buffer "TermStoreDump version")
    payload-flags (read-u16-le! buffer "payload flags")]
@@ -392,7 +392,7 @@
   (validate-dump! dump source)
   (let [payload (write-payload! dump)
    payload-sha (sha256-bytes payload)
-   buffer (ByteArrayOutputStream.)]
+   ^ByteArrayOutputStream buffer (ByteArrayOutputStream.)]
   (.write buffer (strict-utf8 MAGIC "magic"))
   (write-u16-le! buffer FMT)
   (write-u16-le! buffer FLAGS)
@@ -409,13 +409,13 @@
 (defn- read-envelope! [^String path]
   (try
   (let [bytes (Files/readAllBytes (.toPath (File. path)))
-   buffer (doto (ByteBuffer/wrap bytes)
+   ^ByteBuffer buffer (doto (ByteBuffer/wrap bytes)
   (.order ByteOrder/LITTLE_ENDIAN))
-   magic (strict-utf8-string (read-fixed! buffer (count MAGIC) "cache magic") "cache magic")]
+   ^String magic (strict-utf8-string (read-fixed! buffer (count MAGIC) "cache magic") "cache magic")]
   (if (not (= magic MAGIC)) (fail "fri: invalid cache magic" :invalid-fri-cache) (let [format (read-u16-le! buffer "cache format")
    flags (read-u16-le! buffer "cache flags")]
-  (if (not (= format FMT)) (fail "fri: unsupported cache format" :invalid-fri-cache) (if (not (= flags FLAGS)) (fail "fri: unsupported cache flags" :invalid-fri-cache) (let [space-id (read-sized-text! buffer "SpaceId")
-   fingerprint (hex (read-fixed! buffer FINGERPRINT-BYTES "source fingerprint"))
+  (if (not (= format FMT)) (fail "fri: unsupported cache format" :invalid-fri-cache) (if (not (= flags FLAGS)) (fail "fri: unsupported cache flags" :invalid-fri-cache) (let [^String space-id (read-sized-text! buffer "SpaceId")
+   ^String fingerprint (hex (read-fixed! buffer FINGERPRINT-BYTES "source fingerprint"))
    source-position (read-i64-le! buffer "source position")
    payload-sha (read-fixed! buffer FINGERPRINT-BYTES "payload checksum")
    payload-length (read-i64-le! buffer "payload length")]

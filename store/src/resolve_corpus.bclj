@@ -72,7 +72,7 @@
 
 (defn name->module [nm Any] Any
   (if (string? nm)
-    (let [hit (re-matches MODULE-NAME-RE nm)] (if (some? hit) (second hit) nil))
+    (let [hit Any (re-matches MODULE-NAME-RE nm)] (if (some? hit) (second hit) nil))
     nil))
 
 (defn make-xresolve
@@ -83,13 +83,15 @@
    type-exports Any
    accessor-exports Any
    src Any] Any
-  (let [{:keys [refer as rename]} Any (rm/parse-require ctx view (vec (get ents-of src []))) xport (fn
-                                                                                                     [m Any
-                                                                                                      n Any] Any
-                                                                                                     (or (get-in exports [m n]) (get-in type-exports [m n]))) xacc (fn
-                                                                                                                                                                     [m Any
-                                                                                                                                                                      n Any] Any
-                                                                                                                                                                     (get-in accessor-exports [m n]))]
+  (let [{:keys [refer as rename]} Any (rm/parse-require ctx view (vec (get ents-of src [])))
+        xport Any (fn
+                    [m Any
+                     n Any] Any
+                    (or (get-in exports [m n]) (get-in type-exports [m n])))
+        xacc Any (fn
+                   [m Any
+                    n Any] Any
+                   (get-in accessor-exports [m n]))]
     (fn
       [qualifier Any
        nm Any] Any
@@ -97,9 +99,9 @@
         (nil? nm)
         nil
         (some? qualifier)
-        (let [alias qualifier
-              public-name nm
-              module (or (get as alias) (when (some (fn [table Any] Bool
+        (let [alias Any qualifier
+              public-name Any nm
+              module Any (or (get as alias) (when (some (fn [table Any] Bool
                                                                                      (contains? table alias)) [exports type-exports accessor-exports]) alias))]
           (when module
             (if-let [target (xport module public-name)]
@@ -114,7 +116,7 @@
                  :accessor
                  (second accessor)}))))
         (get refer nm)
-        (let [m (get refer nm)]
+        (let [m Any (get refer nm)]
           (if-let [target (xport m nm)]
             {:target target :mode :tracking}
             (when-let [accessor (xacc m nm)]
@@ -125,7 +127,7 @@
                :accessor
                (second accessor)})))
         (get rename nm)
-        (let [[m source-name] (get rename nm)]
+        (let [[m source-name] Any (get rename nm)]
           {:target (xport m source-name) :mode :fixed})
         :else
         nil))))
@@ -135,9 +137,9 @@
    view Any
    ents-of Any
    src Any] Any
-  (let [ents (vec (get ents-of src []))
-        exports (rm/module-exports ctx view ents)
-        value-exports (if (empty? exports) (rm/module-defs ctx view ents) exports)]
+  (let [ents Any (vec (get ents-of src []))
+        exports Any (rm/module-exports ctx view ents)
+        value-exports Any (if (empty? exports) (rm/module-defs ctx view ents) exports)]
     (into #{}
       (concat (set (keys value-exports))
         (set (keys (rm/module-types ctx view ents)))
@@ -148,7 +150,7 @@
    view Any
    ents-of Any
    src Any] Any
-  (let [imports (rm/parse-require ctx view (vec (get ents-of src [])))
+  (let [imports Any (rm/parse-require ctx view (vec (get ents-of src [])))
         refer (Map Any Any) (get imports :refer {})
         as (Map Any Any) (get imports :as {})
         rename (Map Any Any) (get imports :rename {})]
@@ -163,7 +165,7 @@
    ents-of Any
    srcs (Vec Any)] Any
   (into {}
-    (map (fn [src Any] Any (let [ents (vec (get ents-of src []))] [(rm/module-name ctx view ents) (module-imports ctx view ents-of src)]))
+    (map (fn [src Any] Any (let [ents Any (vec (get ents-of src []))] [(rm/module-name ctx view ents) (module-imports ctx view ents-of src)]))
       (filter (fn [src Any] Bool (some? (rm/module-name ctx view (vec (get ents-of src [])))))
         srcs))))
 
@@ -172,9 +174,9 @@
    view Any
    ents-of Any
    src Any] Bool
-  (let [ents (vec (get ents-of src []))]
-    (boolean (some (fn [form Any] Bool (let [def-form (rm/unwrap-def ctx view form)
-                                             head (first (rr/ordered-children ctx def-form))]
+  (let [ents Any (vec (get ents-of src []))]
+    (boolean (some (fn [form Any] Bool (let [def-form Any (rm/unwrap-def ctx view form)
+                                             head Any (first (rr/ordered-children ctx def-form))]
                                          (= "defmacro" (rr/sym-val ctx view head)))) (rm/forms-of ctx view ents)))))
 
 (defn lift-bound-to-refers!
@@ -184,20 +186,21 @@
    REFERS Any] Any
   (when (some? BOUND)
     (doseq [occ (ri/by-predicate ctx BOUND)]
-      (let [leaf (ri/subject-at ctx occ)
-            target (ri/target-at ctx occ)]
+      (let [leaf Any (ri/subject-at ctx occ)
+            target Any (ri/target-at ctx occ)]
         (when (and (some? target) (rr/live-node? ctx KIND target) (empty? (ri/by-subject-predicate ctx leaf REFERS)))
           (ri/assert! ctx leaf REFERS target))))))
 
 (defn corpus-from-store! [state CorpusState] Any
   (let [t0 Int (System/nanoTime)
-        groups (rw/warm-groups (:ctx state) (:corpus-cache state) name->module) t-groups
-        Int (System/nanoTime) tables
-        (rw/scoped-corpus-tables (:ctx state) (:view state) groups (:corpus-scope state)) install (:install-warm state)]
+        groups Any (rw/warm-groups (:ctx state) (:corpus-cache state) name->module)
+        t-groups Int (System/nanoTime)
+        tables Any (rw/scoped-corpus-tables (:ctx state) (:view state) groups (:corpus-scope state))
+        install Any (:install-warm state)]
     (do
       (install groups tables)
       (when (= "1" (System/getenv "BEAGLE_STORE_PROF"))
-        (let [profile (:profile state)
+        (let [profile Any (:profile state)
               t-done Int (System/nanoTime)]
           (profile (format "  corpus-from-store!: groups=%.1fms contexts+exports=%.1fms cached=%s nsrcs=%d scoped=%s" (/ (- t-groups t0) 1000000.0) (/ (- t-done t-groups) 1000000.0) (some? (:corpus-cache state)) (count (:srcs tables)) (boolean (:corpus-scope state))))))
       tables)))
@@ -208,35 +211,35 @@
   [host CorpusHost
    edn-paths (Vec Any)
    body Any] Any
-  (let [ctx (ri/new-graph! RESOLVE-SPACE)
-        with-state (:with-state host)]
+  (let [ctx Any (ri/new-graph! RESOLVE-SPACE)
+        with-state Any (:with-state host)]
     (with-state ctx
       (fn [] Any
-        (let [state-fn (:state host)
-              load (:load-edn host)
-              loaded (mapv load edn-paths)
-              state (state-fn)
-              install-srcs (:install-srcs state)
-              install-tables (:install-tables state)]
+        (let [state-fn Any (:state host)
+              load Any (:load-edn host)
+              loaded Any (mapv load edn-paths)
+              state Any (state-fn)
+              install-srcs Any (:install-srcs state)
+              install-tables Any (:install-tables state)]
           (do
             (install-srcs loaded)
             (install-tables (rw/corpus-tables (:ctx state) (:view state) loaded (deref (:file-ents state))))
-            (let [run-all (:run-all state)] (run-all))
+            (let [run-all Any (:run-all state)] (run-all))
             (body)))))))
 
 (defn resolve-warm-store!
   [host CorpusHost
    ctx ri/Graph
    body Any] Any
-  (let [with-state (:with-state host)]
+  (let [with-state Any (:with-state host)]
     (with-state ctx
       (fn [] Any
-        (let [state-fn (:state host)
-              state (state-fn)]
+        (let [state-fn Any (:state host)
+              state Any (state-fn)]
           (do
             (corpus-from-store! state)
             (when (:resolve-walk? state)
-              (let [run-all (:run-all state)] (run-all))
+              (let [run-all Any (:run-all state)] (run-all))
               (lift-bound-to-refers! (:ctx state)
                 (:KIND state)
                 (:BOUND state)
@@ -248,15 +251,15 @@
    ctx ri/Graph
    module-set Any
    body Any] Any
-  (let [with-state (:with-state host)]
+  (let [with-state Any (:with-state host)]
     (with-state ctx
       (fn [] Any
-        (let [state-fn (:state host)
-              state (state-fn)]
+        (let [state-fn Any (:state host)
+              state Any (state-fn)]
           (do
             (corpus-from-store! state)
-            (let [fresh (state-fn)
-                  run-over (:run-over fresh)]
+            (let [fresh Any (state-fn)
+                  run-over Any (:run-over fresh)]
               (run-over (filter module-set (:srcs fresh)))
               (lift-bound-to-refers! (:ctx fresh)
                 (:KIND fresh)
@@ -322,10 +325,10 @@
   (reduce (fn
             [tables Any
              row Any] Any
-            (let [[subject predicate object] row]
+            (let [[subject predicate object] Any row]
               (if (= "bindingId" predicate)
-                (let [node-by-id (:node-by-id tables)
-                      existing (get node-by-id object)]
+                (let [node-by-id Any (:node-by-id tables)
+                      existing Any (get node-by-id object)]
                   (do
                     (when (and (some? existing) (not= existing subject))
                       (throw (ex-info "resolve: compiler bindingId names multiple binding nodes"
@@ -342,45 +345,45 @@
   [builder Any
    ent Any
    rows (Vec Any)] Any
-  (let [tables (compiler-lexical-binding-tables rows)
-        id-by-node (:id-by-node tables)
-        node-by-id (:node-by-id tables)]
+  (let [tables Any (compiler-lexical-binding-tables rows)
+        id-by-node Any (:id-by-node tables)
+        node-by-id Any (:node-by-id tables)]
     (doseq [row rows]
-      (let [[occurrence predicate compiler-target] row]
+      (let [[occurrence predicate compiler-target] Any row]
         (when (= "refersTo" predicate)
-          (let [binding-id (get id-by-node compiler-target)
-                binding-node (get node-by-id binding-id)]
+          (let [binding-id Any (get id-by-node compiler-target)
+                binding-node Any (get node-by-id binding-id)]
             (when (nil? binding-id)
               (throw (ex-info "resolve: compiler refersTo target has no bindingId"
                        {:occurrence occurrence :target compiler-target})))
             (when (nil? binding-node)
               (throw (ex-info "resolve: compiler bindingId has no binding node"
                        {:occurrence occurrence :bindingId binding-id})))
-            (let [occurrence-entity (ent occurrence)
-                  binding-entity (ent binding-node)]
+            (let [occurrence-entity Any (ent occurrence)
+                  binding-entity Any (ent binding-node)]
               (do
                 (ri/assert-on! builder occurrence-entity "bound_to" binding-entity)
                 (ri/assert-on! builder occurrence-entity "refers_to" binding-entity)))))))))
 
 (defn- structural-reader-rows [rows (Vec Any)] (Vec Any)
-  (let [symbol-nodes (reduce (fn
-                               [nodes (Set Any)
-                                row Any] (Set Any)
-                               (if (and (= "kind" (nth row 1 nil))
+  (let [symbol-nodes Any (reduce (fn
+                                   [nodes (Set Any)
+                                    row Any] (Set Any)
+                                   (if (and (= "kind" (nth row 1 nil))
                                      (= "symbol" (nth row 2 nil)))
                                  (conj nodes (nth row 0))
                                  nodes)) #{} rows)]
     (reduce (fn
               [result (Vec Any)
                row Any] (Vec Any)
-              (let [subject (nth row 0 nil)
-                    predicate (nth row 1 nil)
-                    object (nth row 2 nil)]
+              (let [subject Any (nth row 0 nil)
+                    predicate Any (nth row 1 nil)
+                    object Any (nth row 2 nil)]
                 (if (and (= "v" predicate)
                       (contains? symbol-nodes subject)
                       (string? object))
-                  (let [reference (symbol object)
-                        qualifier (namespace reference)]
+                  (let [reference Any (symbol object)
+                        qualifier Any (namespace reference)]
                     (if (nil? qualifier)
                       (conj result row)
                       (into result
@@ -392,19 +395,19 @@
   [ctx ri/Graph
    file-ents (Atom Any)
    path Any] Any
-  (let [lines (str/split-lines (slurp path))
-        src (-> (first (filter (fn [line Any] Bool
+  (let [lines Any (str/split-lines (slurp path))
+        src Any (-> (first (filter (fn [line Any] Bool
                                                                       (str/starts-with? line "@file")) lines)) (subs 6))
-        local (atom {})
-        read-edn (requiring-resolve (quote clojure.edn/read-string))
-        rows (structural-reader-rows (mapv read-edn (filter (fn [line Any] Bool
+        local Any (atom {})
+        read-edn Any (requiring-resolve (quote clojure.edn/read-string))
+        rows Any (structural-reader-rows (mapv read-edn (filter (fn [line Any] Bool
                                                                                                                                                                                                                                                             (str/starts-with? line "[")) lines)))
-        builder (ri/open ctx)
-        ent (fn [lid Any] Any
-                                                                                                                                                                                                                                                                                                                              (or (get (deref local) lid) (let [e (ri/mint! ctx builder)] (do (swap! local assoc lid e) (swap! file-ents update src (fnil conj []) e) e))))]
+        builder Any (ri/open ctx)
+        ent Any (fn [lid Any] Any
+                                                                                                                                                                                                                                                                                                                              (or (get (deref local) lid) (let [e Any (ri/mint! ctx builder)] (do (swap! local assoc lid e) (swap! file-ents update src (fnil conj []) e) e))))]
     (do
       (doseq [row rows]
-        (let [[s p o] row]
+        (let [[s p o] Any row]
           (ri/assert-on! builder
             (ent s)
             p

@@ -35,7 +35,12 @@ check_sources=(
   "$repo/native-core/validation/parser/fixture.bgl"
 )
 
-run_bounded 30s "$repo/bin/beagle" check --agent "${check_sources[@]}"
+for source in "${check_sources[@]}"; do
+  run_bounded 30s "$repo/bin/beagle-check" --agent \
+    --module-root "store/src=$repo/store/src" \
+    --module-root "native-core/src=$repo/native-core/src" \
+    "$source"
+done
 run_bounded 110s "$repo/bin/beagle" native-exe \
   --out "$scratch/program-model" \
   --artifacts "$scratch/artifacts" \

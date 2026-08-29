@@ -2114,6 +2114,8 @@ BEAGLE
 (check-ok "ByteBuffer and mapped FileChannel APIs carry precise receiver types"
   `(ns test.jvm-buffer (:import ,(br 'java.nio 'ByteBuffer 'MappedByteBuffer)
                                 ,(br 'java.nio.channels 'FileChannel)))
+  '(defn read-short [(view ByteBuffer)] Int
+     (.getShort view))
   '(defn read-long [(channel FileChannel) (mode Any)] Int
      (let [mapped MappedByteBuffer (.map channel mode 0 4096)
            view ByteBuffer (.duplicate mapped)]

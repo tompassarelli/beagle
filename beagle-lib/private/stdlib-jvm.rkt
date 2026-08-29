@@ -167,6 +167,7 @@
              (M (C BB) 'get (list INT) (C 'I8))
              (M (C BB) 'get (list (ARR (C 'I8))) (C BB))
              (M (C BB) 'get (list (ARR (C 'I8)) INT INT) (C BB))
+             (M (C BB) 'getShort '() INT)
              (M (C BB) 'getInt '() INT)
              (M (C BB) 'getInt (list INT) INT)
              (M (C BB) 'getLong '() INT)

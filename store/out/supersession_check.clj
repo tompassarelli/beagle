@@ -44,13 +44,13 @@
    lines (str/split-lines (slurp "/tmp/trap.edn"))
    operations (mapv (fn [^String line] (line->operation line)) (filterv (fn [^String line] (str/starts-with? line "[")) lines))
    _load (if (pos? (count operations)) (do
-  (c/commit-transaction! ctx operations)))
+  (c/commit-boundary! ctx operations (c/commit-metadata "store.codegraph/supersession-load-v1" "store/CommitOperationV1" "codegraph-v1"))))
    old-proposition (first-sym-value-proposition ctx "red")
    node (t/triple-t1 old-proposition)
    new-proposition (t/triple node "v" "crimson")
    occurrences-before (c/occurrences ctx)
    old-occurrence (assertion-occurrence-of occurrences-before old-proposition)
-   _edit (c/commit-transaction! ctx [(c/retract-operation old-proposition) (c/assert-operation new-proposition)])
+   _edit (c/commit-boundary! ctx [(c/retract-operation old-proposition) (c/assert-operation new-proposition)] (c/commit-metadata "store.codegraph/supersession-v1" "store/CommitOperationV1" "codegraph-v1"))
    occurrences (c/occurrences ctx)
    new-occurrence (assertion-occurrence-of occurrences new-proposition)
    withdrawal (withdrawal-of ctx old-occurrence)]

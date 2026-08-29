@@ -184,8 +184,8 @@
   (and (= (t/rpcrequest-space request) (t/rpcresponse-space response)) (= (t/rpcrequest-op request) (t/rpcresponse-op response))))
 
 (defn ^ProviderInvocation invoke-plan-with! [descriptors enabled capability-value ^String space ^ProviderPlan plan executor]
-  (let [boot (boot-providers descriptors enabled)
-   descriptor-value (provider-for boot capability-value)]
+  (let [^ProviderBoot boot (boot-providers descriptors enabled)
+   ^ProviderDescriptor descriptor-value (provider-for boot capability-value)]
   (cond
   (not (providerplan-accepted plan)) (throw (ex-info "provider invocation refuses a rejected plan" {:type :provider/plan-rejected}))
   (not (plan-capability? plan capability-value)) (throw (ex-info "provider plan capability does not match the boot-selected provider" {:type :provider/capability-mismatch}))

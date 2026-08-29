@@ -377,7 +377,7 @@
    right-int (integer-value right)
    left-number (numeric-value left)
    right-number (numeric-value right)
-   invalid (->BuiltinValueResult nil nil)]
+   ^BuiltinValueResult invalid (->BuiltinValueResult nil nil)]
   (cond
   (= operator :mod) (if (nil? left-int) invalid (if (nil? right-int) invalid (if (= right-int 0) invalid (->BuiltinValueResult (integer-builtin-value operator left-int right-int) nil))))
   (= operator :/) (if (nil? left-number) invalid (if (nil? right-number) invalid (if (= right-number 0.0) invalid (->BuiltinValueResult nil (double-builtin-value operator left-number right-number)))))
@@ -544,22 +544,22 @@
 
 (defn ^String term-key [value]
   (cond
-  (string? value) (let [text value]
+  (string? value) (let [^String text value]
   (length-key "s" text))
   (integer? value) (let [integer-value value]
   (str "i" integer-value ";"))
   (number? value) (let [float-value (double value)]
   (str "f" float-value ";"))
-  (boolean? value) (let [bool-value value]
+  (boolean? value) (let [^Boolean bool-value value]
   (if bool-value "b1;" "b0;"))
   (keyword? value) (let [keyword-value value]
   (length-key "k" (str keyword-value)))
   (t/instant? value) (let [instant-value value]
   (str "m" (t/instant-epoch-seconds instant-value) ":" (t/instant-nanos instant-value) ";"))
   (t/triple? value) (let [triple-value value
-   t1 (term-key (t/triple-t1 triple-value))
-   t2 (term-key (t/triple-t2 triple-value))
-   t3 (term-key (t/triple-t3 triple-value))]
+   ^String t1 (term-key (t/triple-t1 triple-value))
+   ^String t2 (term-key (t/triple-t2 triple-value))
+   ^String t3 (term-key (t/triple-t3 triple-value))]
   (str "t" (count t1) ":" t1 (count t2) ":" t2 (count t3) ":" t3))
   :else "x0:"))
 
@@ -579,7 +579,7 @@
 
 (defn- ^CandidateSource candidate-source-add [^String relation ^CandidateSource source tuple]
   (let [handle (count (candidatesource-rows source))
-   with-row (assoc source :rows (conj (candidatesource-rows source) tuple))]
+   ^CandidateSource with-row (assoc source :rows (conj (candidatesource-rows source) tuple))]
   (if (and (= relation triple-relation) (= 3 (count tuple))) (assoc with-row :spo (trie-add (candidatesource-spo source) tuple [0 1 2] handle) :pos (trie-add (candidatesource-pos source) tuple [1 2 0] handle) :osp (trie-add (candidatesource-osp source) tuple [2 0 1] handle)) (assoc with-row :positions (add-position-handles (candidatesource-positions source) tuple handle)))))
 
 (defn- ^CandidateSource candidate-source-add-rows [^String relation ^CandidateSource source tuples]
@@ -594,7 +594,7 @@
 (defn- add-delta-sources [sources delta relations]
   (reduce (fn [current ^String relation] (let [tuples (get delta relation #{})
    existing (get current relation)
-   base (if (instance? CandidateSource existing) existing (empty-candidate-source))]
+   ^CandidateSource base (if (instance? CandidateSource existing) existing (empty-candidate-source))]
   (if (empty? tuples) current (assoc current relation (candidate-source-add-rows relation base (ordered-rows tuples)))))) sources relations))
 
 (defn ^Boolean text-relation-needle-valid?! [^String relation needle]
@@ -642,7 +642,7 @@
 (defn- positional-handles [^CandidateSource source arguments subst]
   (loop [position 0
    best []
-   found false]
+   ^Boolean found false]
   (if (>= position (count arguments)) (if found best nil) (let [value (bound-term-value (nth arguments position) subst)]
   (if (nil? value) (recur (inc position) best found) (let [bucket (get (candidatesource-positions source) position {})
    candidate (get bucket value [])]
@@ -674,7 +674,7 @@
   (if (query-evaluation-context-open? context) (recur (rest remaining) (conj seen proposition) (if (some? matched) (conj results matched) results)) results))))))))
 
 (defn- relation-results-indexed! [db sources ^Literal literal subst ^QueryEvaluationContext context]
-  (let [relation (literal-relation literal)
+  (let [^String relation (literal-relation literal)
    arguments (literal-arguments literal)
    source (get sources relation)]
   (if (literal-negated literal) (cond

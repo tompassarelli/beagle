@@ -129,7 +129,7 @@
   (let [authority (writer-authority/acquire! path)]
   (try
   (let [database (create-or-open! path)
-   counts (append-entries! database entries)]
+   ^AppendCounts counts (append-entries! database entries)]
   ["store.dev-compile-facts/append-response-v1" "ok" (revision-identity! path) (appendcounts-appended counts) (appendcounts-retained counts)])
   (finally
     (writer-authority/release! authority)))))
@@ -138,8 +138,8 @@
   (if (and (vector? value) (= 5 (count value)) (allowed-stage? (nth value 0)) (exact-sha256? (nth value 1)) (exact-sha256? (nth value 2)) (nonempty-string? (nth value 3)) (nonempty-string? (nth value 4))) [(nth value 0) (nth value 1) (nth value 2) (nth value 3) (nth value 4)] (fail "query row must be [stage key context profile unit-id]" :dev-compile-facts/invalid-query)))
 
 (defn- query-rows [facts requests]
-  (reduce (fn [rows request] (let [stage (nth request 0)
-   result-key (nth request 1)
+  (reduce (fn [rows request] (let [^String stage (nth request 0)
+   ^String result-key (nth request 1)
    matches (facts-for-key facts stage result-key)]
   (vec (concat rows (mapv (fn [^CompileFact entry] [stage result-key (compilefact-id entry) (compilefact-encoding entry)]) matches))))) [] requests))
 
