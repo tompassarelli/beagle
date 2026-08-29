@@ -2511,6 +2511,15 @@
     (if (= 16 (alength (.getAddress address))) "::1" "127.0.0.1")
     (.getHostAddress address)))
 
+(defn- admit-until-client! [^ServerSocket server ^Socket client]
+  (loop []
+    (let [accepted (.accept server)
+          self-client?
+          (and (= (.getLocalAddress client) (.getInetAddress accepted))
+               (= (.getLocalPort client) (.getPort accepted)))]
+      (admit-connection! accepted)
+      (when-not self-client? (recur)))))
+
 (defn- prove-rpc-ready! [^ServerSocket server]
   (let [request-id Long/MIN_VALUE
         space (database/database-space @active-store)
@@ -2523,11 +2532,7 @@
       (.setSoTimeout client 5000)
       ;; External clients may enter the backlog before this self-client. Serve
       ;; them, but do not mistake their successful RPC for the readiness proof.
-      (loop []
-        (let [accepted (.accept server)
-              self-client? (= (.getLocalPort client) (.getPort accepted))]
-          (admit-connection! accepted)
-          (when-not self-client? (recur))))
+      (admit-until-client! server client)
       (let [output (.getOutputStream client)]
         (.write output (rpc/store-rpc-encode-packet-v2! request-packet))
         (.flush output))
