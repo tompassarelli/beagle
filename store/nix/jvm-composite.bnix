@@ -1,0 +1,71 @@
+#lang beagle/nix
+(ns store.nix.jvm-composite)
+
+(nix/module [pkgs beaglePackage beagleNativeBin beagleRevision storePackage]
+  (let [storeRoot storePackage.runtimeRoot
+        rawDispatcher (s beaglePackage "/bin/.beagle-wrapped")
+        runtimePath (pkgs.lib.makeBinPath
+            (nix/with pkgs
+              [racket babashka bun clojure jdk python3 bash coreutils
+               gnugrep gnused gawk findutils util-linux ripgrep]))]
+    (pkgs.stdenvNoCC.mkDerivation
+      (fn [finalAttrs Any] Any
+        {:pname "beagle-store-jvm-composite"
+         :version (s "1-" beagleRevision)
+         :nativeBuildInputs
+           (nix/with pkgs [makeWrapper bash coreutils diffutils gnugrep babashka])
+         :dontUnpack true
+         :dontConfigure true
+         :dontBuild true
+         :installPhase
+           (ms "runHook preInstall"
+               ""
+               "mkdir -p \"$out/libexec/store\" \"$out/libexec/bin\""
+               (s "cp -r " storeRoot "/. \"$out/libexec/store/\"")
+               "test ! -L \"$out/libexec/store\""
+               "test -x \"$out/libexec/store/bin/beagle-store-server\""
+               "test -r \"$out/libexec/store/runtime.manifest\""
+               (s "test -x " rawDispatcher)
+               ""
+               (s "makeWrapper " rawDispatcher " \"$out/libexec/bin/beagle\" \\")
+               (s "  --set _BEAGLE_RACKET \"" pkgs.racket "/bin/racket\" \\")
+               (s "  --set PLTCOLLECTS \":" beaglePackage "/share/racket-collects\" \\")
+               "  --set BEAGLE_STORE_HOME \"$out/libexec/store\" \\
+  --set BEAGLE_STORE_BIN \"$out/libexec/store/bin\" \\
+  --set BEAGLE_STORE_OUT \"$out/libexec/store/out\" \\
+  --set BEAGLE_STORE_RESOLVE \"$out/libexec/store/out/resolve.clj\" \\
+  --set BEAGLE_STORE_SERVER_CLASSPATH_FILE \"$out/libexec/store/server.classpath\" \\
+  --set BEAGLE_STORE_PACKAGED \"1\" \\
+  --set BEAGLE_STORE_SERVER_RUNTIME \"jvm\" \\"
+               (s "  --set BEAGLE_STORE_JAVA \"" pkgs.jdk "/bin/java\" \\")
+               (s "  --set BEAGLE_PACKAGED_COMPILER_COMMIT \"" beagleRevision "\" \\")
+               (s "  --set BEAGLE_NATIVE_BIN \"" beagleNativeBin "\" \\")
+               (s "  --set _BEAGLE_SELFHOST_EXACT_NATIVE_BIN \"" beagleNativeBin "\" \\")
+               (s "  --prefix PATH : \"" runtimePath "\"")
+               ""
+               "runHook postInstall")
+         :doInstallCheck true
+         :installCheckPhase
+           (ms "runHook preInstallCheck"
+               ""
+               (s "BEAGLE_JVM_COMPOSITE_TEST_BB=\"" pkgs.babashka "/bin/bb\" \\")
+               (s "BEAGLE_JVM_COMPOSITE_TEST_CMP=\"" pkgs.diffutils "/bin/cmp\" \\")
+               (s "BEAGLE_JVM_COMPOSITE_TEST_ENV=\"" pkgs.coreutils "/bin/env\" \\")
+               (s "BEAGLE_JVM_COMPOSITE_TEST_GREP=\"" pkgs.gnugrep "/bin/grep\" \\")
+               (s "BEAGLE_JVM_COMPOSITE_TEST_JAVA=\"" pkgs.jdk "/bin/java\" \\")
+               (s "BEAGLE_JVM_COMPOSITE_TEST_RAW_DISPATCHER=\"" rawDispatcher "\" \\")
+               (s "BEAGLE_JVM_COMPOSITE_TEST_STORE_ROOT=\"" storeRoot "\" \\")
+               (s "  " pkgs.bash "/bin/bash " (p "../tests/package_jvm_composite_smoke.sh") " \"$out\"")
+               ""
+               "runHook postInstallCheck")
+         :meta
+           {:description "Immutable Beagle dispatcher and packaged JVM Store runtime"
+            :license (nix/with pkgs.lib.licenses [mit asl20])
+            :platforms pkgs.lib.platforms.unix}
+         :passthru
+           {:runtimeRoot (s finalAttrs.finalPackage "/libexec/store")
+            :babashkaClasspath (s finalAttrs.finalPackage "/libexec/store/out")
+            :runtimeManifest (s finalAttrs.finalPackage "/libexec/store/runtime.manifest")
+            :beagleExecutable (s finalAttrs.finalPackage "/libexec/bin/beagle")
+            :storePackage storePackage
+            :beaglePackage beaglePackage}}))))

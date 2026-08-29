@@ -24,6 +24,7 @@
       # advertising that system made `flake check --all-systems` dishonest.
       systems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
       forAll = f: nixpkgs.lib.genAttrs systems (system: f system nixpkgs.legacyPackages.${system});
+      mkJvmComposite = import ./nix/jvm-composite.nix;
 
       mkWasiToolchainLicenses = pkgs:
         let
@@ -600,6 +601,13 @@
     {
       packages = forAll (system: pkgs: rec {
         store = mkStore pkgs clj-nix.packages.${system};
+        jvm-composite = mkJvmComposite {
+          inherit pkgs;
+          beaglePackage = beagle.packages.${system}.default;
+          beagleNativeBin = "${beagle.packages.${system}.beagle-selfhost}/bin/beagle-selfhost";
+          beagleRevision = beagle.rev;
+          storePackage = store;
+        };
         beagle-store-graph-edit-runtime = mkGraphEditRuntime system pkgs store
           beagle.packages.${system}.default beagle.outPath;
         default = store;
