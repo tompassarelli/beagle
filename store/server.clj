@@ -117,7 +117,7 @@
   (bounded-positive-env-int "BEAGLE_STORE_CONNECTION_WORKERS" 32 512))
 (def connection-pending-limit
   (bounded-positive-env-int "BEAGLE_STORE_CONNECTION_QUEUE" 128 65536))
-(def connection-first-packet-timeout-ms
+(def connection-read-timeout-ms
   (bounded-positive-env-int "BEAGLE_STORE_CONNECTION_READ_TIMEOUT_MS" 5000 600000))
 (def connection-drain-grace-ms
   (bounded-positive-env-int "BEAGLE_STORE_SHUTDOWN_CONNECTION_GRACE_MS" 3000 600000))
@@ -2324,7 +2324,7 @@
 
 (defn- serve-accepted-connection! [^Socket socket]
   (try
-    (.setSoTimeout socket connection-first-packet-timeout-ms)
+    (.setSoTimeout socket connection-read-timeout-ms)
     (serve-connection! socket)
     (catch Throwable error
       (when (= :rpc/internal-error (admission-error-code error))
@@ -2401,9 +2401,11 @@
 (defn- start-connection-request! [^Socket socket packet output started]
   (let [request-id (t/storerpcpacketv2-request-id packet)
         operation (t/rpcrequest-op (t/storerpcpacketv2-request packet))
-        cancellation (cancellation-state)]
+        cancellation (cancellation-state)
+        completed-ns (atom nil)]
     (register-request! request-id cancellation)
     {:cancellation cancellation
+     :completed-ns completed-ns
      :task
      (future
        (try
@@ -2420,18 +2422,36 @@
            (try (.close socket) (catch Throwable _ nil))
            (throw error))
          (finally
+           (reset! completed-ns (System/nanoTime))
            (swap! active-requests dissoc request-id))))}))
 
 (defn- await-connection-request! [pending disconnected?]
-  (when pending
-    (when (and disconnected? (not (realized? (:task pending))))
-      (cancel-state! (:cancellation pending) :client-disconnected))
-    (try
-      @(:task pending)
-      (catch Throwable error
-        (when-not disconnected?
-          (throw error)))))
-  nil)
+  (if-not pending
+    false
+    (do
+      (when (and disconnected? (not (realized? (:task pending))))
+        (cancel-state! (:cancellation pending) :client-disconnected))
+      (try
+        @(:task pending)
+        false
+        (catch Throwable error
+          (if disconnected?
+            true
+            (throw error)))))))
+
+(defn- continue-after-read-timeout! [^Socket socket pending-request]
+  (when-let [pending @pending-request]
+    (if-not (realized? (:task pending))
+      true
+      (do
+        (await-connection-request! pending false)
+        (reset! pending-request nil)
+        (let [completed-ns (or @(:completed-ns pending) (System/nanoTime))
+              idle-ms (quot (- (System/nanoTime) completed-ns) 1000000)
+              remaining-ms (- connection-read-timeout-ms idle-ms)]
+          (when (pos? remaining-ms)
+            (.setSoTimeout socket (int remaining-ms))
+            true))))))
 
 (defn serve-connection! [^Socket socket]
   (with-open [socket socket]
@@ -2441,36 +2461,49 @@
           opened (System/nanoTime)
           pending-request (atom nil)]
       (try
-        (loop [first-packet? true]
-          (let [packet (read-rpc-packet! input)
+        (loop []
+          (let [packet
+                (try
+                  (read-rpc-packet! input)
+                  (catch SocketTimeoutException error
+                    (if (continue-after-read-timeout! socket pending-request)
+                      ::retry-read
+                      (throw error))))
                 started (System/nanoTime)]
-            (when (and first-packet? (.isConnected socket))
-              (.setSoTimeout socket 0))
-            (if-not packet
+            (if (= ::retry-read packet)
+              (recur)
               (do
-                (await-connection-request! @pending-request true)
-                (reset! pending-request nil))
-              (if (= :cancel (t/storerpcpacketv2-kind packet))
-                (do
-                  (handle-rpc-packet! packet (cancellation-state))
-                  (record-request! :rpc/cancel (- (System/nanoTime) started)
-                                   :ok nil nil)
-                  (recur false))
-                (do
-                  ;; A connection may carry many framed requests, but executes
-                  ;; only one at a time so one client cannot bypass admission.
-                  (await-connection-request! @pending-request false)
-                  (reset! pending-request nil)
-                  (reset! pending-request
-                          (start-connection-request! socket packet output started))
-                  (recur false))))))
+                (.setSoTimeout socket connection-read-timeout-ms)
+                (if-not packet
+                  (do
+                    (await-connection-request! @pending-request true)
+                    (reset! pending-request nil))
+                  (if (= :cancel (t/storerpcpacketv2-kind packet))
+                    (do
+                      (handle-rpc-packet! packet (cancellation-state))
+                      (record-request! :rpc/cancel (- (System/nanoTime) started)
+                                       :ok nil nil)
+                      (recur))
+                    (do
+                      ;; A connection may carry many framed requests, but executes
+                      ;; only one at a time so one client cannot bypass admission.
+                      (await-connection-request! @pending-request false)
+                      (reset! pending-request nil)
+                      (reset! pending-request
+                              (start-connection-request!
+                               socket packet output started))
+                      (recur))))))))
         (catch Throwable error
-          (await-connection-request! @pending-request true)
-          (reset! pending-request nil)
-          ;; Beagle Packet-level failures never reach handle-rpc-request!, so without
-          ;; this arm a malformed or duplicated request is served invisibly.
-          (let [code (admission-error-code error)]
-            (record-request! nil (- (System/nanoTime) opened) :error code nil))
+          (let [request-failed?
+                (await-connection-request! @pending-request true)]
+            (reset! pending-request nil)
+            ;; Packet-level failures never reach handle-rpc-request!. A pending
+            ;; request failure has already recorded its operation before closing
+            ;; the socket, so account only failures without that prior record.
+            (when-not request-failed?
+              (let [code (admission-error-code error)]
+                (record-request! nil (- (System/nanoTime) opened)
+                                 :error code nil))))
           (throw error))))))
 
 (defn- readiness-probe-host [^java.net.InetAddress address]
@@ -2544,7 +2577,7 @@
               " log=" (or request-log-path "stderr")
               " connection-workers=" connection-worker-limit
               " connection-queue=" connection-pending-limit
-              " connection-read-timeout-ms=" connection-first-packet-timeout-ms
+              " connection-read-timeout-ms=" connection-read-timeout-ms
               " max-heap-mb=" (quot (.maxMemory runtime) 1048576)))
         (while (not @stopping?)
           (try

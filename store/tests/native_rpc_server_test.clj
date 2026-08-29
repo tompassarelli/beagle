@@ -155,6 +155,76 @@
                    (= :rpc/version (t/rpcresponse-op version))
                    (= :rpc/status (t/rpcresponse-op status))))))
 
+  (let [idle-session-closed?
+        (with-redefs [server/connection-read-timeout-ms 75]
+          (with-open [session (rt/open-native-session! port)]
+            (rt/native-session-request!
+             session (wire/rpc-request!
+                      space :rpc/version nil nil nil wire/rpc-unit))
+            (Thread/sleep 200)
+            (try
+              (rt/native-session-request!
+               session (wire/rpc-request!
+                        space :rpc/status nil nil nil wire/rpc-unit))
+              false
+              (catch Throwable _ true))))]
+    (check! "persistent STORERPC sessions retain the configured idle timeout"
+            idle-session-closed?))
+
+  (let [handle-rpc-request! server/handle-rpc-request!
+        active-request-completed?
+        (with-redefs [server/connection-read-timeout-ms 50
+                      server/handle-rpc-request!
+                      (fn [request cancellation]
+                        (Thread/sleep 125)
+                        (handle-rpc-request! request cancellation))]
+          (with-open [session (rt/open-native-session! port)]
+            (nil?
+             (error-code
+              (rt/native-session-request!
+               session (wire/rpc-request!
+                        space :rpc/version nil nil nil wire/rpc-unit))))))]
+    (check! "connection idle timeout does not interrupt an active request"
+            active-request-completed?))
+
+  (let [closed (promise)
+        reads (atom 0)
+        recorded (atom [])
+        packet
+        (wire/store-rpc-request-packet
+         9001 (wire/rpc-request!
+               space :rpc/version nil nil nil wire/rpc-unit))
+        socket
+        (proxy [java.net.Socket] []
+          (getInputStream [] (java.io.ByteArrayInputStream. (byte-array 0)))
+          (getOutputStream [] (java.io.ByteArrayOutputStream.))
+          (setTcpNoDelay [_] nil)
+          (close [] (deliver closed true)))
+        failure
+        (with-redefs-fn
+          {(ns-resolve 'server 'read-rpc-packet!)
+           (fn [_]
+             (if (= 1 (swap! reads inc))
+               packet
+               (do
+                 (deref closed 1000 nil)
+                 (throw (java.net.SocketException. "forced close")))))
+           (ns-resolve 'server 'write-rpc-packet!)
+           (fn [_ _]
+             (throw (java.net.SocketException. "forced write failure")))
+           #'server/record-request!
+           (fn [& values]
+             (swap! recorded conj values))}
+          #(try
+             (server/serve-connection! socket)
+             nil
+             (catch Throwable error error)))]
+    (check! "response write failure records its request exactly once"
+            (and (instance? java.net.SocketException failure)
+                 (= 1 (count @recorded))
+                 (= :rpc/version (ffirst @recorded))
+                 (= :error (nth (first @recorded) 2)))))
+
   (check! "operation disposition is exhaustive for the fourteen v2 operations"
           (and (= 14 (count server/native-rpc-operations))
                (every? #(= :supported (server/native-op-disposition %))
@@ -738,6 +808,22 @@
           (check! "product page drain decodes multiple responses in order"
                   (and (< 1 (count responses))
                        (= (scan-reference) rows)))))
+
+      (with-open [session (rt/open-native-session! port)]
+        (let [responses
+              (rt/native-session-pages!
+               session
+               (wire/rpc-request!
+                "wrong-space" :rpc/scan nil
+                (wire/rpc-page-request! 100 nil) nil scan-payload))
+              status
+              (rt/native-session-request!
+               session (wire/rpc-request!
+                        space :rpc/status nil nil nil wire/rpc-unit))]
+          (check! "page drain returns typed server errors without closing the session"
+                  (and (= 1 (count responses))
+                       (= :rpc/space-mismatch (error-code (first responses)))
+                       (nil? (error-code status))))))
 
       (let [visited (atom 0)
             live database/live-propositions

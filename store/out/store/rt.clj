@@ -425,17 +425,18 @@
                   (validate-native-response-route!
                    (rpc/store-rpc-decode-response-route-v2! frame)
                    request-id current-request)
-                  page (rpc/storerpcresponseroute-page route)]
-              (when-not page
+                  page (rpc/storerpcresponseroute-page route)
+                  failed (rpc/storerpcresponseroute-failed route)
+                  decode-work
+                  (future
+                    (decode-native-routed-response!
+                     frame request-id current-request route))
+                  _ (swap! active-decodes conj decode-work)
+                  next-pending (conj pending decode-work)]
+              (when (and (not failed) (nil? page))
                 (throw (ex-info "Store RPC page drain received no page metadata"
                                 {:type :rpc-page-missing})))
-              (let [decode-work
-                    (future
-                      (decode-native-routed-response!
-                       frame request-id current-request route))
-                    _ (swap! active-decodes conj decode-work)
-                    next-pending (conj pending decode-work)]
-                (if (terms/rpcpageresponse-done page)
+              (if (or failed (terms/rpcpageresponse-done page))
                   (into responses
                         (mapv (fn [work]
                                 (try
@@ -466,7 +467,7 @@
                               current-request next-cursor)
                              (conj seen-cursors next-cursor)
                              remaining-pending
-                             next-responses))))))))
+                             next-responses)))))))
         (catch Throwable error
           (doseq [work @active-decodes]
             (future-cancel work))
