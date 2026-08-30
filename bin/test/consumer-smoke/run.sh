@@ -42,6 +42,13 @@ printf '%s' '__Store transaction log_MAGIC__' >"$legacy_semantic_read_store"
 legacy_semantic_read_store_digest="$(
   sha256sum "$legacy_semantic_read_store" | awk '{print $1}'
 )"
+legacy_source_fact_root="$core_cache_root/source-facts"
+mkdir -p "$legacy_source_fact_root"
+legacy_source_fact_store="$legacy_source_fact_root/legacy.storelog"
+printf '%s' '__Store transaction log_MAGIC__' >"$legacy_source_fact_store"
+legacy_source_fact_store_digest="$(
+  sha256sum "$legacy_source_fact_store" | awk '{print $1}'
+)"
 export BEAGLE_CORE_BUILD_CACHE="$core_cache_root"
 
 # The Atom cell is intentionally outside QBE's current frontier. Keep that
@@ -83,6 +90,16 @@ mapfile -t semantic_read_stores < <(
 )
 (( ${#semantic_read_stores[@]} >= 1 )) ||
   die "qualified terrain build did not select a keyed semantic cache cohort"
+[[ "$(sha256sum "$legacy_source_fact_store" | awk '{print $1}')" == \
+  "$legacy_source_fact_store_digest" ]] ||
+  die "qualified terrain build mutated the incompatible source-fact cache"
+mapfile -t source_fact_stores < <(
+  find "$core_cache_root" -mindepth 2 -maxdepth 2 -type f \
+    -path "$core_cache_root/source-facts-????????????????????????????????????????????????????????????????/*.storelog" \
+    -print | LC_ALL=C sort
+)
+(( ${#source_fact_stores[@]} >= 1 )) ||
+  die "qualified terrain build did not select a keyed source-fact cache cohort"
 printf 'consumer smoke: qualified terrain native symbol table ok\n'
 
 store_artifact="$(BEAGLE_STORE_BEAGLE="$beagle_cli" \

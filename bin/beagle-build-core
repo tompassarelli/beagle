@@ -1117,7 +1117,7 @@ source_fact_store_scope_key="$(
         printf '%s\0' "${normalized_sources[@]}" | LC_ALL=C sort -z
     } | sha256sum | awk '{print $1}'
 )"
-source_fact_store_root="$cache_root/source-facts"
+source_fact_store_root="$cache_root/source-facts-$semantic_read_store_cohort"
 source_fact_store="$source_fact_store_root/$source_fact_store_scope_key.storelog"
 core_result_early_hit=0
 core_checkpoint_early_hit=0
