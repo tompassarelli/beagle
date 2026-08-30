@@ -458,6 +458,35 @@
        "      third (third-value)]\n"
        "  third)\n")))))
 
+(test-case "metadata-bearing local initializers survive one write"
+  (define source
+    (string-append
+     "(let [process ^Process (:process feed) writer ^java.io.Writer "
+     "(:writer feed)] process)\n"))
+  (with-source
+   source
+   (lambda (path)
+     (check-equal? (format-signature-files 'write (list path)) 0)
+     (check-equal? (format-signature-files 'check (list path)) 0)
+     (check-equal?
+      (file->string path)
+      (string-append
+       "(let [process ^Process (:process feed)\n"
+       "      writer ^java.io.Writer (:writer feed)]\n"
+       "  process)\n")))))
+
+(test-case "map destructuring parameters never masquerade as legacy constraints"
+  (define source
+    (string-append
+     "(defn fixture [{:strs [run referent agent]} Any] Any "
+     "(str run referent agent))\n"))
+  (with-source
+   source
+   (lambda (path)
+     (check-equal? (format-signature-files 'write (list path)) 0)
+     (check-equal? (format-signature-files 'check (list path)) 0)
+     (check-equal? (file->string path) source))))
+
 (test-case "one write reaches the canonical fixed point"
   (define source "(defn add [(x Int) (y Int)] Int (+ x y))\n")
   (with-source

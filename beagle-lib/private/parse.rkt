@@ -521,10 +521,15 @@
          [(syntax-span stx) (+ start (syntax-span stx))]
          [else
           (define tok (token-at-offset tokens start))
+          (define child-ends
+            (filter values
+                    (for/list ([child (in-list (or (stx-subs stx) '()))])
+                      (syntax-end-offset child tokens))))
           (cond
             [(and tok (opener? tok))
              (define close (matching-token tokens tok))
              (and close (token-end close))]
+            [(pair? child-ends) (apply max child-ends)]
             [tok (token-end tok)]
             [else #f])])))
 
@@ -551,7 +556,9 @@
   (define items (and subs (cdr subs)))
   (and items
        (let* ([legacy? (and (pair? items)
-                            (structured-binding? (->datum (car items))))]
+                            (let ([first (->datum (car items))])
+                              (and (structured-binding? first)
+                                   (not (map-tagged? first)))))]
               [flat? (and (not legacy?)
                           (pair? items)
                           (pair? (cdr items))
