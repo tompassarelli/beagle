@@ -3,6 +3,7 @@
 (ns store.store)
 (require [store.types :as t])
 (require [store.slots :as slots])
+(require [store.packed :as packed])
 
 (def empty-ids (Vec Int) [])
 (def empty-atoms (Vec t/AtomRow) [])
@@ -15,6 +16,19 @@
 (def empty-active-cells (Vec (Atom (Vec Int))) [])
 (def term-store-dump-version Int 2)
 (def max-transaction-sequence Int 9223372036854775806)
+(def default-tail-row-limit Int 65536)
+(def default-tail-byte-limit Int 67108864)
+(def tail-base-rows Int 192)
+(def tail-base-bytes Int 12288)
+(def atom-tail-overhead-bytes Int 64)
+(def slot-entry-tail-bytes Int 24)
+(def triple-tail-bytes Int 72)
+(def transaction-tail-bytes Int 48)
+(def operation-tail-bytes Int 64)
+(def withdrawal-tail-bytes Int 16)
+(def active-bucket-tail-bytes Int 88)
+(def active-position-tail-bytes Int 16)
+(def active-cell-tail-bytes Int 32)
 
 (defrecord TermStoreLoadResult
   [ok Bool
@@ -32,6 +46,11 @@
    code Keyword?
    message String?])
 
+(defrecord TailDemand
+  [seen Any
+   rows Int
+   bytes Int])
+
 ;; A slot table doubles once its indexed vector holds more than this many rows
 ;; per slot. Every lookup still checks the complete physical row for collision.
 (def initial-slots Int 64)
@@ -46,22 +65,26 @@
 
 (defn- build-atom-term-slots!
   [atoms (Vec t/AtomRow)
-   width Int] slots/TermSlots
+   width Int
+   base Int] slots/TermSlots
   (loop [slots slots/TermSlots (slots/fresh-slots width)
          position Int 0]
     (if (>= position (count atoms))
       slots
-      (recur (slots/slot-add! slots (slots/slot-of (nth atoms position) width) position)
+      (recur (slots/slot-add! slots (slots/slot-of (nth atoms position) width)
+                              (+ base position))
              (inc position)))))
 
 (defn- build-triple-term-slots!
   [rows (Vec t/TripleRow)
-   width Int] slots/TermSlots
+   width Int
+   base Int] slots/TermSlots
   (loop [slots slots/TermSlots (slots/fresh-slots width)
          position Int 0]
     (if (>= position (count rows))
       slots
-      (recur (slots/slot-add! slots (slots/slot-of (nth rows position) width) position)
+      (recur (slots/slot-add! slots (slots/slot-of (nth rows position) width)
+                              (+ base position))
              (inc position)))))
 
 (defn- build-active-slots!
@@ -103,18 +126,135 @@
   (deref (t/termstore-triple-slots store)))
 (defn- store-active-slots [store t/TermStore] slots/TermSlots
   (deref (t/termstore-active-slots store)))
+(defn- store-prefix [store t/TermStore] Any
+  (t/termstore-packed-prefix store))
+(defn- prefix-atom-count [store t/TermStore] Int
+  (if (nil? (store-prefix store)) 0 (packed/atom-count (store-prefix store))))
+(defn- prefix-triple-count [store t/TermStore] Int
+  (if (nil? (store-prefix store)) 0 (packed/triple-count (store-prefix store))))
+(defn- prefix-transaction-count [store t/TermStore] Int
+  (if (nil? (store-prefix store)) 0 (packed/transaction-count (store-prefix store))))
+(defn- prefix-operation-count [store t/TermStore] Int
+  (if (nil? (store-prefix store)) 0 (packed/operation-count (store-prefix store))))
+(defn- total-atom-count [store t/TermStore] Int
+  (+ (prefix-atom-count store) (count (store-atoms store))))
+(defn- total-triple-count [store t/TermStore] Int
+  (+ (prefix-triple-count store) (count (store-triples store))))
+(defn- total-transaction-count [store t/TermStore] Int
+  (+ (prefix-transaction-count store) (count (store-transactions store))))
+(defn- total-operation-count [store t/TermStore] Int
+  (+ (prefix-operation-count store) (count (store-operations store))))
+
+(defn atom-row-at
+  [store t/TermStore
+   position Int] t/AtomRow
+  (let [base Int (prefix-atom-count store)]
+    (if (< position base)
+      (packed/atom-row-at! (store-prefix store) position)
+      (nth (store-atoms store) (- position base)))))
+
+(defn triple-row-at
+  [store t/TermStore
+   position Int] t/TripleRow
+  (let [base Int (prefix-triple-count store)]
+    (if (< position base)
+      (packed/triple-row-at! (store-prefix store) position)
+      (nth (store-triples store) (- position base)))))
+
+(defn transaction-row-at
+  [store t/TermStore
+   position Int] t/TransactionRow
+  (let [base Int (prefix-transaction-count store)]
+    (if (< position base)
+      (packed/transaction-row-at! (store-prefix store) position)
+      (nth (store-transactions store) (- position base)))))
+
+(defn operation-row-at
+  [store t/TermStore
+   position Int] t/OperationRow
+  (let [base Int (prefix-operation-count store)]
+    (if (< position base)
+      (packed/operation-row-at! (store-prefix store) position)
+      (nth (store-operations store) (- position base)))))
+
+(defn- withdrawal-target-at
+  [store t/TermStore
+   position Int] Int
+  (let [base Int (prefix-operation-count store)]
+    (if (< position base)
+      (packed/withdrawal-target-at! (store-prefix store) position)
+      (nth (store-withdrawal-targets store) (- position base)))))
+
+(defn- tail-row-count [store t/TermStore] Int
+  (let [atoms Int (count (store-atoms store))
+        triples Int (count (store-triples store))
+        transactions Int (count (store-transactions store))
+        operations Int (count (store-operations store))
+        buckets (Vec t/ActiveBucket) (store-active-buckets store)
+        bucket-count Int (count buckets)
+        active-positions Int (if (store-fold-open store)
+          (reduce + (map (fn [cell (Atom (Vec Int))] Int
+                           (count (deref cell)))
+                         (store-active-cells store)))
+          (reduce + (map (fn [bucket t/ActiveBucket] Int
+                           (count (t/activebucket-positions bucket)))
+                         buckets)))
+        cell-count Int (if (store-fold-open store) bucket-count 0)]
+    (+ tail-base-rows
+       (+ (* 2 atoms)
+          (+ (* 2 triples)
+             (+ transactions
+                (+ (* 2 operations)
+                   (+ (* 2 bucket-count)
+                      (+ active-positions cell-count)))))))))
+
+(defn- ensure-tail-room!
+  [store t/TermStore
+   rows Int
+   bytes Int] Nil
+  (if (or (nil? (store-prefix store))
+          (and (<= (+ (tail-row-count store) rows)
+                   (t/termstore-tail-row-limit store))
+               (<= (+ (deref (t/termstore-tail-bytes store)) bytes)
+                   (t/termstore-tail-byte-limit store))))
+    nil
+    (throw
+     (ex-info
+      "store: boxed mutation tail requires a packed checkpoint rollover"
+      {:type :packed-tail-rollover-required
+       :store/code :packed-tail-rollover-required
+       :tail-rows (tail-row-count store)
+       :tail-bytes (deref (t/termstore-tail-bytes store))
+       :requested-rows rows
+       :requested-bytes bytes
+       :row-limit (t/termstore-tail-row-limit store)
+       :byte-limit (t/termstore-tail-byte-limit store)}))))
+
+(defn- account-tail-bytes! [store t/TermStore amount Int] Nil
+  (swap! (t/termstore-tail-bytes store) + amount)
+  nil)
 
 ;; A slot table is rebuilt by doubling, and every superseded generation stays
 ;; resident, so a caller that already knows roughly how many terms are coming
 ;; says so and pays for one table instead of the whole chain. The hint only
 ;; picks a starting width: an underestimate still grows, an overestimate only
 ;; costs empty slots.
-(defn new-term-store-sized
+(defn- new-term-store-sized-with-tail-limits
   [space-id String
    expected-atoms Int
    expected-triples Int
-   expected-buckets Int] (Atom t/TermStore)
-  (if (valid-space-id? space-id)
+   expected-buckets Int
+   tail-row-limit Int
+   tail-byte-limit Int] (Atom t/TermStore)
+  (cond
+    [(not (valid-space-id? space-id))
+     (throw (ex-info "store: TermStore requires a non-empty SpaceId"
+                     {:type :invalid-space-id}))]
+    [(not (and (pos? tail-row-limit) (pos? tail-byte-limit)))
+     (throw (ex-info "store: TermStore requires positive tail bounds"
+                     {:type :invalid-packed-tail-bound
+                      :store/code :invalid-packed-tail-bound}))]
+    [:else
     (atom (t/->TermStore
            space-id (atom 1) (atom empty-atoms) (atom empty-triple-rows)
            (atom empty-transaction-rows) (atom empty-operation-rows)
@@ -122,12 +262,70 @@
            (atom empty-active-buckets) (atom empty-active-cells) (atom false)
            (atom (slots/fresh-slots (term-slots-width-for expected-atoms)))
            (atom (slots/fresh-slots (term-slots-width-for expected-triples)))
-           (atom (slots/fresh-slots (term-slots-width-for expected-buckets)))))
-    (throw (ex-info "store: TermStore requires a non-empty SpaceId"
-                    {:type :invalid-space-id}))))
+           (atom (slots/fresh-slots (term-slots-width-for expected-buckets)))
+           nil tail-row-limit tail-byte-limit (atom 0) (atom 0)))]))
+
+(defn new-term-store-sized
+  [space-id String
+   expected-atoms Int
+   expected-triples Int
+   expected-buckets Int] (Atom t/TermStore)
+  (new-term-store-sized-with-tail-limits
+   space-id expected-atoms expected-triples expected-buckets
+   default-tail-row-limit default-tail-byte-limit))
 
 (defn new-term-store [space-id String] (Atom t/TermStore)
   (new-term-store-sized space-id 0 0 0))
+
+(defn new-term-store-with-tail-limits
+  [space-id String
+   tail-row-limit Int
+   tail-byte-limit Int] (Atom t/TermStore)
+  (new-term-store-sized-with-tail-limits
+   space-id 0 0 0 tail-row-limit tail-byte-limit))
+
+(defn new-packed-term-store
+  [prefix Any
+   tail-row-limit Int
+   tail-byte-limit Int
+   rollovers Int] (Atom t/TermStore)
+  (if (and (some? prefix)
+           (and (pos? tail-row-limit)
+                (and (pos? tail-byte-limit) (>= rollovers 0))))
+    (atom
+     (t/->TermStore
+      (packed/space-id prefix) (atom (packed/next-sequence prefix))
+      (atom empty-atoms) (atom empty-triple-rows)
+      (atom empty-transaction-rows) (atom empty-operation-rows)
+      (atom empty-ids) (atom empty-active-buckets)
+      (atom empty-active-cells) (atom false)
+      (atom (slots/fresh-slots initial-slots))
+      (atom (slots/fresh-slots initial-slots))
+      (atom (slots/fresh-slots initial-slots))
+      prefix tail-row-limit tail-byte-limit
+      (atom tail-base-bytes) (atom rollovers)))
+    (throw
+     (ex-info "store: packed TermStore requires positive tail bounds"
+              {:type :invalid-packed-tail-bound
+               :store/code :invalid-packed-tail-bound}))))
+
+(defn install-packed-prefix!
+  [ctx (Atom t/TermStore)
+   prefix Any] (Atom t/TermStore)
+  (let [before t/TermStore (deref ctx)]
+    (if (not (and (= (t/termstore-space-id before) (packed/space-id prefix))
+                  (= (store-next-sequence before) (packed/next-sequence prefix))))
+      (throw
+       (ex-info "store: packed checkpoint does not match the live Store boundary"
+                {:type :packed-source-mismatch
+                 :store/code :packed-source-mismatch}))
+      (let [replacement (Atom t/TermStore) (new-packed-term-store
+             prefix
+             (t/termstore-tail-row-limit before)
+             (t/termstore-tail-byte-limit before)
+             (inc (deref (t/termstore-tail-rollovers before))))]
+        (reset! ctx (deref replacement))
+        ctx))))
 
 ;; One byte of Store transaction log carries far less than one new term, so these divisors
 ;; only have to be the right order of magnitude to collapse the rebuild chain.
@@ -167,7 +365,12 @@
    (atom (store-fold-open store))
    (atom (store-atom-slots store))
    (atom (store-triple-slots store))
-   (atom (store-active-slots store))))
+   (atom (store-active-slots store))
+   (store-prefix store)
+   (t/termstore-tail-row-limit store)
+   (t/termstore-tail-byte-limit store)
+   (atom (deref (t/termstore-tail-bytes store)))
+   (atom (deref (t/termstore-tail-rollovers store)))))
 
 (defn fork-store [ctx (Atom t/TermStore)] (Atom t/TermStore)
   (atom (fork-state (deref ctx))))
@@ -210,26 +413,32 @@
 (defn- find-atom-position
   [atoms (Vec t/AtomRow)
    slots slots/TermSlots
+   base Int
    value t/AtomRow] Int
   (let [positions (Vec Int) (deref (nth slots (slots/slot-of value (count slots))))]
     (loop [offset Int 0]
       (if (>= offset (count positions))
         -1
         (let [position (nth positions offset)]
-          (if (and (< position (count atoms)) (= (nth atoms position) value))
+          (if (and (>= position base)
+                   (and (< position (+ base (count atoms)))
+                        (= (nth atoms (- position base)) value)))
             position
             (recur (inc offset))))))))
 
 (defn- find-triple-position
   [rows (Vec t/TripleRow)
    slots slots/TermSlots
+   base Int
    value t/TripleRow] Int
   (let [positions (Vec Int) (deref (nth slots (slots/slot-of value (count slots))))]
     (loop [offset Int 0]
       (if (>= offset (count positions))
         -1
         (let [position (nth positions offset)]
-          (if (and (< position (count rows)) (= (nth rows position) value))
+          (if (and (>= position base)
+                   (and (< position (+ base (count rows)))
+                        (= (nth rows (- position base)) value)))
             position
             (recur (inc offset))))))))
 
@@ -243,7 +452,8 @@
     (if (> (count (store-atoms store)) (* slot-load (count indexed)))
       (do
         (reset! (t/termstore-atom-slots store)
-                (build-atom-term-slots! (store-atoms store) (* 2 width)))
+                (build-atom-term-slots! (store-atoms store) (* 2 width)
+                                        (prefix-atom-count store)))
         store)
       store)))
 
@@ -257,7 +467,8 @@
     (if (> (count (store-triples store)) (* slot-load (count indexed)))
       (do
         (reset! (t/termstore-triple-slots store)
-                (build-triple-term-slots! (store-triples store) (* 2 width)))
+                (build-triple-term-slots! (store-triples store) (* 2 width)
+                                          (prefix-triple-count store)))
         store)
       store)))
 
@@ -278,21 +489,42 @@
             store t/TermStore (deref ctx)
             rows (Vec t/TripleRow) (store-triples store)
             value t/TripleRow (t/->TripleRow t1 t2 t3)
-            known Int (find-triple-position rows (store-triple-slots store) value)]
+            prefix-known Int (if (nil? (store-prefix store))
+                               -1
+                               (packed/find-triple-position
+                                (store-prefix store) t1 t2 t3))
+            tail-known Int (find-triple-position
+                            rows (store-triple-slots store)
+                            (prefix-triple-count store) value)
+            known Int (if (>= prefix-known 0) prefix-known tail-known)]
         (if (>= known 0)
           (triple-handle known)
-          (let [position (count rows)]
+          (let [position (total-triple-count store)]
+            (ensure-tail-room! store 2 triple-tail-bytes)
             (swap! (t/termstore-triples store) conj value)
+            (account-tail-bytes! store triple-tail-bytes)
             (index-triple-term! store value position)
             (triple-handle position))))
       (let [value t/AtomRow (atom-row term)
             store t/TermStore (deref ctx)
             atoms (Vec t/AtomRow) (store-atoms store)
-            known Int (find-atom-position atoms (store-atom-slots store) value)]
+            prefix-known Int (if (nil? (store-prefix store))
+                               -1
+                               (packed/find-atom-position
+                                (store-prefix store) term))
+            tail-known Int (find-atom-position
+                            atoms (store-atom-slots store)
+                            (prefix-atom-count store) value)
+            known Int (if (>= prefix-known 0) prefix-known tail-known)]
         (if (>= known 0)
           (atom-handle known)
-          (let [position (count atoms)]
+          (let [position Int (total-atom-count store)
+                bytes Int (+ slot-entry-tail-bytes
+                             (+ atom-tail-overhead-bytes
+                                (packed/term-byte-count! term)))]
+            (ensure-tail-room! store 2 bytes)
             (swap! (t/termstore-atoms store) conj value)
+            (account-tail-bytes! store bytes)
             (index-atom-term! store value position)
             (atom-handle position)))))))
 
@@ -301,8 +533,8 @@
    handle Int] Bool
   (and (>= handle 0)
        (if (atom-handle? handle)
-         (< (handle-position handle) (count (store-atoms store)))
-         (< (handle-position handle) (count (store-triples store))))))
+         (< (handle-position handle) (total-atom-count store))
+         (< (handle-position handle) (total-triple-count store)))))
 
 (defn- resolve-handle
   [store t/TermStore
@@ -311,8 +543,8 @@
     (throw (ex-info "store: term handle does not resolve" {:type :invalid-term-handle}))
     (let [position (handle-position handle)]
       (if (atom-handle? handle)
-        (atom-row-value (nth (store-atoms store) position))
-        (let [row t/TripleRow (nth (store-triples store) position)]
+        (atom-row-value (atom-row-at store position))
+        (let [row t/TripleRow (triple-row-at store position)]
           (t/triple (resolve-handle store (t/triplerow-t1 row))
                     (resolve-handle store (t/triplerow-t2 row))
                     (resolve-handle store (t/triplerow-t3 row))))))))
@@ -336,12 +568,24 @@
     (let [row t/AtomRow (atom-row value)
           store t/TermStore (deref ctx)
           atoms (Vec t/AtomRow) (store-atoms store)
-          known Int (find-atom-position atoms (store-atom-slots store) row)]
+          prefix-known Int (if (nil? (store-prefix store))
+                             -1
+                             (packed/find-atom-position
+                              (store-prefix store) value))
+          tail-known Int (find-atom-position
+                          atoms (store-atom-slots store)
+                          (prefix-atom-count store) row)
+          known Int (if (>= prefix-known 0) prefix-known tail-known)]
       (if (>= known 0)
         (atom-handle known)
-        (let [position (count atoms)]
+        (let [position Int (total-atom-count store)
+              bytes Int (+ slot-entry-tail-bytes
+                           (+ atom-tail-overhead-bytes
+                              (packed/term-byte-count! value)))]
           (do
+            (ensure-tail-room! store 2 bytes)
             (swap! (t/termstore-atoms store) conj row)
+            (account-tail-bytes! store bytes)
             (index-atom-term! store row position)
             (atom-handle position)))))))
 
@@ -353,15 +597,24 @@
   (let [store t/TermStore (deref ctx)
         rows (Vec t/TripleRow) (store-triples store)
         value t/TripleRow (t/->TripleRow t1 t2 t3)
-        known Int (find-triple-position rows (store-triple-slots store) value)]
+        prefix-known Int (if (nil? (store-prefix store))
+                           -1
+                           (packed/find-triple-position
+                            (store-prefix store) t1 t2 t3))
+        tail-known Int (find-triple-position
+                        rows (store-triple-slots store)
+                        (prefix-triple-count store) value)
+        known Int (if (>= prefix-known 0) prefix-known tail-known)]
     (if (not (and (valid-handle? store t1)
                   (and (valid-handle? store t2) (valid-handle? store t3))))
       (throw (ex-info "store: term handle does not resolve" {:type :invalid-term-handle}))
       (if (>= known 0)
         (triple-handle known)
-        (let [position (count rows)]
+        (let [position (total-triple-count store)]
           (do
+            (ensure-tail-room! store 2 triple-tail-bytes)
             (swap! (t/termstore-triples store) conj value)
+            (account-tail-bytes! store triple-tail-bytes)
             (index-triple-term! store value position)
             (triple-handle position)))))))
 
@@ -385,22 +638,157 @@
                   (recur (inc position))
                   false)))]
         (if all-known
-          (let [position (find-triple-position
-                 (store-triples store) (store-triple-slots store)
-                 (t/->TripleRow (if (some? t1) t1 0)
-                                (if (some? t2) t2 0)
-                                (if (some? t3) t3 0)))]
+          (let [h1 Int (if (some? t1) t1 0)
+                h2 Int (if (some? t2) t2 0)
+                h3 Int (if (some? t3) t3 0)
+                prefix-known Int (if (nil? (store-prefix store))
+                                   -1
+                                   (packed/find-triple-position
+                                    (store-prefix store) h1 h2 h3))
+                tail-known Int (find-triple-position
+                                (store-triples store)
+                                (store-triple-slots store)
+                                (prefix-triple-count store)
+                                (t/->TripleRow h1 h2 h3))
+                position Int (if (>= prefix-known 0)
+                               prefix-known tail-known)]
             (when (>= position 0) (triple-handle position)))
           nil))
-      (let [position (find-atom-position
-             (store-atoms store) (store-atom-slots store)
-             (atom-row term))]
+      (let [prefix-known Int (if (nil? (store-prefix store))
+                               -1
+                               (packed/find-atom-position
+                                (store-prefix store) term))
+            tail-known Int (find-atom-position
+                            (store-atoms store) (store-atom-slots store)
+                            (prefix-atom-count store) (atom-row term))
+            position Int (if (>= prefix-known 0) prefix-known tail-known)]
         (when (>= position 0) (atom-handle position))))))
+
+(defn known-triple-row-handle
+  [store t/TermStore
+   t1 Int
+   t2 Int
+   t3 Int] Int?
+  (let [prefix-known Int (if (nil? (store-prefix store))
+                           -1
+                           (packed/find-triple-position
+                            (store-prefix store) t1 t2 t3))
+        tail-known Int (find-triple-position
+                        (store-triples store) (store-triple-slots store)
+                        (prefix-triple-count store)
+                        (t/->TripleRow t1 t2 t3))
+        position Int (if (>= prefix-known 0) prefix-known tail-known)]
+    (when (>= position 0) (triple-handle position))))
+
+(defn resolve-term-handle [store t/TermStore handle Int] Any
+  (resolve-handle store handle))
+
+(defn triple-tuple-at
+  [store t/TermStore
+   handle Int] (Vec Any)
+  (let [proposition t/Triple (resolve-triple-handle store handle)]
+    [(t/triple-t1 proposition)
+     (t/triple-t2 proposition)
+     (t/triple-t3 proposition)]))
+
+(declare find-active-bucket-position)
+
+(defn- collect-new-term-demand!
+  [store t/TermStore
+   term Any
+   seen Any] Any
+  (if (or (contains? seen term) (some? (known-term-handle store term)))
+    (->TailDemand seen 0 0)
+    (if (t/triple? term)
+      (let [first-demand TailDemand (collect-new-term-demand! store (t/triple-t1 term) seen)
+            second-demand TailDemand (collect-new-term-demand! store (t/triple-t2 term)
+                                      (taildemand-seen first-demand))
+            third-demand TailDemand (collect-new-term-demand! store (t/triple-t3 term)
+                                      (taildemand-seen second-demand))]
+        (->TailDemand
+         (conj (taildemand-seen third-demand) term)
+         (+ 2 (+ (taildemand-rows first-demand)
+                 (+ (taildemand-rows second-demand)
+                    (taildemand-rows third-demand))))
+         (+ triple-tail-bytes
+            (+ (taildemand-bytes first-demand)
+               (+ (taildemand-bytes second-demand)
+                  (taildemand-bytes third-demand))))))
+      (->TailDemand
+       (conj seen term)
+       2
+       (+ slot-entry-tail-bytes
+          (+ atom-tail-overhead-bytes (packed/term-byte-count! term)))))))
+
+(defn- transaction-tail-demand!
+  [store t/TermStore
+   operations (Vec t/CommitOperation)] (Vec Int)
+  (let [terms TailDemand (loop [position Int 0
+                                demand TailDemand (->TailDemand #{} 0 0)]
+                           (if (>= position (count operations))
+            demand
+            (let [next TailDemand (collect-new-term-demand!
+                   store
+                   (t/commitoperation-proposition (nth operations position))
+                   (taildemand-seen demand))]
+              (recur
+               (inc position)
+               (->TailDemand
+                (taildemand-seen next)
+                (+ (taildemand-rows demand) (taildemand-rows next))
+                (+ (taildemand-bytes demand) (taildemand-bytes next)))))))
+        overlay Any (loop [position Int 0
+                           seen Any #{}
+                           bucket-count Int 0
+                           asserted-count Int 0]
+                      (if (>= position (count operations))
+            {:buckets bucket-count :assertions asserted-count}
+            (let [operation t/CommitOperation (nth operations position)
+                  proposition t/Triple (t/commitoperation-proposition operation)
+                  handle Int? (known-term-handle store proposition)
+                  needs-bucket Bool (and (not (contains? seen proposition))
+                       (or (nil? handle)
+                           (< (find-active-bucket-position
+                               store (if (some? handle) handle 0)) 0)))]
+              (recur
+               (+ position 1)
+               (conj seen proposition)
+               (+ bucket-count (if needs-bucket 1 0))
+               (+ asserted-count
+                  (if (= t/assert-action
+                         (t/commitoperation-action operation))
+                    1 0))))))
+        bucket-count Int (:buckets overlay)
+        asserted-count Int (:assertions overlay)
+        cell-count Int (if (store-fold-open store) bucket-count 0)]
+    [(+ (taildemand-rows terms)
+        (+ 1
+           (+ (* 2 (count operations))
+              (+ (* 2 bucket-count) (+ asserted-count cell-count)))))
+     (+ (taildemand-bytes terms)
+        (+ transaction-tail-bytes
+           (+ (* (+ operation-tail-bytes withdrawal-tail-bytes)
+                 (count operations))
+              (+ (* active-bucket-tail-bytes bucket-count)
+                 (+ (* active-position-tail-bytes asserted-count)
+                    (* active-cell-tail-bytes cell-count))))))]))
+
+(defn ensure-transaction-capacity!
+  [ctx (Atom t/TermStore)
+   operations (Vec t/CommitOperation)] (Atom t/TermStore)
+  (let [store t/TermStore (deref ctx)
+        demand (Vec Int) (transaction-tail-demand! store operations)]
+    (ensure-tail-room! store (nth demand 0) (nth demand 1))
+    ctx))
 
 (defn intern-term!
   [ctx (Atom t/TermStore)
    term Any] Any
-  (let [handle (intern-handle! ctx term)]
+  (let [store t/TermStore (deref ctx)
+        demand TailDemand (collect-new-term-demand! store term #{})
+        _ Nil (ensure-tail-room! store (taildemand-rows demand)
+                                 (taildemand-bytes demand))
+        handle Int (intern-handle! ctx term)]
     (resolve-handle (deref ctx) handle)))
 
 (defn replay-terms!
@@ -411,19 +799,19 @@
     ctx))
 
 (defn atom-term-count [ctx (Atom t/TermStore)] Int
-  (count (store-atoms (deref ctx))))
+  (total-atom-count (deref ctx)))
 
 (defn triple-term-count [ctx (Atom t/TermStore)] Int
-  (count (store-triples (deref ctx))))
+  (total-triple-count (deref ctx)))
 
 (defn term-count [ctx (Atom t/TermStore)] Int
   (+ (atom-term-count ctx) (triple-term-count ctx)))
 
 (defn transaction-count [ctx (Atom t/TermStore)] Int
-  (count (store-transactions (deref ctx))))
+  (total-transaction-count (deref ctx)))
 
 (defn operation-count [ctx (Atom t/TermStore)] Int
-  (count (store-operations (deref ctx))))
+  (total-operation-count (deref ctx)))
 
 (defn assert-operation [proposition t/Term] t/CommitOperation
   (let [triple t/Triple? (t/term-as-triple proposition)]
@@ -490,34 +878,145 @@
             position
             (recur (inc offset))))))))
 
-(defn- active-positions
+(defn- active-tail-positions
   [store t/TermStore
-   handle Int] (Vec Int)
-  (let [position (find-active-bucket-position store handle)]
-    (if (>= position 0)
-      (if (store-fold-open store)
-        (deref (nth (store-active-cells store) position))
-        (t/activebucket-positions (nth (store-active-buckets store) position)))
-      empty-ids)))
+   bucket-position Int] (Vec Int)
+  (if (< bucket-position 0)
+    empty-ids
+    (if (store-fold-open store)
+      (deref (nth (store-active-cells store) bucket-position))
+      (t/activebucket-positions
+       (nth (store-active-buckets store) bucket-position)))))
 
-(defn- set-active-positions!
+(defn- active-prefix-count
   [store t/TermStore
    handle Int
+   bucket-position Int] Int
+  (if (>= bucket-position 0)
+    (t/activebucket-prefix-count
+     (nth (store-active-buckets store) bucket-position))
+    (if (nil? (store-prefix store))
+      0
+      (packed/active-position-count (store-prefix store) handle))))
+
+(defn active-handle? [store t/TermStore handle Int] Bool
+  (let [bucket-position Int (find-active-bucket-position store handle)]
+    (pos? (+ (active-prefix-count store handle bucket-position)
+             (count (active-tail-positions store bucket-position))))))
+
+(defn active-operation-positions
+  [store t/TermStore
+   handle Int] (Vec Int)
+  (let [bucket-position Int (find-active-bucket-position store handle)
+        prefix-count Int (active-prefix-count store handle bucket-position)
+        tail (Vec Int) (active-tail-positions store bucket-position)
+        prefix Any (store-prefix store)]
+    (loop [position Int 0
+           values (Vec Int) []]
+      (if (>= position prefix-count)
+        (into values tail)
+        (recur (+ position 1)
+               (conj values
+                     (packed/active-position-at! prefix handle position)))))))
+
+(defn active-triple-handles [store t/TermStore] (Vec Int)
+  (let [prefix Any (store-prefix store)
+        prefix-total Int (if (nil? prefix) 0 (packed/active-handle-count prefix))
+        prefix-result Any (loop [position Int 0
+                                 handles (Vec Int) []
+                                 seen Any #{}]
+                            (if (>= position prefix-total)
+            {:handles handles :seen seen}
+            (let [handle Int (packed/active-handle-at! prefix position)]
+              (recur (+ position 1)
+                     (if (active-handle? store handle)
+                       (conj handles handle)
+                       handles)
+                     (conj seen handle)))))
+        prefix-handles (Vec Int) (:handles prefix-result)
+        prefix-seen Any (:seen prefix-result)]
+    (reduce (fn
+              [handles (Vec Int)
+               bucket t/ActiveBucket] (Vec Int)
+              (let [handle Int (t/activebucket-triple-handle bucket)]
+                (if (or (contains? prefix-seen handle)
+                        (not (active-handle? store handle)))
+                  handles
+                  (conj handles handle))))
+            prefix-handles (store-active-buckets store))))
+
+(defn- triple-row-matches?
+  [row t/TripleRow
+   t1 Int?
+   t2 Int?
+   t3 Int?] Bool
+  (and (or (nil? t1) (= t1 (t/triplerow-t1 row)))
+       (and (or (nil? t2) (= t2 (t/triplerow-t2 row)))
+            (or (nil? t3) (= t3 (t/triplerow-t3 row))))))
+
+(defn matching-triple-handles
+  [store t/TermStore
+   t1 Any
+   t2 Any
+   t3 Any] (Vec Int)
+  (let [h1 Int? (when (some? t1) (known-term-handle store t1))
+        h2 Int? (when (some? t2) (known-term-handle store t2))
+        h3 Int? (when (some? t3) (known-term-handle store t3))
+        all-known Bool (and (or (nil? t1) (some? h1))
+                            (and (or (nil? t2) (some? h2))
+                                 (or (nil? t3) (some? h3))))]
+    (if (not all-known)
+      []
+      (if (and (nil? t1) (and (nil? t2) (nil? t3)))
+        (active-triple-handles store)
+        (let [prefix Any (store-prefix store)
+              prefix-positions (Vec Int) (if (nil? prefix)
+                []
+                (packed/matching-triple-positions prefix h1 h2 h3))
+              prefix-handles (Vec Int) (reduce (fn
+                                                 [handles (Vec Int)
+                                                  position Int] (Vec Int)
+                                                 (let [handle Int (triple-handle position)]
+                          (if (active-handle? store handle)
+                            (conj handles handle)
+                            handles)))
+                      [] prefix-positions)
+              base Int (prefix-triple-count store)
+              rows (Vec t/TripleRow) (store-triples store)]
+          (loop [position Int 0
+                 handles (Vec Int) prefix-handles]
+            (if (>= position (count rows))
+              handles
+              (let [row t/TripleRow (nth rows position)
+                    handle Int (triple-handle (+ base position))]
+                (recur
+                 (inc position)
+                 (if (and (triple-row-matches? row h1 h2 h3)
+                          (active-handle? store handle))
+                   (conj handles handle)
+                   handles))))))))))
+
+(defn- set-active-state!
+  [store t/TermStore
+   handle Int
+   prefix-count Int
    positions (Vec Int)] t/TermStore
   (let [folding Bool (store-fold-open store)
         known Int (find-active-bucket-position store handle)]
     (if (>= known 0)
-      (if folding
-        (do
+      (do
+        (if folding
           (reset! (nth (store-active-cells store) known) positions)
-          store)
-        (do
-          (reset! (t/termstore-active-buckets store)
-                  (assoc (store-active-buckets store) known
-                         (t/->ActiveBucket handle positions)))
-          store))
+          nil)
+        (reset! (t/termstore-active-buckets store)
+                (assoc (store-active-buckets store) known
+                       (t/->ActiveBucket
+                        handle prefix-count
+                        (if folding empty-ids positions))))
+        store)
       (let [buckets (Vec t/ActiveBucket) (conj (store-active-buckets store)
-                  (t/->ActiveBucket handle (if folding empty-ids positions)))
+                  (t/->ActiveBucket handle prefix-count
+                                    (if folding empty-ids positions)))
             position Int (dec (count buckets))
             width Int (count (store-active-slots store))
             slots slots/TermSlots (slots/slot-add! (store-active-slots store)
@@ -527,6 +1026,9 @@
               (conj (store-active-cells store) (atom positions))
               (store-active-cells store))]
         (do
+          (account-tail-bytes!
+           store (+ active-bucket-tail-bytes
+                    (if folding active-cell-tail-bytes 0)))
           (reset! (t/termstore-active-buckets store) buckets)
           (reset! (t/termstore-active-cells store) cells)
           (if (> (count buckets) (* slot-load (count slots)))
@@ -542,6 +1044,9 @@
   (if (store-fold-open store)
     store
     (let [buckets (Vec t/ActiveBucket) (store-active-buckets store)
+          _ Nil (ensure-tail-room! store (count buckets)
+                                   (* active-cell-tail-bytes
+                                      (count buckets)))
           opened (Vec t/ActiveBucket) (loop [built (Vec t/ActiveBucket) empty-active-buckets
                                              position Int 0]
                                         (if (>= position (count buckets))
@@ -550,6 +1055,7 @@
                (conj built
                      (t/->ActiveBucket
                       (t/activebucket-triple-handle (nth buckets position))
+                      (t/activebucket-prefix-count (nth buckets position))
                       empty-ids))
                (inc position))))
           cells (Vec (Atom (Vec Int))) (loop [built (Vec (Atom (Vec Int))) empty-active-cells
@@ -564,6 +1070,8 @@
         (reset! (t/termstore-active-buckets store) opened)
         (reset! (t/termstore-active-cells store) cells)
         (reset! (t/termstore-fold-open store) true)
+        (account-tail-bytes! store
+                             (* active-cell-tail-bytes (count buckets)))
         store))))
 
 (defn- close-fold-state! [store t/TermStore] t/TermStore
@@ -579,12 +1087,15 @@
                (conj built
                      (t/->ActiveBucket
                       (t/activebucket-triple-handle (nth buckets position))
+                      (t/activebucket-prefix-count (nth buckets position))
                       (deref (nth cells position))))
                (inc position))))]
       (do
         (reset! (t/termstore-active-buckets store) closed)
         (reset! (t/termstore-active-cells store) empty-active-cells)
         (reset! (t/termstore-fold-open store) false)
+        (account-tail-bytes! store
+                             (- (* active-cell-tail-bytes (count buckets))))
         store))))
 
 (defn open-fold! [ctx (Atom t/TermStore)] (Atom t/TermStore)
@@ -603,19 +1114,31 @@
    row t/OperationRow] t/TermStore
   (let [handle Int (t/operationrow-triple-handle row)
         action Keyword (t/operationrow-action row)
-        active (Vec Int) (active-positions store handle)]
+        bucket-position Int (find-active-bucket-position store handle)
+        prefix-count Int (active-prefix-count store handle bucket-position)
+        tail (Vec Int) (active-tail-positions store bucket-position)]
+    (account-tail-bytes! store withdrawal-tail-bytes)
     (if (= action t/assert-action)
       (do
         (swap! (t/termstore-withdrawal-targets store) conj -1)
-        (set-active-positions! store handle (conj active operation-position)))
-      (if (empty? active)
+        (account-tail-bytes! store active-position-tail-bytes)
+        (set-active-state! store handle prefix-count
+                           (conj tail operation-position)))
+      (if (and (zero? prefix-count) (empty? tail))
         (do
           (swap! (t/termstore-withdrawal-targets store) conj -1)
           store)
-        (let [target Int (peek active)]
+        (let [target Int (if (empty? tail)
+                           (packed/active-position-at!
+                            (store-prefix store) handle (- prefix-count 1))
+                           (peek tail))]
           (do
             (swap! (t/termstore-withdrawal-targets store) conj target)
-            (set-active-positions! store handle (pop active))))))))
+            (if (empty? tail)
+              (set-active-state! store handle (- prefix-count 1) tail)
+              (do
+                (account-tail-bytes! store (- active-position-tail-bytes))
+                (set-active-state! store handle prefix-count (pop tail))))))))))
 
 (defn- operation-handles!
   [ctx (Atom t/TermStore)
@@ -644,12 +1167,16 @@
   [ctx (Atom t/TermStore)
    sequence Int
    operations (Vec t/CommitOperation)] t/TermStore
-  (let [handles (Vec Int) (operation-handles! ctx operations)
+  (let [store-before t/TermStore (deref ctx)
+        demand (Vec Int) (transaction-tail-demand! store-before operations)
+        _ Nil (ensure-tail-room! store-before (nth demand 0) (nth demand 1))
+        handles (Vec Int) (operation-handles! ctx operations)
         store t/TermStore (deref ctx)
-        first-operation Int (count (store-operations store))
+        first-operation Int (total-operation-count store)
         transaction-row t/TransactionRow (t/->TransactionRow sequence first-operation (count operations))
         appended t/TermStore (do
           (swap! (t/termstore-transactions store) conj transaction-row)
+          (account-tail-bytes! store transaction-tail-bytes)
           (loop [ordinal Int 0]
             (if (>= ordinal (count operations))
               store
@@ -660,6 +1187,7 @@
                     operation-position Int (+ first-operation ordinal)]
                 (do
                   (swap! (t/termstore-operations store) conj row)
+                  (account-tail-bytes! store operation-tail-bytes)
                   (apply-operation-state! store operation-position row)
                   (recur (inc ordinal)))))))]
     (do
@@ -763,6 +1291,37 @@
 ;; The fused tail of a wire-walked record: operations arrive as parallel action
 ;; and proposition-handle columns, already interned, and append exactly as
 ;; append-valid-transaction! appends a decoded record.
+(defn- replayed-transaction-demand
+  [store t/TermStore
+   actions (Vec Keyword)
+   handles (Vec Int)] (Vec Int)
+  (let [overlay Any (loop [position Int 0
+                           seen Any #{}
+                           bucket-count Int 0
+                           asserted-count Int 0]
+                      (if (>= position (count actions))
+            {:buckets bucket-count :assertions asserted-count}
+            (let [handle Int (nth handles position)
+                  needs-bucket Bool (and (not (contains? seen handle))
+                       (< (find-active-bucket-position store handle) 0))]
+              (recur (+ position 1)
+                     (conj seen handle)
+                     (+ bucket-count (if needs-bucket 1 0))
+                     (+ asserted-count
+                        (if (= t/assert-action (nth actions position))
+                          1 0))))))
+        bucket-count Int (:buckets overlay)
+        asserted-count Int (:assertions overlay)
+        cell-count Int (if (store-fold-open store) bucket-count 0)]
+    [(+ 1 (+ (* 2 (count actions))
+             (+ (* 2 bucket-count) (+ asserted-count cell-count))))
+     (+ transaction-tail-bytes
+        (+ (* (+ operation-tail-bytes withdrawal-tail-bytes)
+              (count actions))
+           (+ (* active-bucket-tail-bytes bucket-count)
+              (+ (* active-position-tail-bytes asserted-count)
+                 (* active-cell-tail-bytes cell-count)))))]))
+
 (defn append-replayed-transaction!
   [ctx (Atom t/TermStore)
    sequence Int
@@ -781,10 +1340,13 @@
       [(> sequence max-transaction-sequence)
        (transaction-replay-unclassified-error)]
       [:else
-       (let [first-operation Int (count (store-operations before))
+       (let [demand (Vec Int) (replayed-transaction-demand before actions handles)
+             _ Nil (ensure-tail-room! before (nth demand 0) (nth demand 1))
+             first-operation Int (total-operation-count before)
              transaction-row t/TransactionRow (t/->TransactionRow sequence first-operation (count actions))
              appended t/TermStore (do
                (swap! (t/termstore-transactions before) conj transaction-row)
+               (account-tail-bytes! before transaction-tail-bytes)
                (loop [ordinal Int 0]
                  (if (>= ordinal (count actions))
                    before
@@ -794,6 +1356,7 @@
                          operation-position Int (+ first-operation ordinal)]
                      (do
                        (swap! (t/termstore-operations before) conj row)
+                       (account-tail-bytes! before operation-tail-bytes)
                        (apply-operation-state! before operation-position row)
                        (recur (inc ordinal)))))))]
          (do
@@ -818,7 +1381,7 @@
 (defn- occurrence-at
   [store t/TermStore
    operation-position Int] t/Triple
-  (let [row t/OperationRow (nth (store-operations store) operation-position)]
+  (let [row t/OperationRow (operation-row-at store operation-position)]
     (t/occurrence-coordinate
      (t/transaction-coordinate (t/termstore-space-id store)
                                (t/operationrow-tx-sequence row))
@@ -827,22 +1390,59 @@
 (defn- operation-occurrence-at
   [store t/TermStore
    operation-position Int] t/OperationOccurrence
-  (let [row t/OperationRow (nth (store-operations store) operation-position)
+  (let [row t/OperationRow (operation-row-at store operation-position)
         occurrence t/Triple (occurrence-at store operation-position)
         proposition t/Triple (resolve-triple-handle store (t/operationrow-triple-handle row))]
     (t/operation-occurrence occurrence
                             (t/operationrow-action row)
                             proposition)))
 
+(defn- matching-live-operation-positions
+  [store t/TermStore
+   t1 Any
+   t2 Any
+   t3 Any] (Vec Int)
+  (let [handles (Vec Int) (matching-triple-handles store t1 t2 t3)
+        positions (Vec Int) (reduce (fn
+                                      [known (Vec Int)
+                                       handle Int] (Vec Int)
+                                      (into known (active-operation-positions store handle)))
+                [] handles)]
+    (vec (sort positions))))
+
+(defn matching-live-occurrences
+  [store t/TermStore
+   t1 Any
+   t2 Any
+   t3 Any
+   maximum Int?] (Vec t/OperationOccurrence)
+  (loop [positions (Vec Int) (matching-live-operation-positions store t1 t2 t3)
+         values (Vec t/OperationOccurrence) []]
+    (if (or (empty? positions)
+            (and (some? maximum) (>= (count values) maximum)))
+      values
+      (recur (rest positions)
+             (conj values (operation-occurrence-at store (first positions)))))))
+
+(defn matching-live-propositions
+  [store t/TermStore
+   t1 Any
+   t2 Any
+   t3 Any
+   maximum Int?] (Vec t/Triple)
+  (mapv t/operationoccurrence-proposition
+        (matching-live-occurrences store t1 t2 t3 maximum)))
+
 (defn- first-transaction-after
-  [transactions (Vec t/TransactionRow)
+  [store t/TermStore
    sequence Int] Int
   (loop [low Int 0
-         high Int (count transactions)]
+         high Int (total-transaction-count store)]
     (if (>= low high)
       low
       (let [middle (quot (+ low high) 2)
-            candidate (t/transactionrow-sequence (nth transactions middle))]
+            candidate (t/transactionrow-sequence
+                       (transaction-row-at store middle))]
         (if (<= candidate sequence)
           (recur (inc middle) high)
           (recur low middle))))))
@@ -851,49 +1451,58 @@
   [store t/TermStore
    lower-exclusive Int
    upper-inclusive Int] (Vec Int)
-  (let [transactions (Vec t/TransactionRow) (store-transactions store)
-        operations (Vec t/OperationRow) (store-operations store)
-        start-transaction Int (first-transaction-after transactions lower-exclusive)
-        end-transaction Int (first-transaction-after transactions upper-inclusive)
-        start Int (if (>= start-transaction (count transactions))
-                (count operations)
+  (let [transaction-total Int (total-transaction-count store)
+        operation-total Int (total-operation-count store)
+        start-transaction Int (first-transaction-after store lower-exclusive)
+        end-transaction Int (first-transaction-after store upper-inclusive)
+        start Int (if (>= start-transaction transaction-total)
+                operation-total
                 (t/transactionrow-first-operation
-                 (nth transactions start-transaction)))
-        end Int (if (>= end-transaction (count transactions))
-              (count operations)
+                 (transaction-row-at store start-transaction)))
+        end Int (if (>= end-transaction transaction-total)
+              operation-total
               (t/transactionrow-first-operation
-               (nth transactions end-transaction)))]
+               (transaction-row-at store end-transaction)))]
     [start end]))
 
 (defn transaction-records-between
   [store t/TermStore
    lower-exclusive Int
    upper-inclusive Int] (Vec t/TransactionRecord)
-  (let [transactions (Vec t/TransactionRow) (store-transactions store)
-        first Int (first-transaction-after transactions lower-exclusive)
-        end Int (first-transaction-after transactions upper-inclusive)]
-    (mapv
-     (fn [row t/TransactionRow] t/TransactionRecord
-       (let [start (t/transactionrow-first-operation row)
-             stop (+ start (t/transactionrow-operation-count row))]
-         (t/->TransactionRecord
-          (t/transactionrow-sequence row)
-          (mapv
-           (fn [operation t/OperationRow] t/CommitOperation
-             (t/->CommitOperation
-              (t/operationrow-action operation)
-              (resolve-triple-handle
-               store (t/operationrow-triple-handle operation))))
-           (subvec (store-operations store) start stop)))))
-     (subvec transactions first end))))
+  (let [first Int (first-transaction-after store lower-exclusive)
+        end Int (first-transaction-after store upper-inclusive)]
+    (loop [transaction-position Int first
+           records (Vec t/TransactionRecord) []]
+      (if (>= transaction-position end)
+        records
+        (let [row t/TransactionRow (transaction-row-at store transaction-position)
+              start Int (t/transactionrow-first-operation row)
+              stop Int (+ start (t/transactionrow-operation-count row))
+              operations (Vec t/CommitOperation) (loop [operation-position Int start
+                                                        collected (Vec t/CommitOperation) []]
+                                                   (if (>= operation-position stop)
+                  collected
+                  (let [operation t/OperationRow (operation-row-at store operation-position)]
+                    (recur
+                     (inc operation-position)
+                     (conj collected
+                           (t/->CommitOperation
+                            (t/operationrow-action operation)
+                            (resolve-triple-handle
+                             store
+                             (t/operationrow-triple-handle operation))))))))]
+          (recur (inc transaction-position)
+                 (conj records
+                       (t/->TransactionRecord
+                        (t/transactionrow-sequence row) operations))))))))
 
 (defn operation-postings [store t/TermStore] (Map Int (Vec Int))
   (loop [position Int 0
          postings (Map Int (Vec Int)) {}]
-    (if (>= position (count (store-operations store)))
+    (if (>= position (total-operation-count store))
       postings
       (let [handle (t/operationrow-triple-handle
-             (nth (store-operations store) position))]
+                    (operation-row-at store position))]
         (recur (inc position)
                (update postings handle
                        (fn [known (U (Vec Int) Nil)] (Vec Int)
@@ -922,12 +1531,11 @@
           space String (t/triple-t1 transaction)
           sequence Int (t/triple-t3 transaction)
           ordinal Int (t/triple-t3 coordinate)
-          transactions (Vec t/TransactionRow) (store-transactions store)
-          position Int (first-transaction-after transactions (dec sequence))]
+          position Int (first-transaction-after store (dec sequence))]
       (if (or (not (= space (t/termstore-space-id store)))
-              (>= position (count transactions)))
+              (>= position (total-transaction-count store)))
         -1
-        (let [row t/TransactionRow (nth transactions position)]
+        (let [row t/TransactionRow (transaction-row-at store position)]
           (if (and (= sequence (t/transactionrow-sequence row))
                    (< ordinal (t/transactionrow-operation-count row)))
             (+ (t/transactionrow-first-operation row) ordinal)
@@ -958,7 +1566,7 @@
        (fn [position Int] Bool
          (= proposition-handle
             (t/operationrow-triple-handle
-             (nth (store-operations store) position))))
+             (operation-row-at store position))))
        candidates)
       candidates)))
 
@@ -974,7 +1582,7 @@
   (let [store t/TermStore (deref ctx)]
     (loop [position Int 0
            values (Vec t/OperationOccurrence) []]
-      (if (>= position (count (store-operations store)))
+      (if (>= position (total-operation-count store))
         values
         (recur (inc position)
                (conj values (operation-occurrence-at store position)))))))
@@ -983,9 +1591,9 @@
   (let [store t/TermStore (deref ctx)]
     (loop [position Int 0
            values (Vec t/Withdrawal) []]
-      (if (>= position (count (store-operations store)))
+      (if (>= position (total-operation-count store))
         values
-        (let [target (nth (store-withdrawal-targets store) position)]
+        (let [target (withdrawal-target-at store position)]
           (if (>= target 0)
             (recur (inc position)
                    (conj values
@@ -1008,7 +1616,7 @@
            rows (Vec (Vec Any)) []]
       (if (>= position end)
         rows
-        (let [target Int (nth (store-withdrawal-targets store) position)]
+        (let [target Int (withdrawal-target-at store position)]
           (if (>= target 0)
             (let [retraction t/OperationOccurrence (operation-occurrence-at store position)
                   assertion t/OperationOccurrence (operation-occurrence-at store target)]
@@ -1029,33 +1637,38 @@
    position Int
    row t/OperationRow] Bool
   (and (= t/assert-action (t/operationrow-action row))
-       (let [positions (Vec Int) (active-positions store (t/operationrow-triple-handle row))
-             offset Int (lower-bound-position positions position)]
-         (and (< offset (count positions))
-              (= position (nth positions offset))))))
+       (let [handle Int (t/operationrow-triple-handle row)
+             bucket-position Int (find-active-bucket-position store handle)
+             prefix-count Int (active-prefix-count store handle bucket-position)
+             tail (Vec Int) (active-tail-positions store bucket-position)]
+         (if (< position (prefix-operation-count store))
+           (and (some? (store-prefix store))
+                (packed/active-prefix-operation?
+                 (store-prefix store) handle prefix-count position))
+           (let [offset Int (lower-bound-position tail position)]
+             (and (< offset (count tail))
+                  (= position (nth tail offset))))))))
 
 (defn live-occurrences [ctx (Atom t/TermStore)] (Vec t/OperationOccurrence)
   (let [store t/TermStore (deref ctx)
-        operations (Vec t/OperationRow) (store-operations store)
-        total Int (count operations)]
+        total Int (total-operation-count store)]
     (loop [position Int 0
            live (Vec t/OperationOccurrence) []]
       (if (>= position total)
         live
-        (if (operation-live? store position (nth operations position))
+        (if (operation-live? store position (operation-row-at store position))
           (recur (inc position)
                  (conj live (operation-occurrence-at store position)))
           (recur (inc position) live))))))
 
 (defn live-propositions [ctx (Atom t/TermStore)] (Vec t/Triple)
   (let [store t/TermStore (deref ctx)
-        operations (Vec t/OperationRow) (store-operations store)
-        total Int (count operations)]
+        total Int (total-operation-count store)]
     (loop [position Int 0
            live (Vec t/Triple) []]
       (if (>= position total)
         live
-        (let [row t/OperationRow (nth operations position)]
+        (let [row t/OperationRow (operation-row-at store position)]
           (if (operation-live? store position row)
             (recur (inc position)
                    (conj live
@@ -1063,7 +1676,101 @@
                                                 (t/operationrow-triple-handle row))))
             (recur (inc position) live)))))))
 
+(defn- relation-proposition?
+  [predicate Keyword
+   value Any] Bool
+  (and (t/triple? value)
+       (and (t/occurrence-coordinate? (t/triple-t1 value))
+            (and (= predicate (t/triple-t2 value))
+                 (t/occurrence-coordinate? (t/triple-t3 value))))))
+
+(defn supersession-triples
+  [ctx (Atom t/TermStore)] (Vec t/Triple)
+  (filterv (fn [value t/Triple] Bool
+             (relation-proposition? :kernel/supersedes value))
+           (matching-live-propositions
+            (deref ctx) nil :kernel/supersedes nil nil)))
+
+(defn- suppressed-occurrence-coordinates
+  [store t/TermStore] Any
+  (reduce (fn
+            [coordinates Any
+             proposition t/Triple] Any
+            (conj coordinates (t/triple-t3 proposition)))
+          #{}
+          (filterv (fn [value t/Triple] Bool
+                     (relation-proposition? :kernel/supersedes value))
+                   (matching-live-propositions
+                    store nil :kernel/supersedes nil nil))))
+
+(defn effective-live-occurrences
+  [ctx (Atom t/TermStore)] (Vec t/OperationOccurrence)
+  (let [store t/TermStore (deref ctx)
+        suppressed Any (suppressed-occurrence-coordinates store)]
+    (filterv
+     (fn [occurrence t/OperationOccurrence] Bool
+       (not (contains? suppressed
+                       (t/operationoccurrence-coordinate occurrence))))
+     (live-occurrences ctx))))
+
+(defn effective-live-propositions
+  [ctx (Atom t/TermStore)] (Vec t/Triple)
+  (mapv t/operationoccurrence-proposition
+        (effective-live-occurrences ctx)))
+
+(defn matching-effective-propositions
+  [store t/TermStore
+   t1 Any
+   t2 Any
+   t3 Any
+   maximum Int?] (Vec t/Triple)
+  (let [suppressed Any (suppressed-occurrence-coordinates store)]
+    (loop [remaining (Vec t/OperationOccurrence) (matching-live-occurrences store t1 t2 t3 nil)
+           propositions (Vec t/Triple) []]
+      (if (or (empty? remaining)
+              (and (some? maximum)
+                   (>= (count propositions) maximum)))
+        propositions
+        (let [occurrence t/OperationOccurrence (first remaining)]
+          (recur
+           (rest remaining)
+           (if (contains? suppressed
+                          (t/operationoccurrence-coordinate occurrence))
+             propositions
+             (conj propositions
+                   (t/operationoccurrence-proposition occurrence)))))))))
+
 (defn dump-term-store [ctx (Atom t/TermStore)] t/TermStoreDump
+  (let [store t/TermStore (deref ctx)
+        atoms (Vec t/AtomRow) (loop [position Int 0
+                                     collected (Vec t/AtomRow) []]
+                                (if (>= position (total-atom-count store))
+            collected
+            (recur (inc position) (conj collected (atom-row-at store position)))))
+        triples (Vec t/TripleRow) (loop [position Int 0
+                                         collected (Vec t/TripleRow) []]
+                                    (if (>= position (total-triple-count store))
+            collected
+            (recur (inc position) (conj collected (triple-row-at store position)))))
+        transactions (Vec t/TransactionRow) (loop [position Int 0
+                                                   collected (Vec t/TransactionRow) []]
+                                              (if (>= position (total-transaction-count store))
+            collected
+            (recur (inc position)
+                   (conj collected (transaction-row-at store position)))))
+        operations (Vec t/OperationRow) (loop [position Int 0
+                                               collected (Vec t/OperationRow) []]
+                                          (if (>= position (total-operation-count store))
+            collected
+            (recur (inc position)
+                   (conj collected (operation-row-at store position)))))]
+    (t/->TermStoreDump
+     term-store-dump-version
+     (t/termstore-space-id store)
+     (store-next-sequence store)
+     atoms triples transactions operations)))
+
+(defn dump-term-store-tail [ctx (Atom t/TermStore)] t/TermStoreDump
   (let [store t/TermStore (deref ctx)]
     (t/->TermStoreDump
      term-store-dump-version
@@ -1073,6 +1780,39 @@
      (store-triples store)
      (store-transactions store)
      (store-operations store))))
+
+(defn packed-prefix [ctx (Atom t/TermStore)] Any
+  (store-prefix (deref ctx)))
+
+(defn storage-diagnostics [ctx (Atom t/TermStore)] Any
+  (let [store t/TermStore (deref ctx)
+        prefix Any (store-prefix store)
+        overlay-buckets (Vec t/ActiveBucket) (store-active-buckets store)
+        overlay-positions Int (if (store-fold-open store)
+          (reduce + (map (fn [cell (Atom (Vec Int))] Int
+                           (count (deref cell)))
+                         (store-active-cells store)))
+          (reduce + (map (fn [bucket t/ActiveBucket] Int
+                           (count (t/activebucket-positions bucket)))
+                         overlay-buckets)))]
+    {:source (if (nil? prefix) :storelog-full-replay :packed-checkpoint)
+     :active-manifest (if (nil? prefix) nil (packed/manifest-path prefix))
+     :prefix-atoms (prefix-atom-count store)
+     :prefix-triples (prefix-triple-count store)
+     :prefix-transactions (prefix-transaction-count store)
+     :prefix-operations (prefix-operation-count store)
+     :suffix-atoms (count (store-atoms store))
+     :suffix-triples (count (store-triples store))
+     :suffix-transactions (count (store-transactions store))
+     :suffix-operations (count (store-operations store))
+     :active-overlay-buckets (count overlay-buckets)
+     :active-overlay-positions overlay-positions
+     :tail-rows (tail-row-count store)
+     :tail-bytes (deref (t/termstore-tail-bytes store))
+     :tail-row-limit (t/termstore-tail-row-limit store)
+     :tail-byte-limit (t/termstore-tail-byte-limit store)
+     :tail-rollovers (deref (t/termstore-tail-rollovers store))
+     :mapped-bytes (if (nil? prefix) 0 (packed/mapped-bytes prefix))}))
 
 (defn- valid-prior-handle?
   [atom-count Int
@@ -1221,8 +1961,8 @@
    handle Int] Any
   (let [position (handle-position handle)]
     (if (atom-handle? handle)
-      (atom-row-value (nth (store-atoms store) position))
-      (let [row t/TripleRow (nth (store-triples store) position)]
+      (atom-row-value (atom-row-at store position))
+      (let [row t/TripleRow (triple-row-at store position)]
         (t/->Triple
          (resolve-valid-handle store (t/triplerow-t1 row))
          (resolve-valid-handle store (t/triplerow-t2 row))
@@ -1231,7 +1971,7 @@
 (defn- resolve-valid-triple-handle
   [store t/TermStore
    handle Int] t/Triple
-  (let [row t/TripleRow (nth (store-triples store) (handle-position handle))]
+  (let [row t/TripleRow (triple-row-at store (handle-position handle))]
     (t/->Triple
      (resolve-valid-handle store (t/triplerow-t1 row))
      (resolve-valid-handle store (t/triplerow-t2 row))
@@ -1240,14 +1980,14 @@
 (defn- valid-transaction-record-at
   [store t/TermStore
    transaction-position Int] t/TransactionRecord
-  (let [row t/TransactionRow (nth (store-transactions store) transaction-position)
+  (let [row t/TransactionRow (transaction-row-at store transaction-position)
         start Int (t/transactionrow-first-operation row)
         stop Int (+ start (t/transactionrow-operation-count row))
         operations (Vec t/CommitOperation) (loop [position Int start
                                                   current (Vec t/CommitOperation) empty-commit-operations]
                                              (if (>= position stop)
             current
-            (let [operation t/OperationRow (nth (store-operations store) position)]
+            (let [operation t/OperationRow (operation-row-at store position)]
               (recur
                (inc position)
                (conj
@@ -1262,9 +2002,8 @@
   [store t/TermStore
    lower-exclusive Int
    upper-inclusive Int] (Vec t/TransactionRecord)
-  (let [transactions (Vec t/TransactionRow) (store-transactions store)
-        first Int (first-transaction-after transactions lower-exclusive)
-        end Int (first-transaction-after transactions upper-inclusive)]
+  (let [first Int (first-transaction-after store lower-exclusive)
+        end Int (first-transaction-after store upper-inclusive)]
     (loop [position Int first
            records (Vec t/TransactionRecord) empty-transaction-records]
       (if (>= position end)
@@ -1276,11 +2015,18 @@
   [store t/TermStore
    lower-exclusive Int
    upper-inclusive Int] TransactionRecordsResult
-  (let [atoms (Vec t/AtomRow) (store-atoms store)
-        triples (Vec t/TripleRow) (store-triples store)
-        transactions (Vec t/TransactionRow) (store-transactions store)
-        operations (Vec t/OperationRow) (store-operations store)]
-    (cond
+  (if (some? (store-prefix store))
+    (if (> lower-exclusive upper-inclusive)
+      (transaction-records-error
+       :invalid-transaction-record
+       "store: transaction record range is invalid")
+      (transaction-records-ok
+       (transaction-records-between store lower-exclusive upper-inclusive)))
+    (let [atoms (Vec t/AtomRow) (store-atoms store)
+          triples (Vec t/TripleRow) (store-triples store)
+          transactions (Vec t/TransactionRow) (store-transactions store)
+          operations (Vec t/OperationRow) (store-operations store)]
+      (cond
       [(> lower-exclusive upper-inclusive)
        (transaction-records-error
         :invalid-transaction-record
@@ -1316,7 +2062,7 @@
                       "store: invalid transaction record")
                      (transaction-records-ok
                       (valid-transaction-records-between
-                       store lower-exclusive upper-inclusive)))))))))])))
+                       store lower-exclusive upper-inclusive)))))))))]))))
 
 (defn- rebuild-operation-state! [store t/TermStore] t/TermStore
   (let [operations (Vec t/OperationRow) (store-operations store)
@@ -1384,10 +2130,12 @@
                    (atom empty-ids) (atom empty-active-buckets)
                    (atom empty-active-cells) (atom false)
                    (atom (build-atom-term-slots!
-                          atoms (term-slots-width-for (count atoms))))
+                          atoms (term-slots-width-for (count atoms)) 0))
                    (atom (build-triple-term-slots!
-                          rows (term-slots-width-for (count rows))))
-                   (atom (slots/fresh-slots initial-slots)))]
+                          rows (term-slots-width-for (count rows)) 0))
+                   (atom (slots/fresh-slots initial-slots))
+                   nil default-tail-row-limit default-tail-byte-limit
+                   (atom 0) (atom 0))]
               (reset! ctx (rebuild-operation-state! loaded))
               (term-store-load-ok))))))))
 
@@ -1402,7 +2150,8 @@
         transactions (Vec t/TransactionRow) (store-transactions store)
         operations (Vec t/OperationRow) (store-operations store)
         next-sequence-value Int (store-next-sequence store)]
-    (if (and (valid-space-id? (t/termstore-space-id store))
+    (if (or (some? (store-prefix store))
+            (and (valid-space-id? (t/termstore-space-id store))
              (and (>= next-sequence-value 1)
                   (and (every? (fn [row t/AtomRow] Bool
                                  (valid-atom-row? row))
@@ -1410,7 +2159,7 @@
                        (and (valid-triple-rows? (count atoms) rows)
                             (valid-history-rows?
                              transactions operations (count rows)
-                             next-sequence-value)))))
+                             next-sequence-value))))))
       ctx
       (throw (ex-info "store: invalid TermStore dump"
                       {:type :invalid-term-store-dump})))))

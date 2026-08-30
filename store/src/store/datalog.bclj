@@ -84,6 +84,8 @@
      osp HandleTrie
      occurrence OccurrenceCandidateSource?
      rotation RotationCandidateSource?])
+  (StoreCandidateSource
+    [root t/TermStore])
   (VirtualCandidateSource
     [relation String
      source text-search/TextSearchSource]))
@@ -879,6 +881,9 @@
   (->CandidateSource [] {} {} {} {} nil
     (->RotationCandidateSource rotation lower-exclusive)))
 
+(defn triple-candidate-source [root t/TermStore] StoreCandidateSource
+  (->StoreCandidateSource root))
+
 ;; Exclusive lower bound, matching store/operation-range-bounds exactly.
 (defn- event-after-sequence?
   [event t/OperationOccurrence
@@ -1169,6 +1174,30 @@
         (occurrencecandidatesource-root occurrence) handle)
       (nth (candidatesource-rows source) handle))))
 
+(defn- store-source-handles
+  [source StoreCandidateSource
+   arguments (Vec QueryTerm)
+   subst Substitution] (Vec Int)
+  (store/matching-triple-handles
+   (storecandidatesource-root source)
+   (bound-term-value (nth arguments 0) subst)
+   (bound-term-value (nth arguments 1) subst)
+   (bound-term-value (nth arguments 2) subst)))
+
+(defn- store-source-row
+  [source StoreCandidateSource
+   handle Int] Tuple
+  (store/triple-tuple-at (storecandidatesource-root source) handle))
+
+(defn- store-source-contains?
+  [source StoreCandidateSource
+   arguments (Vec QueryTerm)
+   subst Substitution] Bool
+  (let [wanted Tuple (ground arguments subst)]
+    (some? (some (fn [handle Int] Any
+                   (when (= wanted (store-source-row source handle)) handle))
+                 (store-source-handles source arguments subst)))))
+
 (defn- source-contains?
   [source CandidateSource
    relation String
@@ -1219,6 +1248,25 @@
                        (if (some? matched) (conj results matched) results))
                 results))))))))
 
+(defn- store-results-indexed!
+  [source StoreCandidateSource
+   arguments (Vec QueryTerm)
+   subst Substitution
+   context QueryEvaluationContext] (Vec Substitution)
+  (loop [remaining (Vec Int) (store-source-handles source arguments subst)
+         results (Vec Substitution) []]
+    (if (or (empty? remaining)
+            (not (query-evaluation-context-open? context)))
+      results
+      (let [tuple Tuple (store-source-row source (first remaining))
+            matched (U Substitution Nil) (unify-arguments-controlled!
+             arguments tuple subst context)]
+        (if (query-evaluation-context-open? context)
+          (recur
+           (rest remaining)
+           (if (some? matched) (conj results matched) results))
+          results)))))
+
 (defn- relation-results-indexed!
   [db Db
    sources CandidateSources
@@ -1232,6 +1280,8 @@
       (cond
         [(instance? CandidateSource source)
          (if (source-contains? source relation arguments subst) [] [subst])]
+        [(instance? StoreCandidateSource source)
+         (if (store-source-contains? source arguments subst) [] [subst])]
         [:else
          (if (contains? (get db relation #{}) (ground arguments subst))
            [] [subst])])
@@ -1241,6 +1291,8 @@
           arguments
           (virtual-source-rows! source true arguments subst context)
           subst context)]
+        [(instance? StoreCandidateSource source)
+         (store-results-indexed! source arguments subst context)]
         [(instance? CandidateSource source)
          (let [rotation (candidatesource-rotation source)]
            (if (some? rotation)

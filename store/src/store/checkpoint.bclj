@@ -1,0 +1,116 @@
+#lang beagle/clj
+;; Packed checkpoint selection and rollover policy. STORELOG IO stays at the
+;; database adapter; every semantic decision about derived packed state lives
+;; here in typed Beagle.
+(ns store.checkpoint)
+(require [store.packed :as packed])
+(require [store.store :as store])
+(require [store.types :as t])
+
+(defn- fail!
+  [code Keyword
+   message String
+   data Any] Any
+  (throw (ex-info message (assoc data :type code :store/code code))))
+
+(defn- error-code [error Throwable] Keyword
+  (let [data Any (ex-data error)
+        code Any (or (:store/code data) (:type data))]
+    (if (keyword? code) code :invalid-packed-checkpoint)))
+
+(defn- rejection
+  [manifest-path String
+   error Throwable] Any
+  {:manifest manifest-path
+   :code (error-code error)
+   :message (or (.getMessage error) "packed checkpoint was rejected")})
+
+(defn select-boot!
+  [directory String
+   source-for-manifest Any
+   tail-row-limit Int
+   tail-byte-limit Int] Any
+  (loop [candidates Any (seq (packed/candidate-manifests directory))
+         rejections Any []]
+    (if (nil? candidates)
+      {:context nil
+       :source :storelog-full-replay
+       :source-record nil
+       :selected-manifest nil
+       :prefix-records 0
+       :rejections rejections}
+      (let [manifest-path String (first candidates)
+            attempt Any (try
+              (let [manifest packed/CheckpointManifest (packed/read-manifest! manifest-path)
+                    source packed/CheckpointSource (source-for-manifest manifest)
+                    prefix packed/PackedPrefix (packed/open-checkpoint! manifest-path source)
+                    context (Atom t/TermStore) (store/new-packed-term-store
+                     prefix tail-row-limit tail-byte-limit 0)]
+                {:context context
+                 :source :packed-checkpoint
+                 :source-record source
+                 :selected-manifest manifest-path
+                 :prefix-records
+                 (packed/checkpointmanifest-transaction-count manifest)
+                 :rejections rejections})
+              (catch Throwable error
+                {:rejection (rejection manifest-path error)}))]
+        (if (some? (:rejection attempt))
+          (recur (next candidates)
+                 (conj rejections (:rejection attempt)))
+          attempt)))))
+
+(defn publish!
+  [context (Atom t/TermStore)
+   directory String
+   source-for-revision Any] Any
+  (let [revision Int (store/current-sequence context)
+        source packed/CheckpointSource (source-for-revision revision)]
+    (if (not (= revision (packed/checkpointsource-revision source)))
+      (fail! :packed-source-mismatch
+             "live Store revision is not the durable STORELOG prefix"
+             {:store-revision revision
+              :storelog-revision (packed/checkpointsource-revision source)})
+      nil)
+    (let [manifest packed/CheckpointManifest (packed/write-checkpoint!
+           (store/packed-prefix context)
+           (store/dump-term-store-tail context)
+           directory source)
+          prefix packed/PackedPrefix (packed/open-checkpoint!
+           (packed/checkpointmanifest-path manifest) source)]
+      (store/install-packed-prefix! context prefix)
+      {:version revision
+       :watermark (packed/checkpointsource-log-valid-bytes source)
+       :created-at (System/currentTimeMillis)
+       :manifest (packed/checkpointmanifest-path manifest)
+       :component (packed/checkpointmanifest-component manifest)
+       :page-sha256 (packed/checkpointmanifest-page-sha256 manifest)
+       :bytes (packed/checkpointmanifest-mapped-bytes manifest)})))
+
+(defn- rollover-required? [error Any] Bool
+  (= :packed-tail-rollover-required (error-code error)))
+
+(defn prepare-write!
+  [context (Atom t/TermStore)
+   operations (Vec t/CommitOperation)
+   directory String
+   source-for-revision Any] (Atom t/TermStore)
+  (if (nil? (store/packed-prefix context))
+    (do (publish! context directory source-for-revision) nil)
+    nil)
+  (try
+    (store/ensure-transaction-capacity! context operations)
+    (catch clojure.lang.ExceptionInfo error
+      (if (rollover-required? error)
+        (do
+          (publish! context directory source-for-revision)
+          (try
+            (store/ensure-transaction-capacity! context operations)
+            (catch clojure.lang.ExceptionInfo capacity-error
+              (if (rollover-required? capacity-error)
+                (fail! :packed-tail-capacity-exceeded
+                       "one transaction exceeds the empty boxed-tail bound"
+                       (ex-data capacity-error))
+                (throw capacity-error)))))
+        (throw error))))
+  context)

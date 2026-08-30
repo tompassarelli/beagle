@@ -20,8 +20,7 @@
            [java.time Instant]
            [java.util.concurrent ArrayBlockingQueue LinkedBlockingQueue
             ThreadFactory ThreadPoolExecutor TimeUnit]
-           [java.util.concurrent.atomic AtomicLong]
-           [java.util.zip CRC32]))
+           [java.util.concurrent.atomic AtomicLong]))
 
 (load-file "database.clj")
 (load-file "writer_authority.clj")
@@ -247,6 +246,16 @@
 
 (defn- canonical-path [path]
   (.getPath (.getCanonicalFile (io/file (str path)))))
+
+(defn- require-distinct-log-paths! [path]
+  (let [store-log (canonical-path path)
+        request-log (when request-log-path
+                      (canonical-path request-log-path))]
+    (when (= store-log request-log)
+      (server-fail!
+       :request-log-aliases-store-log
+       "BEAGLE_STORE_SERVER_LOG must not name the Store transaction log"
+       {:store-log store-log :request-log request-log}))))
 
 (defn writer-authority-status []
   (when @active-store
@@ -622,18 +631,6 @@
         (when fence-present (require-triple! fence "batch fence"))
         cancellation)))))
 
-(defn- scan-match? [options proposition]
-  (every? identity
-          (map-indexed
-           (fn [index [present value]]
-             (or (not present)
-                 (= value ((case index
-                             0 t/triple-t1
-                             1 t/triple-t2
-                             t/triple-t3)
-                           proposition))))
-           options)))
-
 (defn- query-record-tag [value]
   (when (and (t/triple? value) (= :rpc/record (t/triple-t3 value)))
     (t/triple-t1 value)))
@@ -997,12 +994,6 @@
           (term-store/replay-transaction! context record))
         (write-query-checkpoint! history-store version @context)))))
 
-(defn- snapshot-image [version root]
-  (let [context (atom root)]
-    {:version version
-     :store-root root
-     :propositions (term-store/live-propositions context)}))
-
 (defn- occurrence-candidate-source [root lower-exclusive upper-inclusive]
   (datalog/occurrence-candidate-source root lower-exclusive upper-inclusive))
 
@@ -1095,122 +1086,17 @@
           root
           (retain-query-page-root! version root)))))
 
-(defn- native-term-slot [value width]
-  (mod (hash value) width))
-
-(defn- native-index-position [rows slots value]
-  (let [positions @(nth slots (native-term-slot value (count slots)))]
-    (some (fn [position]
-            (when (and (< position (count rows)) (= value (nth rows position)))
-              position))
-          positions)))
-
-(defn- native-atom-row [value]
-  (cond
-    (string? value) (t/->AtomRow :string value nil nil nil nil nil)
-    (integer? value) (t/->AtomRow :int nil value nil nil nil nil)
-    (number? value) (t/->AtomRow :float nil nil value nil nil nil)
-    (boolean? value) (t/->AtomRow :bool nil nil nil value nil nil)
-    (keyword? value) (t/->AtomRow :keyword nil nil nil nil value nil)
-    (t/instant? value) (t/->AtomRow :instant nil nil nil nil nil value)))
-
-(declare native-term-handle)
-
-(defn- native-term-handle [root value]
-  (if (t/triple? value)
-    (let [t1 (native-term-handle root (t/triple-t1 value))
-          t2 (native-term-handle root (t/triple-t2 value))
-          t3 (native-term-handle root (t/triple-t3 value))]
-      (when (every? some? [t1 t2 t3])
-        (when-let [position
-                   (native-index-position
-                    (deref (t/termstore-triples root))
-                    (deref (t/termstore-triple-slots root))
-                    (t/->TripleRow t1 t2 t3))]
-          (inc (* 2 position)))))
-    (let [row (native-atom-row value)]
-      (when row
-        (when-let [position
-                   (native-index-position
-                    (deref (t/termstore-atoms root))
-                    (deref (t/termstore-atom-slots root)) row)]
-          (* 2 position))))))
-
-(defn- native-atom-value [row]
-  (case (t/atomrow-kind row)
-    :string (t/atomrow-string-value row)
-    :int (t/atomrow-int-value row)
-    :float (t/atomrow-float-value row)
-    :bool (t/atomrow-bool-value row)
-    :keyword (t/atomrow-keyword-value row)
-    :instant (t/atomrow-instant-value row)))
-
 (defn- native-resolve-handle [root handle]
-  (let [position (quot handle 2)]
-    (if (zero? (mod handle 2))
-      (native-atom-value (nth (deref (t/termstore-atoms root)) position))
-      (let [row (nth (deref (t/termstore-triples root)) position)]
-        (t/triple
-         (native-resolve-handle root (t/triplerow-t1 row))
-         (native-resolve-handle root (t/triplerow-t2 row))
-         (native-resolve-handle root (t/triplerow-t3 row)))))))
-
-(defn- native-active-handle? [root handle]
-  (let [slots (deref (t/termstore-active-slots root))
-        buckets (deref (t/termstore-active-buckets root))
-        positions @(nth slots (native-term-slot handle (count slots)))]
-    (boolean
-     (some (fn [position]
-             (when (< position (count buckets))
-               (let [bucket (nth buckets position)]
-                 (and (= handle (t/activebucket-triple-handle bucket))
-                      (seq (t/activebucket-positions bucket))))))
-           positions))))
-
-(def ^:private native-unbound ::native-unbound)
-(def ^:private native-missing ::native-missing)
-
-(defn- native-pattern-handles [root arguments]
-  (mapv (fn [argument]
-          (if (some? (datalog/queryterm-variable argument))
-            native-unbound
-            (or (native-term-handle root (datalog/queryterm-value argument))
-                native-missing)))
-        arguments))
-
-(defn- native-row-matches-handles? [expected row]
-  (every? identity
-          (map (fn [wanted actual]
-                 (or (= native-unbound wanted) (= wanted actual)))
-               expected
-               [(t/triplerow-t1 row)
-                (t/triplerow-t2 row)
-                (t/triplerow-t3 row)])))
+  (term-store/resolve-term-handle root handle))
 
 (defn- native-candidate-handles [root arguments cancellation]
-  (let [expected (native-pattern-handles root arguments)]
-    (cond
-      (some #{native-missing} expected) []
-      (not-any? #{native-unbound} expected)
-      (let [row (apply t/->TripleRow expected)
-            position (native-index-position
-                      (deref (t/termstore-triples root))
-                      (deref (t/termstore-triple-slots root)) row)
-            handle (when (some? position) (inc (* 2 position)))]
-        (if (and handle (native-active-handle? root handle)) [handle] []))
-      :else
-      (persistent!
-       (reduce (fn [handles bucket]
-                 (cancelled! cancellation)
-                 (let [handle (t/activebucket-triple-handle bucket)]
-                   (if (and (seq (t/activebucket-positions bucket))
-                            (native-row-matches-handles?
-                             expected
-                             (nth (deref (t/termstore-triples root)) (quot handle 2))))
-                     (conj! handles handle)
-                     handles)))
-               (transient [])
-               (deref (t/termstore-active-buckets root)))))))
+  (let [values (mapv (fn [argument]
+                       (when-not (some? (datalog/queryterm-variable argument))
+                         (datalog/queryterm-value argument)))
+                     arguments)]
+    (cancelled! cancellation)
+    (term-store/matching-triple-handles
+     root (nth values 0) (nth values 1) (nth values 2))))
 
 (defn- match-query-row [arguments row]
   (loop [position 0 bindings {}]
@@ -1661,16 +1547,23 @@
         [t1-option t2-option t3-option]
         (record-fields! payload :rpc/triple-pattern 3)
         options (mapv option-value! [t1-option t2-option t3-option])
+        values (mapv (fn [[present value]] (when present value)) options)
         page (t/rpcrequest-page request)
         version (page-version snapshot page)
         cache-snapshot (assoc (select-keys snapshot [:generation :space])
                               :version version)
         build #(let [db (database/store-view @active-store (:root snapshot))
                      root (query-page-root! db version)
-                     view (database/store-view db root)]
-                 (collect-rows (database/live-propositions view)
-                               (fn [row] (scan-match? options row))
-                               (when-not page unpaged-row-cutoff)
+                     view (database/store-view db root)
+                     cutoff (when-not page unpaged-row-cutoff)]
+                 (collect-rows (database/matching-live-propositions
+                                view
+                                (nth values 0)
+                                (nth values 1)
+                                (nth values 2)
+                                cutoff)
+                               (constantly true)
+                               nil
                                cancellation))
         digest (term-sha256 payload)
         rows (if page
@@ -1751,6 +1644,9 @@
                      candidates
                      (cond->
                       {}
+                       (not only-text?)
+                       (assoc datalog/triple-relation
+                              (datalog/triple-candidate-source root))
                        (contains? history datalog/occurrence-relation)
                        (assoc datalog/occurrence-relation
                               (occurrence-candidate-source
@@ -1760,14 +1656,8 @@
                               (withdrawal-candidate-source
                                root lower-exclusive version))
                        source (merge (datalog/text-candidate-sources source)))
-                     snapshot-data (when-not only-text?
-                                     (snapshot-image version root))
                      projection
-                     (query/->Projection
-                       (if only-text?
-                         {}
-                         (datalog/edb (:propositions snapshot-data)))
-                       candidates)
+                     (query/->Projection {} candidates)
                      result (binding [query/*query-control* control]
                               (query/run-plan-projected! projection plan))]
                  (result-rows! result))
@@ -1911,30 +1801,21 @@
                  (if (keyword? code) code :rpc/validation-failed)
                  (or (.getMessage error) "validation failed"))])))))
 
-(defn- checkpoint-image-path [db]
-  (str (:log db) ".snapshot"))
-
 (defn- write-checkpoint-image!
-  "Write one exact JVM snapshot at the commit-sequencer durability barrier.
-   The STORELOG remains authoritative; FRI binds the image to its canonical
-   prefix and atomically installs the derived file beside it."
+  "Publish one exact manifest-last packed snapshot at the commit-sequencer
+   durability barrier. STORELOG remains the sole authority."
   [db snapshot]
-  (let [version (:version snapshot)
-        {:keys [valid-bytes fingerprint space-id]}
-        (database/triple-log-prefix-source! (:log db) version)
-        binding (fri/source-binding space-id fingerprint valid-bytes)
-        path (checkpoint-image-path db)
-        _ (fri/write-fri!
-           (term-store/dump-term-store (atom (:root snapshot)))
-           path binding)
-        ^bytes bytes (java.nio.file.Files/readAllBytes
-                      (.toPath (io/file path)))
-        crc (doto (CRC32.) (.update bytes))]
+  (let [{:keys [version watermark created-at page-sha256 bytes]}
+        (database/checkpoint-packed! db)]
+    (when-not (= version (:version snapshot))
+      (server-fail! :rpc/checkpoint-unavailable
+                    "packed checkpoint crossed the sequenced snapshot boundary"
+                    {:expected (:version snapshot) :actual version}))
     {:version version
-     :watermark valid-bytes
-     :created-at (System/currentTimeMillis)
-     :crc (.getValue crc)
-     :bytes (alength bytes)}))
+     :watermark watermark
+     :created-at created-at
+     :crc (Long/parseLong (subs page-sha256 0 8) 16)
+     :bytes bytes}))
 
 (defn- checkpoint-payload! [request snapshot]
   (require-unit! (t/rpc-request-payload-value request))
@@ -2556,8 +2437,9 @@
 (defn serve!
   "Serve Store RPC v2 requests. The default bind is loopback; an authenticated
    private gateway may set BEAGLE_STORE_BIND explicitly. The active process holds
-   writer authority for the full listener lifetime; a standby refreshes reads."
+  writer authority for the full listener lifetime; a standby refreshes reads."
   [port path expected-space role]
+  (require-distinct-log-paths! path)
   (boot! path expected-space role)
   (reset! lifecycle-notification-state :starting)
   (let [bind-host (or (not-empty (System/getenv "BEAGLE_STORE_BIND")) "127.0.0.1")

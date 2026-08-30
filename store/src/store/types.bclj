@@ -131,6 +131,7 @@
    triple-handle Int])
 (defrecord ActiveBucket
   [triple-handle Int
+   prefix-count Int
    positions (Vec Int)])
 (defrecord CommitOperation
   [action Keyword
@@ -157,8 +158,9 @@
 (defrecord Withdrawal
   [retraction OperationOccurrence
    assertion OperationOccurrence])
-;; While fold-open, active-cells carries every bucket's positions and the
-;; ActiveBucket rows carry only their handle.
+;; While fold-open, active-cells carries every bucket's boxed tail positions.
+;; ActiveBucket.prefix-count is only a cursor into the packed prefix runs; no
+;; prefix occurrence vector may be copied into the mutation overlay.
 ;; Every mutable field is a cell, so the record itself is written once and no
 ;; append ever copies it. A TermStore is therefore an identity, not a value:
 ;; one owner mutates it, and a second store is built by loading a dump.
@@ -175,7 +177,12 @@
    fold-open (Atom Bool)
    atom-slots (Atom slots/TermSlots)
    triple-slots (Atom slots/TermSlots)
-   active-slots (Atom slots/TermSlots)])
+   active-slots (Atom slots/TermSlots)
+   packed-prefix Any
+   tail-row-limit Int
+   tail-byte-limit Int
+   tail-bytes (Atom Int)
+   tail-rollovers (Atom Int)])
 (defrecord TermStoreDump
   [version Int
    space-id SpaceId

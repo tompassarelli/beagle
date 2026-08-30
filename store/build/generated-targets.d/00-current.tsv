@@ -15,7 +15,9 @@ copy	src/store/candidate_transformer.clj	out/store/candidate_transformer.clj
 beagle	src/store/slots.bclj	out/store/slots.clj
 beagle	src/store/types.bclj	out/store/types.clj
 beagle	src/store/rpc_limits.bclj	out/store/rpc_limits.clj
+beagle	src/store/packed.bclj	out/store/packed.clj
 beagle	src/store/store.bclj	out/store/store.clj
+beagle	src/store/checkpoint.bclj	out/store/checkpoint.clj
 beagle	src/store/rotation.bclj	out/store/rotation.clj
 beagle	src/store/txn.bclj	out/store/txn.clj
 beagle	src/store/schema.bclj	out/store/schema.clj

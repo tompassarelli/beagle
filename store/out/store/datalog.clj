@@ -99,7 +99,7 @@
 
 (defn rotationcandidatesource-lower-exclusive [r] (:lower-exclusive r))
 
-;; CandidateSourceValue = CandidateSource | VirtualCandidateSource
+;; CandidateSourceValue = CandidateSource | StoreCandidateSource | VirtualCandidateSource
 (defrecord CandidateSource [rows positions spo pos osp occurrence rotation])
 
 (defn candidatesource-rows [r] (:rows r))
@@ -115,6 +115,9 @@
 (defn candidatesource-occurrence [r] (:occurrence r))
 
 (defn candidatesource-rotation [r] (:rotation r))
+(defrecord StoreCandidateSource [root])
+
+(defn storecandidatesource-root [r] (:root r))
 (defrecord VirtualCandidateSource [relation source])
 
 (defn virtualcandidatesource-relation [r] (:relation r))
@@ -530,6 +533,9 @@
 (defn ^CandidateSource rotation-candidate-source [rotation lower-exclusive]
   (->CandidateSource [] {} {} {} {} nil (->RotationCandidateSource rotation lower-exclusive)))
 
+(defn ^StoreCandidateSource triple-candidate-source [root]
+  (->StoreCandidateSource root))
+
 (defn- ^Boolean event-after-sequence? [event lower-exclusive]
   (if (< lower-exclusive 0) true (let [occurrence (t/operationoccurrence-coordinate event)]
   (if (t/occurrence-coordinate? occurrence) (let [transaction (t/triple-t1 occurrence)
@@ -656,6 +662,17 @@
   (let [occurrence (candidatesource-occurrence source)]
   (if (some? occurrence) (store/occurrence-tuple-at (occurrencecandidatesource-root occurrence) handle) (nth (candidatesource-rows source) handle))))
 
+(defn- store-source-handles [^StoreCandidateSource source arguments subst]
+  (store/matching-triple-handles (storecandidatesource-root source) (bound-term-value (nth arguments 0) subst) (bound-term-value (nth arguments 1) subst) (bound-term-value (nth arguments 2) subst)))
+
+(defn- store-source-row [^StoreCandidateSource source handle]
+  (store/triple-tuple-at (storecandidatesource-root source) handle))
+
+(defn- ^Boolean store-source-contains? [^StoreCandidateSource source arguments subst]
+  (let [wanted (ground arguments subst)]
+  (some? (some (fn [handle] (if (= wanted (store-source-row source handle)) (do
+  handle))) (store-source-handles source arguments subst)))))
+
 (defn- ^Boolean source-contains? [^CandidateSource source ^String relation arguments subst]
   (let [rotation (candidatesource-rotation source)]
   (if (some? rotation) (let [wanted (ground arguments subst)]
@@ -673,14 +690,23 @@
   (if (contains? seen proposition) (recur (rest remaining) seen results) (let [matched (unify-arguments-controlled! arguments (triple-row proposition) subst context)]
   (if (query-evaluation-context-open? context) (recur (rest remaining) (conj seen proposition) (if (some? matched) (conj results matched) results)) results))))))))
 
+(defn- store-results-indexed! [^StoreCandidateSource source arguments subst ^QueryEvaluationContext context]
+  (loop [remaining (store-source-handles source arguments subst)
+   results []]
+  (if (or (empty? remaining) (not (query-evaluation-context-open? context))) results (let [tuple (store-source-row source (first remaining))
+   matched (unify-arguments-controlled! arguments tuple subst context)]
+  (if (query-evaluation-context-open? context) (recur (rest remaining) (if (some? matched) (conj results matched) results)) results)))))
+
 (defn- relation-results-indexed! [db sources ^Literal literal subst ^QueryEvaluationContext context]
   (let [^String relation (literal-relation literal)
    arguments (literal-arguments literal)
    source (get sources relation)]
   (if (literal-negated literal) (cond
   (instance? CandidateSource source) (if (source-contains? source relation arguments subst) [] [subst])
+  (instance? StoreCandidateSource source) (if (store-source-contains? source arguments subst) [] [subst])
   :else (if (contains? (get db relation #{}) (ground arguments subst)) [] [subst])) (cond
   (instance? VirtualCandidateSource source) (unify-tuples-controlled! arguments (virtual-source-rows! source true arguments subst context) subst context)
+  (instance? StoreCandidateSource source) (store-results-indexed! source arguments subst context)
   (instance? CandidateSource source) (let [rotation (candidatesource-rotation source)]
   (if (some? rotation) (rotation-results-indexed! rotation arguments subst context) (let [rows-value (candidatesource-rows source)
    handles (source-handles source relation arguments subst)]

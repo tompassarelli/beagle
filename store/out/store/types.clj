@@ -181,9 +181,11 @@
 
 (defn operationrow-triple-handle [r] (:triple-handle r))
 
-(defrecord ActiveBucket [triple-handle positions])
+(defrecord ActiveBucket [triple-handle prefix-count positions])
 
 (defn activebucket-triple-handle [r] (:triple-handle r))
+
+(defn activebucket-prefix-count [r] (:prefix-count r))
 
 (defn activebucket-positions [r] (:positions r))
 
@@ -231,7 +233,7 @@
 
 (defn withdrawal-assertion [r] (:assertion r))
 
-(defrecord TermStore [space-id next-sequence atoms triples transactions operations withdrawal-targets active-buckets active-cells fold-open atom-slots triple-slots active-slots])
+(defrecord TermStore [space-id next-sequence atoms triples transactions operations withdrawal-targets active-buckets active-cells fold-open atom-slots triple-slots active-slots packed-prefix tail-row-limit tail-byte-limit tail-bytes tail-rollovers])
 
 (defn termstore-space-id [r] (:space-id r))
 
@@ -258,6 +260,16 @@
 (defn termstore-triple-slots [r] (:triple-slots r))
 
 (defn termstore-active-slots [r] (:active-slots r))
+
+(defn termstore-packed-prefix [r] (:packed-prefix r))
+
+(defn termstore-tail-row-limit [r] (:tail-row-limit r))
+
+(defn termstore-tail-byte-limit [r] (:tail-byte-limit r))
+
+(defn termstore-tail-bytes [r] (:tail-bytes r))
+
+(defn termstore-tail-rollovers [r] (:tail-rollovers r))
 
 (defrecord TermStoreDump [version space-id next-sequence atoms triples transactions operations])
 
