@@ -57,10 +57,16 @@ Diagnose concrete infrastructure failure once with `beagle doctor --deep`; use
 
 Treat emitted host code as generated output, not source authority. A required
 typed boundary that Beagle cannot express is upstream compiler work, not a
-blocker: the assigned compiler owner must repair and land support before
-authoring resumes and regenerates. Do not evade a compiler gap with source
-reshaping, generated patches, target glue, raw passthrough, escape hatches, or
-hypothetical compatibility.
+blocker. The current Beagle work owner owns reproducing the gap, repairing and
+landing the upstream compiler support, and re-running the dependent task. If
+that run's enforced repository, path, or topology authority cannot include the
+repair, it must escalate the exact gap to its accountable parent. The parent
+must obtain acknowledgment from a concrete compiler-repair owner and remains
+accountable for resuming the dependent work. A gap report without acknowledged
+repair ownership and an exact resume condition is not completion. Pause only
+work that depends on the missing capability; unrelated authoring continues. Do
+not evade a compiler gap with source reshaping, generated patches, target glue,
+raw passthrough, escape hatches, or hypothetical compatibility.
 
 Keep semantics in typed Beagle over normalized Store triples. Limit host code to
 cold bootstrap and irreducible OS/foreign edges. When the owner controls
