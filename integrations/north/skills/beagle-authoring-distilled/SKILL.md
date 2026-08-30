@@ -5,9 +5,9 @@ description: >-
   files with a current Beagle extension (`beagle langs --view extensions`),
   files beginning with `#lang beagle`, or anything under ~/code/beagle.
   Establishes proportional authoring-loop health, typed-Lisp semantic
-  leverage, compiler-first repair, canonical typed syntax, and the pinned
-  Racket route for cold bootstrap or direct `.rkt` maintenance. For primarily
-  relational code analysis, use codegraph instead.
+  leverage, strict foreign boundaries, compiler-first repair, canonical typed
+  syntax, and the pinned Racket route for cold bootstrap or direct `.rkt`
+  maintenance. For primarily relational code analysis, use codegraph instead.
 ---
 
 # Beagle authoring
@@ -72,9 +72,30 @@ Keep semantics in typed Beagle over normalized Store triples. Limit host code to
 cold bootstrap and irreducible OS/foreign edges. When the owner controls
 greenfield domain logic, raw host code is not a workaround: implement that logic
 in the appropriate typed Beagle profile and repair any missing compiler support
-upstream. Use explicit types and reserve `Any` for inexpressible dynamic
-boundaries. Use pinned Racket only for bootstrap verification or `.rkt`
-maintenance after reading its procedure completely.
+upstream.
+
+## Typed boundaries and migrations
+
+Quarantine `Any` at irreducible dynamic edges. Validate or decode each foreign
+value once at ingress, immediately return an explicit Beagle type, and never
+default a domain type to `Any` or propagate it inward. If Beagle cannot express
+or check the required result, repair the compiler or import tooling rather than
+widening the program.
+
+For JVM/Clojure-hosted work, decode foreign values into explicit Beagle records,
+unions, collections, and options before domain code consumes them. Drive
+repeated Clojure migrations through deterministic parser-, compiler-, or
+schema-backed conversion that emits reviewable typed Beagle; use AI only for an
+explicitly identified residual ambiguity, never as the conversion mechanism.
+
+For JavaScript/TypeScript-hosted work, treat published declarations and schemas
+as versioned foreign inputs. Transform them into Beagle-native types while
+preserving representable unions, optionals, nullability, enums, records, and
+generics. Regenerate when the pinned input changes; never maintain a host shape
+and its Beagle mirror by hand.
+
+Use pinned Racket only for bootstrap verification or `.rkt` maintenance after
+reading its procedure completely.
 
 For command selection, profile details, syntax examples, and the pinned Racket
 procedure, resolve and read `agents path beagle-authoring-reference`.
