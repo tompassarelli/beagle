@@ -822,6 +822,24 @@ console.log(JSON.stringify(snapshot()));"
      "console.log(retry());"
      "catch\nfinally\nfinally\nafter\n11")
 
+   (check-js-output "async loop/recur catches a rejected nested control-flow value"
+     (list `(declare-extern mutate ,(fn-ty '(Int) '(Promise Int)))
+           '(defn (#%meta :async retry-call) [] (Promise Int)
+              (loop [attempt Int 1]
+                (try
+                  (let [value (await (mutate attempt))]
+                    value)
+                  (catch Error error
+                    (if (< attempt 3)
+                      (recur (+ attempt 1))
+                      (throw error)))))))
+     (string-append
+      "let calls = 0;\n"
+      "globalThis.mutate = async (attempt) => { calls += 1; "
+      "if (attempt < 3) throw new Error('conflict'); return attempt; };\n"
+      "retry_call().then(result => console.log(`${result}:${calls}`));")
+     "3:3")
+
    (check-js-output "later loop forms escape the preceding catch"
      (list `(defn escape-later [] Int
               (loop [attempt Int 0]

@@ -2313,7 +2313,7 @@
         (and (= node "do") (body-contains-recur? (get e "body")))
           (emit-loop-body-sequence! (get e "body") bind-names emit-value)
         (= node "recur") (emit-recur-stmts! e bind-names)
-        :else (emit-value (emit-expr*! e))))))
+        :else (emit-value (await-async-iife (emit-expr*! e)))))))
 
 (defn emit-loop-stmt!
   [e Any

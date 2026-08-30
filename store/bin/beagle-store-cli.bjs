@@ -8,6 +8,7 @@
 (declare-extern host-call (Fn [Any String Any] (Promise Any)))
 (declare-extern host-get (Fn [Any Any] Any))
 (declare-extern host-error-field (Fn [Any String] String))
+(declare-extern host-store-rpc-error? (Fn [Any] Bool))
 
 (defn delimiter? [ch String] Bool
   (or (= ch " ") (= ch "\n") (= ch "\r") (= ch "\t")
@@ -42,26 +43,39 @@
 
 (defn item-start [stack Any] Any
   (if (= 0 (count stack))
-    ["" stack false]
+    ["" "" stack]
     (let [last-index Int (- (count stack) 1)
-          state String (nth stack last-index)
+          frame Any (nth stack last-index)
+          state String (nth frame 0)
+          after String (nth frame 1)
+          close String (nth frame 2)
           parent Any (.slice stack 0 last-index)]
       (cond
-        (= state "array-first") ["" (conj parent "array-next") false]
-        (= state "array-next") ["," stack false]
-        (= state "map-first") ["" (conj parent "map-value") true]
-        (= state "map-next") ["," (conj parent "map-value") true]
-        (= state "map-value") ["" (conj parent "map-next") false]
-        :else ["" stack false]))))
+        (= state "array-first")
+        ["" "" (conj parent ["array-next" after close])]
+        (= state "array-next") ["," "" stack]
+        (= state "map-first")
+        ["[" "," (conj parent ["map-value" after close])]
+        (= state "map-next")
+        [",[" "," (conj parent ["map-value" after close])]
+        (= state "map-value")
+        ["" "]" (conj parent ["map-next" after close])]
+        :else ["" "" stack]))))
 
 (defn close-container [stack Any] Any
   (if (= 0 (count stack))
-    stack
-    (.slice stack 0 (- (count stack) 1))))
+    ["" stack]
+    (let [last-index Int (- (count stack) 1)
+          frame Any (nth stack last-index)]
+      [(str (nth frame 2) (nth frame 1))
+       (.slice stack 0 last-index)])))
 
-(defn edn-json
-  [text String
-   term-mode Bool] String
+(defn scalar-node-json
+  [kind String
+   value-json String] String
+  (str "[\"" kind "\"," value-json "]"))
+
+(defn edn-json [text String] String
   (loop [index Int 0
          output String ""
          stack Any []]
@@ -75,20 +89,28 @@
           (= ch "{")
           (let [started Any (item-start stack)]
             (recur (+ index 1)
-                   (str output (nth started 0) "{")
-                   (conj (nth started 1) "map-first")))
+                   (str output (nth started 0) "[\"map\",[")
+                   (conj (nth started 2)
+                         ["map-first" (nth started 1) "]]"])))
 
           (= ch "}")
-          (recur (+ index 1) (str output "}") (close-container stack))
+          (let [closed Any (close-container stack)]
+            (recur (+ index 1)
+                   (str output (nth closed 0))
+                   (nth closed 1)))
 
           (or (= ch "[") (= ch "("))
           (let [started Any (item-start stack)]
             (recur (+ index 1)
-                   (str output (nth started 0) "[")
-                   (conj (nth started 1) "array-first")))
+                   (str output (nth started 0) "[\"vector\",[")
+                   (conj (nth started 2)
+                         ["array-first" (nth started 1) "]]"])))
 
           (or (= ch "]") (= ch ")"))
-          (recur (+ index 1) (str output "]") (close-container stack))
+          (let [closed Any (close-container stack)]
+            (recur (+ index 1)
+                   (str output (nth closed 0))
+                   (nth closed 1)))
 
           (= ch "\"")
           (let [end Int (quoted-token-end text index)
@@ -96,35 +118,31 @@
             (recur end
                    (str output
                         (nth started 0)
-                        (subs text index end)
-                        (if (nth started 2) ":" ""))
-                   (nth started 1)))
+                        (scalar-node-json "string" (subs text index end))
+                        (nth started 1))
+                   (nth started 2)))
 
           (= ch ":")
           (let [end Int (token-end text (+ index 1))
                 token String (subs text (+ index 1) end)
-                value String (if term-mode (str "$kw:" token) token)
                 started Any (item-start stack)]
             (recur end
                    (str output
                         (nth started 0)
-                        (.stringify JSON value)
-                        (if (nth started 2) ":" ""))
-                   (nth started 1)))
+                        (scalar-node-json "keyword" (.stringify JSON token))
+                        (nth started 1))
+                   (nth started 2)))
 
           (not (delimiter? ch))
           (let [end Int (token-end text index)
                 token String (subs text index end)
-                value String (if term-mode
-                               (.stringify JSON (str "$atom:" token))
-                               token)
                 started Any (item-start stack)]
             (recur end
                    (str output
                         (nth started 0)
-                        value
-                        (if (nth started 2) ":" ""))
-                   (nth started 1)))
+                        (scalar-node-json "atom" (.stringify JSON token))
+                        (nth started 1))
+                   (nth started 2)))
 
           :else
           (recur (+ index 1) (str output ch) stack))))))
@@ -134,56 +152,64 @@
       (= context "pred") (= context "fn") (= context "op")
       (= context "direction")))
 
+(defn query-atom
+  [bridge Any
+   token String] Any
+  (cond
+    (= token "true") true
+    (= token "false") false
+    (= token "nil") nil
+    (some? (re-matches #"-?[0-9]+" token))
+    (.integerValue bridge (.integerTerm bridge token))
+    (some? (re-matches #"-?(?:[0-9]+\.[0-9]*|[0-9]*\.[0-9]+)(?:[eE][+-]?[0-9]+)?" token))
+    (.parseFloat Number token)
+    :else token))
+
+(defn query-map-key
+  [bridge Any
+   node Any] String
+  (let [kind String (host-get node 0)
+        value String (host-get node 1)]
+    (if (or (= kind "keyword") (= kind "string") (= kind "atom"))
+      value
+      (.fail bridge "query map keys must be keywords, strings, or atoms"))))
+
 (defn query-value
   [bridge Any
-   value Any
+   node Any
    context String] Any
-  (cond
-    (string? value)
+  (let [kind String (host-get node 0)
+        value Any (host-get node 1)]
     (cond
-      (= "$kw:" (subs value 0 4))
-      (let [spelling String (subs value 4)]
+      (= kind "string") value
+
+      (= kind "keyword")
+      (let [spelling String value]
         (if (structural-query-keyword? context)
           spelling
           (.keywordTerm bridge spelling)))
-      (= "$atom:" (subs value 0 6))
-      (let [token String (subs value 6)]
-        (cond
-          (= token "true") true
-          (= token "false") false
-          (= token "nil") nil
-          (some? (re-matches #"-?[0-9]+" token))
-          (.integerValue bridge (.integerTerm bridge token))
-          (some? (re-matches #"-?(?:[0-9]+\.[0-9]*|[0-9]*\.[0-9]+)(?:[eE][+-]?[0-9]+)?" token))
-          (.parseFloat Number token)
-          :else token))
-      :else value)
 
-    (vector? value)
-    (mapv (fn [item Any] Any (query-value bridge item context)) value)
+      (= kind "atom") (query-atom bridge value)
 
-    (map? value)
-    (let [result Any (js-obj)]
-      (doseq [entry (Vec Any) (.entries Object value)]
-        (let [raw-key String (nth entry 0)
-              key String (if (= "$kw:" (subs raw-key 0 4))
-                           (subs raw-key 4)
-                           raw-key)]
-          (aset result key (query-value bridge (nth entry 1) key))))
-      result)
+      (= kind "vector")
+      (mapv (fn [item Any] Any (query-value bridge item context)) value)
 
-    :else value))
+      (= kind "map")
+      (let [result Any (js-obj)]
+        (doseq [entry Any value]
+          (let [key String (query-map-key bridge (nth entry 0))]
+            (aset result key (query-value bridge (nth entry 1) key))))
+        result)
+
+      :else (.fail bridge (str "unknown EDN node kind " kind)))))
 
 (defn parse-query
   [bridge Any
    text String] Any
-  (query-value bridge
-               (.parse JSON
-                       (if (and (> (count text) 1)
-                                (= "\"" (subs text 1 2)))
-                         text
-                         (edn-json text true)))
-               ""))
+  (if (and (> (count text) 1)
+           (= "\"" (subs text 1 2)))
+    (.parse JSON text)
+    (query-value bridge (.parse JSON (edn-json text)) "")))
 
 (defn atom-term
   [bridge Any
@@ -198,38 +224,46 @@
 
 (defn parsed-term
   [bridge Any
-   value Any] Any
-  (cond
-    (string? value)
+   node Any] Any
+  (let [kind String (host-get node 0)
+        value Any (host-get node 1)]
     (cond
-      (= "$kw:" (subs value 0 4))
-      (.keywordTerm bridge (subs value 4))
-      (= "$atom:" (subs value 0 6))
-      (atom-term bridge (subs value 6))
-      :else (.stringTerm bridge value))
+      (= kind "string") (.stringTerm bridge value)
+      (= kind "keyword") (.keywordTerm bridge value)
+      (= kind "atom") (atom-term bridge value)
 
-    (vector? value)
-    (if (= 3 (count value))
-      (.tripleTerm bridge
-                   (parsed-term bridge (nth value 0))
-                   (parsed-term bridge (nth value 1))
-                   (parsed-term bridge (nth value 2)))
-      (.fail bridge "term vector must contain exactly three values"))
+      (= kind "vector")
+      (if (= 3 (count value))
+        (.tripleTerm bridge
+                     (parsed-term bridge (nth value 0))
+                     (parsed-term bridge (nth value 1))
+                     (parsed-term bridge (nth value 2)))
+        (.fail bridge "term vector must contain exactly three values"))
 
-    (map? value)
-    (let [instant Any (host-get value "$kw:instant")]
-      (if (and (vector? instant) (= 2 (count instant)))
-        (.instantTerm bridge
-                      (subs (nth instant 0) 6)
-                      (subs (nth instant 1) 6))
-        (.fail bridge "term map must be {:instant [SECONDS NANOS]}")))
+      (= kind "map")
+      (if (= 1 (count value))
+        (let [entry Any (nth value 0)
+              key-node Any (nth entry 0)
+              instant-node Any (nth entry 1)
+              instant-values Any (host-get instant-node 1)]
+          (if (and (= "keyword" (host-get key-node 0))
+                   (= "instant" (host-get key-node 1))
+                   (= "vector" (host-get instant-node 0))
+                   (= 2 (count instant-values))
+                   (= "atom" (host-get (nth instant-values 0) 0))
+                   (= "atom" (host-get (nth instant-values 1) 0)))
+            (.instantTerm bridge
+                          (host-get (nth instant-values 0) 1)
+                          (host-get (nth instant-values 1) 1))
+            (.fail bridge "term map must be {:instant [SECONDS NANOS]}")))
+        (.fail bridge "term map must be {:instant [SECONDS NANOS]}"))
 
-    :else (.fail bridge "unsupported human term")))
+      :else (.fail bridge "unsupported human term"))))
 
 (defn parse-term
   [bridge Any
    text String] Any
-  (parsed-term bridge (.parse JSON (edn-json text true))))
+  (parsed-term bridge (.parse JSON (edn-json text))))
 
 (defn parse-subject
   [bridge Any
@@ -298,6 +332,11 @@
    arguments Any] (Promise Any)
   (await (host-call bridge operation arguments)))
 
+(defn retryable-conflict? [error Any] Bool
+  (and (host-store-rpc-error? error)
+       (= "rpc/conflict" (host-error-field error "code"))
+       (= true (host-get error "retryable"))))
+
 (defn ^:async write-command
   [bridge Any
    command String
@@ -306,29 +345,35 @@
     (require-count bridge arguments 3
                    "usage: store tell|retract SUBJECT SLOT VALUE")
     (let [asserting Bool (or (= command "tell") (= command "tell-existing"))
-          existing Bool (or (= command "tell-existing") (= command "retract-existing"))
-          base Any (await (call bridge "version" nil))
-          request Any (js-obj
-                       "t1" (parse-subject bridge (nth arguments 0))
-                       "t2" (parse-term bridge (nth arguments 1))
-                       "t3" (parse-term bridge (nth arguments 2))
-                       "existing" existing
-                       "expectedVersion" (host-get base "servedVersion"))
-          response Any (await (call bridge (if asserting "assert" "retract") request))
-          result Any (nth (host-get response "result") 0)
-          proposition Any (js-obj
-                           "subject" (host-get request "t1")
-                           "predicate" (host-get request "t2")
-                           "value" (host-get request "t3"))]
-      (.out bridge
-            (str (if (host-get result "stateChanged") "committed" "no change")
-                 " via server (v" (host-get response "servedVersion") "): "
-                 (render-term bridge (host-get proposition "subject")) " "
-                 (render-term bridge (host-get proposition "predicate")) " = "
-                 (render-term bridge (host-get proposition "value"))
-                 " [input 0, occurrence "
-                 (render-term bridge (host-get result "occurrence")) "]"))
-      0)))
+          existing Bool (or (= command "tell-existing") (= command "retract-existing"))]
+      (loop [attempt Int 1]
+        (let [base Any (await (call bridge "version" nil))
+              request Any (js-obj
+                           "t1" (parse-subject bridge (nth arguments 0))
+                           "t2" (parse-term bridge (nth arguments 1))
+                           "t3" (parse-term bridge (nth arguments 2))
+                           "existing" existing
+                           "expectedVersion" (host-get base "servedVersion"))]
+          (try
+            (let [response Any (await (call bridge (if asserting "assert" "retract") request))
+                  result Any (nth (host-get response "result") 0)
+                  proposition Any (js-obj
+                                   "subject" (host-get request "t1")
+                                   "predicate" (host-get request "t2")
+                                   "value" (host-get request "t3"))]
+              (.out bridge
+                    (str (if (host-get result "stateChanged") "committed" "no change")
+                         " via server (v" (host-get response "servedVersion") "): "
+                         (render-term bridge (host-get proposition "subject")) " "
+                         (render-term bridge (host-get proposition "predicate")) " = "
+                         (render-term bridge (host-get proposition "value"))
+                         " [input 0, occurrence "
+                         (render-term bridge (host-get result "occurrence")) "]"))
+              0)
+            (catch Error error
+              (if (and (< attempt 5) (retryable-conflict? error))
+                (recur (+ attempt 1))
+                (throw error)))))))))
 
 (defn normalized-argv [argv (Vec String)] (Vec String)
   (if (and (pos? (count argv)) (= "store" (first argv)))

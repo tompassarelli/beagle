@@ -3,6 +3,7 @@
 
 import {
   StoreProtocolError,
+  StoreRpcError,
   booleanTerm,
   float64Term,
   float64Value,
@@ -32,6 +33,7 @@ globalThis.host_call = (bridge, operation, arguments_) =>
   bridge.call(operation, arguments_);
 globalThis.host_get = (value, key) => value?.[key];
 globalThis.host_error_field = (error, field) => String(error?.[field] ?? '');
+globalThis.host_store_rpc_error_p = error => error instanceof StoreRpcError;
 const cli = await import(modulePath);
 const { run } = cli;
 const classifyError = cli['classify-error'];

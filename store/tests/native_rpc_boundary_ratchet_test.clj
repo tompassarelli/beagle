@@ -31,12 +31,19 @@
                    (re-seq #"(?m)^    ([A-Za-z]+): .*send\(" worker)))
           nil))
 
-(let [server (file-source "server.clj")]
-  (check! "server serves only the closed thirteen-op STORERPC set"
-          (= 13 (count (re-seq #":rpc/[a-z-]+" (between server
+(let [server (file-source "server.clj")
+      operations (set (re-seq #":rpc/[a-z-]+" (between server
                                                        "(def native-rpc-operations"
-                                                       "(def paged-rpc-operations"))))
-          nil))
+                                                       "(def paged-rpc-operations")))]
+  (check! "server adds only operator checkpoint to the thirteen data operations"
+          (= #{":rpc/version" ":rpc/status" ":rpc/validate"
+               ":rpc/occurrences" ":rpc/scan" ":rpc/query"
+               ":rpc/assert" ":rpc/retract" ":rpc/batch"
+               ":rpc/lease-acquire" ":rpc/lease-renew"
+               ":rpc/lease-release" ":rpc/lease-check"
+               ":rpc/checkpoint"}
+             operations)
+          operations))
 
 (let [runtime (file-source "src/store/rt.clj")]
   (check! "human Term parsing is explicitly local"

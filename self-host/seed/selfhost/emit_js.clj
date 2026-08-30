@@ -1272,7 +1272,7 @@
   (str "{ let " result-name "; " (emit-js-try-statement-with! e emit-result-body) " " (emit-value result-name) " }"))
   (and (= node "do") (body-contains-recur? (get e "body"))) (emit-loop-body-sequence! (get e "body") bind-names emit-value)
   (= node "recur") (emit-recur-stmts! e bind-names)
-  :else (emit-value (emit-expr*! e))))))
+  :else (emit-value (await-async-iife (emit-expr*! e)))))))
 
 (defn ^String emit-loop-stmt! [e bind-names]
   (emit-loop-stmt-with! e bind-names (fn [^String value-str] (str "return " value-str ";"))))

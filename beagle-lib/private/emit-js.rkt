@@ -4993,7 +4993,7 @@
     [(recur-form? e)
      (emit-recur-stmts e bind-names)]
     [else
-     (emit-value (emit-expr e))]))
+     (emit-value (await-async-iife (emit-expr e)))]))
 
 ;; Emit a single expression as the last (returned) thing in a function body.
 ;; Inlines let/do/when/when-let/if-let/if to avoid unnecessary IIFEs.

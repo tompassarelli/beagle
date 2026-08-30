@@ -13,6 +13,7 @@ import {
   stringTerm,
   tripleQuery,
   tripleTerm,
+  storeTransportCheckpoint,
 } from '../clients/bun/store-rpc-core.mjs';
 
 const encoder = new TextEncoder();
@@ -126,7 +127,7 @@ async function expectRemoteRejection(promise) {
   );
 }
 
-test('runtime-neutral transport preserves the closed client surface', async () => {
+test('data client and operator checkpoint cover the exact fourteen server operations', async () => {
   const observed = [];
   const transport = request => {
     observed.push(request);
@@ -150,15 +151,25 @@ test('runtime-neutral transport preserves the closed client surface', async () =
   await expectRemoteRejection(store.leaseRenew(fence, 1000));
   await expectRemoteRejection(store.leaseRelease(fence));
   await expectRemoteRejection(store.leaseCheck(fence));
-  await expectRemoteRejection(store.query(tripleQuery(), { asOf: 0 }));
 
-  assert.equal(observed.length, 14);
+  assert.equal(store.checkpoint, undefined);
+  assert.equal(observed.length, 13);
+  assert.deepEqual(
+    observed.map(request => request.operation),
+    [
+      'rpc/version', 'rpc/status', 'rpc/validate', 'rpc/occurrences',
+      'rpc/scan', 'rpc/query', 'rpc/assert', 'rpc/retract', 'rpc/batch',
+      'rpc/lease-acquire', 'rpc/lease-renew', 'rpc/lease-release',
+      'rpc/lease-check',
+    ],
+  );
+  assert.equal(new Set(observed.map(request => request.operation)).size, 13);
   assert.deepEqual(
     observed.map(request => request.entry),
     [
       'query', 'query', 'query', 'snapshot', 'query', 'query',
       'transact', 'transact', 'transact', 'transact', 'transact',
-      'transact', 'query', 'snapshot',
+      'transact', 'query',
     ],
   );
   for (const request of observed) {
@@ -168,6 +179,21 @@ test('runtime-neutral transport preserves the closed client surface', async () =
     assert(request.packet.length <= STORERPC_MAX_PACKET_BYTES);
     assert(request.signal instanceof AbortSignal);
   }
+
+  await expectRemoteRejection(storeTransportCheckpoint({
+    space: 'operator-space',
+    transport,
+  }));
+  const checkpoint = observed.at(-1);
+  assert.equal(observed.length, 14);
+  assert.equal(checkpoint.operation, 'rpc/checkpoint');
+  assert.equal(checkpoint.entry, 'transact');
+  assert.equal(checkpoint.space, 'operator-space');
+  assert.equal(Object.isFrozen(checkpoint), true);
+  assert(checkpoint.packet instanceof Uint8Array);
+  assert(checkpoint.packet.length <= STORERPC_MAX_PACKET_BYTES);
+  assert(checkpoint.signal instanceof AbortSignal);
+  assert.equal(new Set(observed.map(request => request.operation)).size, 14);
 });
 
 test('transport responses retain exact protocol identity checks', async () => {
