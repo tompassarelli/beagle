@@ -2601,6 +2601,8 @@
           (cond
             (qualified-reference=? e "js" "await")
               (str "await " (emit-expr*! (nth (get e "args") 0)))
+            (qualified-reference=? e "js" "throw")
+              (iife (str "throw " (emit-expr*! (nth (get e "args") 0)) ";") false)
             (qualified-reference=? e "js" "export")
               (str "export " (emit-form* (nth (get e "args") 0)))
             :else
@@ -3198,6 +3200,12 @@
   (expect! "js/typeof"
     (= (emit-expr! {"node" "js-typeof" "expr" {"node" "ref" "name" "obj"}})
       "typeof obj"))
+  (expect! "js/throw emits an expression-safe primitive"
+    (= (emit-expr!
+         {"node" "static-call" "qualifier" "js" "name" "throw"
+          "providerId" nil
+          "args" [{"node" "ref" "name" "problem"}]})
+      "(() => { throw problem; })()"))
   (expect! "atom: reset! notifies watches and returns the installed value"
     (= (emit-expr!
          {"node" "call" "fn" {"node" "ref" "name" "reset!"}

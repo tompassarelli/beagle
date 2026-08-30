@@ -3855,6 +3855,14 @@
       (err! "(fmt ...) is not supported — use str / format")
       (and (= head "js/typeof") (= (count rest-items) 1))
       (make-js-typeof (parse-expr* (nth rest-items 0)))
+      (= head "js/throw")
+      (if (= (count rest-items) 1)
+        {"node" "static-call"
+         "qualifier" "js"
+         "name" "throw"
+         "providerId" nil
+         "args" [(parse-expr* (nth rest-items 0))]}
+        (err! "js/throw expects exactly one value"))
       (= head "new")
       (if (>= (count rest-items) 1)
         (make-js-new
@@ -5737,6 +5745,12 @@
     (= (get (parse-expr* ["js/in?" "obj" ".field"]) "node") "js-in"))
   (expect! "js/typeof"
     (= (get (parse-expr* ["js/typeof" "obj"]) "node") "js-typeof"))
+  (expect! "js/throw"
+    (let [node (parse-expr* ["js/throw" "problem"])]
+      (and (= (get node "node") "static-call")
+        (= (get node "qualifier") "js")
+        (= (get node "name") "throw")
+        (= (count (get node "args")) 1))))
   (expect! "kw-access without default — false (ast-json parity)"
     (let [node (parse-expr* [":name" "m"])]
       (and (= (get node "node") "kw-access")
