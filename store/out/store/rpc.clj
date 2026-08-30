@@ -573,7 +573,7 @@
 
 (defn- ^Boolean rpc-magic-valid! [buffer]
   (loop [index 0
-   ^Boolean valid true]
+   valid true]
   (if (< index 8) (let [actual (rpc-read-u8! buffer "magic")
    expected (bit-and 255 (int (aget store-rpc-v2-magic index)))]
   (recur (+ index 1) (and valid (= actual expected)))) valid)))
@@ -704,6 +704,68 @@
 (defn rpc-record-fields! [value tag field-count]
   (if (and (t/triple? value) (and (= tag (t/triple-t1 value)) (= :rpc/record (t/triple-t3 value)))) (let [fields (rpc-list-values! (t/triple-t2 value))]
   (if (= field-count (count fields)) fields (rpc-fail! :rpc-invalid-record "RPC record contains the wrong number of fields"))) (rpc-fail! :rpc-invalid-record "RPC record tag or marker is invalid")))
+
+(defn- ^String require-rpc-nonempty-string! [value ^String label]
+  (require-rpc-string! value label)
+  (if (empty? value) (rpc-fail! :rpc-invalid-field (str label " must be nonempty")) value))
+
+(defn- require-rpc-version! [value ^String label]
+  (if (and (integer? value) (>= value -1)) value (rpc-fail! :rpc-integer-range (str label " must be at least -1"))))
+
+(defn- require-rpc-positive-u32! [value ^String label]
+  (if (and (integer? value) (and (> value 0) (rpc-u32? value))) value (rpc-fail! :rpc-integer-range (str label " must be a positive u32"))))
+
+(defn- require-rpc-instant! [value ^String label]
+  (if (t/instant? value) value (rpc-fail! :rpc-invalid-field (str label " must be an Instant"))))
+
+(defn- ^Boolean rpc-instant-before? [earlier later]
+  (let [earlier-seconds (t/instant-epoch-seconds earlier)
+   later-seconds (t/instant-epoch-seconds later)]
+  (or (< earlier-seconds later-seconds) (and (= earlier-seconds later-seconds) (< (t/instant-nanos earlier) (t/instant-nanos later))))))
+
+(defn rpc-subscription-request! [^String recipient ^String awaited-peer-or-run ^String transport ^String generation acknowledged-version ttl-ms]
+  (rpc-record! :rpc/subscription-request [(require-rpc-nonempty-string! recipient "subscription recipient") (require-rpc-nonempty-string! awaited-peer-or-run "subscription awaited peer/run") (require-rpc-nonempty-string! transport "subscription transport") (require-rpc-nonempty-string! generation "subscription generation") (require-rpc-version! acknowledged-version "subscription acknowledged-version") (require-rpc-positive-u32! ttl-ms "subscription ttl-ms")]))
+
+(defn rpc-subscription-request-fields! [value]
+  (rpc-record-fields! value :rpc/subscription-request 6))
+
+(defn rpc-subscription-identity! [^String recipient ^String awaited-peer-or-run ^String transport ^String generation observed-at expires-at]
+  (let [observed (require-rpc-instant! observed-at "subscription observed-at")
+   expires (require-rpc-instant! expires-at "subscription expires-at")]
+  (if (rpc-instant-before? observed expires) (rpc-record! :rpc/subscription-identity [(require-rpc-nonempty-string! recipient "subscription recipient") (require-rpc-nonempty-string! awaited-peer-or-run "subscription awaited peer/run") (require-rpc-nonempty-string! transport "subscription transport") (require-rpc-nonempty-string! generation "subscription generation") observed expires]) (rpc-fail! :rpc-invalid-field "subscription expires-at must be after observed-at"))))
+
+(defn rpc-subscription-identity-fields! [value]
+  (rpc-record-fields! value :rpc/subscription-identity 6))
+
+(defn rpc-subscription-open! [identity baseline-version acknowledged-version]
+  (rpc-subscription-identity-fields! identity)
+  (rpc-record! :rpc/subscription-open [identity (require-rpc-version! baseline-version "subscription baseline-version") (require-rpc-version! acknowledged-version "subscription acknowledged-version")]))
+
+(defn rpc-subscription-open-fields! [value]
+  (rpc-record-fields! value :rpc/subscription-open 3))
+
+(defn rpc-subscription-event! [identity acknowledged-version observed-version]
+  (rpc-subscription-identity-fields! identity)
+  (let [acknowledged (require-rpc-version! acknowledged-version "subscription acknowledged-version")
+   observed (require-rpc-version! observed-version "subscription observed-version")]
+  (if (> observed acknowledged) (rpc-record! :rpc/subscription-event [identity acknowledged observed]) (rpc-fail! :rpc-invalid-field "subscription event must advance acknowledged-version"))))
+
+(defn rpc-subscription-event-fields! [value]
+  (rpc-record-fields! value :rpc/subscription-event 3))
+
+(defn rpc-subscription-ack! [identity observed-version]
+  (rpc-subscription-identity-fields! identity)
+  (rpc-record! :rpc/subscription-ack [identity (require-rpc-version! observed-version "subscription observed-version")]))
+
+(defn rpc-subscription-ack-fields! [value]
+  (rpc-record-fields! value :rpc/subscription-ack 2))
+
+(defn rpc-subscription-acknowledged! [identity observed-version]
+  (rpc-subscription-identity-fields! identity)
+  (rpc-record! :rpc/subscription-acknowledged [identity (require-rpc-version! observed-version "subscription observed-version")]))
+
+(defn rpc-subscription-acknowledged-fields! [value]
+  (rpc-record-fields! value :rpc/subscription-acknowledged 2))
 
 (defn rpc-fence! [resource holder epoch]
   (require-rpc-term! resource "lease resource")

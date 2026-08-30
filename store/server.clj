@@ -6,6 +6,7 @@
 (ns server
   (:require [clojure.java.io :as io]
             [store.rpc :as rpc]
+            [store.rpc-subscription :as rpc-subscription]
             [store.datalog :as datalog]
             [store.kernel :as kernel]
             [store.query :as query]
@@ -41,6 +42,7 @@
 (def ^:private connection-drain-monitor (Object.))
 (def ^:private connection-thread-sequence (AtomicLong. 0))
 (def published-snapshot (atom nil))
+(def subscription-registry rpc-subscription/default-registry)
 (def server-generation (atom 0))
 (def commit-sequencer (atom nil))
 (def commit-sequencer-stats
@@ -291,6 +293,8 @@
 (defn- publish-snapshot! [db]
   (let [snapshot (snapshot-of db)]
     (reset! published-snapshot snapshot)
+    (rpc-subscription/publish-version! subscription-registry
+                                       (:version snapshot))
     snapshot))
 
 (defn- drop-query-caches! []
@@ -315,6 +319,7 @@
       (reset! (:cancelled cancellation) true)
       (when-let [control @(:query-control cancellation)]
         (datalog/cancel-query! control :server-shutdown)))
+    (rpc-subscription/reset-registry! subscription-registry)
     (stop-connection-admission!)
     (stop-commit-sequencer!)
     (reset! active-requests {})
@@ -2126,8 +2131,9 @@
               (rpc/store-rpc-encode-packet-v2!
                (rpc/store-rpc-response-packet
                 (t/storerpcpacketv2-request-id packet) fallback)))))]
-    (.write output bytes)
-    (.flush output)
+    (locking output
+      (.write output bytes)
+      (.flush output))
     (alength ^bytes bytes)))
 
 (defn- cancellation-state []
@@ -2291,7 +2297,46 @@
     (server-fail! :rpc-invalid-kind
                   "listener accepts request and cancel packets only" {})))
 
-(defn- start-connection-request! [^Socket socket packet output started]
+(defn- subscription-error-response [space operation error]
+  (let [data (ex-data error)
+        code (or (:store/code data) (:code data) (:type data)
+                 :rpc/internal-error)
+        code (if (keyword? code) code :rpc/internal-error)]
+    (rpc/rpc-response!
+     space operation (response-version) nil
+     (rpc/rpc-error! code (contains? retryable-error-codes code)
+                     (or (.getMessage error)
+                         "Store RPC subscription request failed") nil)
+     nil)))
+
+(defn- handle-subscription-request! [connection request-id request]
+  (let [space (t/rpcrequest-space request)
+        operation (t/rpcrequest-op request)]
+    (try
+      (when-not @active-store
+        (server-fail! :rpc/not-booted "database is not booted" {}))
+      (refresh-standby!)
+      (when-not (= space (database/database-space @active-store))
+        (server-fail! :rpc/space-mismatch
+                      "request SpaceId does not match the served space" {}))
+      (rpc-subscription/handle-rpc-request!
+       connection request-id request)
+      (catch Throwable error
+        (subscription-error-response space operation error)))))
+
+(defn- handle-connection-packet! [connection packet cancellation]
+  (let [request (t/storerpcpacketv2-request packet)]
+    (if (and request
+             (rpc-subscription/subscription-operation?
+              (t/rpcrequest-op request)))
+      (rpc/store-rpc-response-packet
+       (t/storerpcpacketv2-request-id packet)
+       (handle-subscription-request!
+        connection (t/storerpcpacketv2-request-id packet) request))
+      (handle-rpc-packet! packet cancellation))))
+
+(defn- start-connection-request!
+  [^Socket socket connection packet output started]
   (let [request-id (t/storerpcpacketv2-request-id packet)
         operation (t/rpcrequest-op (t/storerpcpacketv2-request packet))
         cancellation (cancellation-state)
@@ -2302,9 +2347,11 @@
      :task
      (future
        (try
-         (let [response (handle-rpc-packet! packet cancellation)
+         (let [response (handle-connection-packet!
+                         connection packet cancellation)
                response-bytes (write-rpc-packet! output response)
                [outcome code] (response-outcome response)]
+           (rpc-subscription/activate-open! connection operation)
            (record-request! operation (- (System/nanoTime) started)
                             outcome code response-bytes))
          (catch Throwable error
@@ -2346,11 +2393,23 @@
             (.setSoTimeout socket (int remaining-ms))
             true))))))
 
+(defn- continue-subscription-after-read-timeout!
+  [^Socket socket connection]
+  (when (rpc-subscription/continue-after-read-timeout?! connection)
+    (.setSoTimeout
+     socket
+     (rpc-subscription/read-timeout-ms!
+      connection connection-read-timeout-ms))
+    true))
+
 (defn serve-connection! [^Socket socket]
   (with-open [socket socket]
     (.setTcpNoDelay socket true)
     (let [input (.getInputStream socket)
           output (.getOutputStream socket)
+          subscription-connection
+          (rpc-subscription/new-connection
+           subscription-registry socket output)
           opened (System/nanoTime)
           pending-request (atom nil)]
       (try
@@ -2359,14 +2418,20 @@
                 (try
                   (read-rpc-packet! input)
                   (catch SocketTimeoutException error
-                    (if (continue-after-read-timeout! socket pending-request)
+                    (if (or (continue-after-read-timeout!
+                             socket pending-request)
+                            (continue-subscription-after-read-timeout!
+                             socket subscription-connection))
                       ::retry-read
                       (throw error))))
                 started (System/nanoTime)]
             (if (= ::retry-read packet)
               (recur)
               (do
-                (.setSoTimeout socket connection-read-timeout-ms)
+                (.setSoTimeout
+                 socket
+                 (rpc-subscription/read-timeout-ms!
+                  subscription-connection connection-read-timeout-ms))
                 (if-not packet
                   (do
                     (await-connection-request! @pending-request true)
@@ -2384,7 +2449,8 @@
                       (reset! pending-request nil)
                       (reset! pending-request
                               (start-connection-request!
-                               socket packet output started))
+                               socket subscription-connection
+                               packet output started))
                       (recur))))))))
         (catch Throwable error
           (let [request-failed?
@@ -2397,7 +2463,10 @@
               (let [code (admission-error-code error)]
                 (record-request! nil (- (System/nanoTime) opened)
                                  :error code nil))))
-          (throw error))))))
+          (throw error))
+        (finally
+          (rpc-subscription/close-connection!
+           subscription-connection))))))
 
 (defn- readiness-probe-host [^java.net.InetAddress address]
   (if (.isAnyLocalAddress address)
