@@ -124,9 +124,9 @@
   (if (and (integer? value) (and (> value 0) (<= value subscription-max-lease-ms))) value (subscription-fail! :rpc/invalid-subscription (str "subscription lease-ms must be in [1," subscription-max-lease-ms "]"))))
 
 (defn ^StoreCoordinate store-coordinate! [^String incarnation store-generation ^String space version]
-  (let [^String exact-incarnation (require-nonempty-string! incarnation "Store incarnation")
+  (let [exact-incarnation (require-nonempty-string! incarnation "Store incarnation")
    exact-generation (require-nonnegative-int! store-generation "Store generation")
-   ^String exact-space (require-nonempty-string! space "Store space")
+   exact-space (require-nonempty-string! space "Store space")
    exact-version (require-nonnegative-int! version "Store version")
    transaction (t/transaction-coordinate exact-space exact-version)]
   (->StoreCoordinate exact-incarnation exact-generation exact-space exact-version transaction)))
@@ -136,14 +136,14 @@
 
 (defn ^StoreCoordinate wire-store-coordinate! [value]
   (let [[incarnation-value generation-value transaction-value] (rpc/rpc-subscription-coordinate-fields! value)
-   ^String incarnation (require-nonempty-string! incarnation-value "Store incarnation")
+   incarnation (require-nonempty-string! incarnation-value "Store incarnation")
    store-generation (require-nonnegative-int! generation-value "Store generation")
    transaction (require-transaction-coordinate! transaction-value "subscription transaction")
    space-value (t/triple-t1 transaction)
    version-value (t/triple-t3 transaction)
-   ^String space (require-nonempty-string! space-value "Store space")
+   space (require-nonempty-string! space-value "Store space")
    version (require-nonnegative-int! version-value "Store version")
-   ^StoreCoordinate coordinate (store-coordinate! incarnation store-generation space version)]
+   coordinate (store-coordinate! incarnation store-generation space version)]
   (if (= transaction (storecoordinate-transaction coordinate)) coordinate (subscription-fail! :rpc/invalid-subscription "subscription transaction is not canonical"))))
 
 (defn cursor-wire! [^SubscriptionCursor cursor]
@@ -151,8 +151,8 @@
 
 (defn ^SubscriptionCursor wire-cursor! [value]
   (let [[generation-value coordinate-value] (rpc/rpc-subscription-cursor-fields! value)
-   ^String generation (require-nonempty-string! generation-value "subscription generation")
-   ^StoreCoordinate coordinate (wire-store-coordinate! coordinate-value)]
+   generation (require-nonempty-string! generation-value "subscription generation")
+   coordinate (wire-store-coordinate! coordinate-value)]
   (->SubscriptionCursor generation coordinate)))
 
 (defn ^Boolean subscription-operation? [operation]
@@ -220,7 +220,7 @@
 (defn- ^String mint-generation-under-lock! [^SubscriptionRegistry registry ^StoreCoordinate coordinate]
   (let [previous (deref (subscriptionregistry-next-generation registry))
    sequence (+ 1 previous)
-   ^String generation (str (storecoordinate-incarnation coordinate) ":" sequence)]
+   generation (str (storecoordinate-incarnation coordinate) ":" sequence)]
   (reset! (subscriptionregistry-next-generation registry) sequence)
   generation))
 
@@ -230,13 +230,13 @@
   nil)
 
 (defn- ^StoreCoordinate resume-coordinate-under-lock! [^SubscriptionRegistry registry resume ^StoreCoordinate current now-ns]
-  (if resume (let [^String generation (subscriptioncursor-generation resume)
-   ^StoreCoordinate requested (subscriptioncursor-coordinate resume)]
+  (if resume (let [generation (subscriptioncursor-generation resume)
+   requested (subscriptioncursor-coordinate resume)]
   (require-current-binding! requested current :rpc/subscription-incarnation-mismatch "subscription resume cursor belongs to another Store incarnation")
   (if (not (coordinate-at-or-before? requested current)) (do
   (subscription-fail! :rpc/subscription-cursor-ahead "subscription resume cursor is ahead of Store")))
   (let [bind__0 (get (deref (subscriptionregistry-generations registry)) generation)]
-  (if bind__0 (let [^SubscriptionGeneration prior bind__0]
+  (if bind__0 (let [prior bind__0]
   (do
   (if (generation-live? prior) (do
   (subscription-fail! :rpc/subscription-generation-active "subscription resume generation is still active")))
@@ -246,33 +246,33 @@
   (let [reason (deref (subscriptiongeneration-retirement prior))]
   (if (not (contains? #{:disconnected :adapter-failed} reason)) (do
   (subscription-fail! :rpc/subscription-resume-unavailable "subscription generation is not resumable"))))
-  (let [^StoreCoordinate acknowledged (deref (subscriptiongeneration-acknowledged prior))]
+  (let [acknowledged (deref (subscriptiongeneration-acknowledged prior))]
   (if (not (= acknowledged requested)) (do
   (subscription-fail! :rpc/subscription-resume-cursor-mismatch "subscription resume cursor is not the last ACK")))
   (swap! (subscriptionregistry-generations registry) dissoc generation)
   acknowledged))) (subscription-fail! :rpc/subscription-resume-unavailable "subscription resume generation is unavailable")))) current))
 
 (defn open-session! [^SubscriptionSession session resume lease-ms]
-  (let [^SubscriptionRegistry registry (subscriptionsession-registry session)
+  (let [registry (subscriptionsession-registry session)
    exact-lease-ms (require-lease-ms! lease-ms)]
   (locking (subscriptionregistry-lock registry) (if (session-generation session) (do
   (subscription-fail! :rpc/subscription-already-open "subscription session already owns a generation"))) (let [now-ns (registry-now-ns-under-lock! registry)
    _ (prune-expired-under-lock! registry now-ns)
-   ^StoreCoordinate current (deref (subscriptionregistry-coordinate registry))
-   ^StoreCoordinate acknowledged-coordinate (resume-coordinate-under-lock! registry resume current now-ns)
-   ^String generation (mint-generation-under-lock! registry current)
+   current (deref (subscriptionregistry-coordinate registry))
+   acknowledged-coordinate (resume-coordinate-under-lock! registry resume current now-ns)
+   generation (mint-generation-under-lock! registry current)
    lease-duration-ns (* (long exact-lease-ms) 1000000)
    lease-deadline-ns (+ now-ns lease-duration-ns)
-   ^SubscriptionGeneration state (->SubscriptionGeneration generation current (atom acknowledged-coordinate) (atom current) (atom acknowledged-coordinate) lease-deadline-ns (atom :opening) (atom nil) (ArrayBlockingQueue. subscription-handoff-capacity))
-   ^SubscriptionCursor acknowledged (->SubscriptionCursor generation acknowledged-coordinate)
-   ^SubscriptionCursor observed (->SubscriptionCursor generation current)]
+   state (->SubscriptionGeneration generation current (atom acknowledged-coordinate) (atom current) (atom acknowledged-coordinate) lease-deadline-ns (atom :opening) (atom nil) (ArrayBlockingQueue. subscription-handoff-capacity))
+   acknowledged (->SubscriptionCursor generation acknowledged-coordinate)
+   observed (->SubscriptionCursor generation current)]
   (swap! (subscriptionregistry-generations registry) assoc generation state)
   (reset! (subscriptionsession-generation session) state)
   (->SubscriptionOpened acknowledged observed lease-deadline-ns)))))
 
 (defn- ^Boolean offer-coordinate-under-lock! [^SubscriptionGeneration state ^StoreCoordinate observed]
-  (let [^StoreCoordinate offered (deref (subscriptiongeneration-offered state))]
-  (if (and (generation-live? state) (coordinate-before? offered observed)) (let [^String generation (subscriptiongeneration-generation state)
+  (let [offered (deref (subscriptiongeneration-offered state))]
+  (if (and (generation-live? state) (coordinate-before? offered observed)) (let [generation (subscriptiongeneration-generation state)
    handoff (subscriptiongeneration-handoff state)]
   (reset! (subscriptiongeneration-offered state) observed)
   (.poll ^ArrayBlockingQueue handoff)
@@ -283,7 +283,7 @@
 (defn publish-coordinate! [^SubscriptionRegistry registry ^StoreCoordinate coordinate]
   (locking (subscriptionregistry-lock registry) (let [now-ns (registry-now-ns-under-lock! registry)
    _ (prune-expired-under-lock! registry now-ns)
-   ^StoreCoordinate previous (deref (subscriptionregistry-coordinate registry))]
+   previous (deref (subscriptionregistry-coordinate registry))]
   (if (same-store-history? previous coordinate) (do
   (if (< (storecoordinate-version coordinate) (storecoordinate-version previous)) (do
   (subscription-fail! :rpc/subscription-version-regressed "published Store coordinate regressed")))
@@ -296,9 +296,9 @@
   0)))))
 
 (defn ^Boolean activate-open! [^SubscriptionSession session]
-  (let [^SubscriptionRegistry registry (subscriptionsession-registry session)]
+  (let [registry (subscriptionsession-registry session)]
   (locking (subscriptionregistry-lock registry) (let [bind__1 (session-generation session)]
-  (if bind__1 (let [^SubscriptionGeneration state bind__1]
+  (if bind__1 (let [state bind__1]
   (let [now-ns (registry-now-ns-under-lock! registry)]
   (if (expire-state-under-lock! registry state now-ns) false (if (and (state-current-under-lock? registry state) (= :opening (deref (subscriptiongeneration-phase state)))) (do
   (reset! (subscriptiongeneration-delivered state) (subscriptiongeneration-opened state))
@@ -310,28 +310,28 @@
   (if (and state (generation-live? state)) (let [value (.poll ^ArrayBlockingQueue (subscriptiongeneration-handoff state) (max 0 wait-ms) TimeUnit/MILLISECONDS)]
   (cond
   (nil? value) nil
-  (instance? StoreCoordinate value) (let [^SubscriptionRegistry registry (subscriptionsession-registry session)]
+  (instance? StoreCoordinate value) (let [registry (subscriptionsession-registry session)]
   (locking (subscriptionregistry-lock registry) (if (and (state-current-under-lock? registry state) (generation-live? state)) (->SubscriptionNotice (->SubscriptionCursor (subscriptiongeneration-generation state) (deref (subscriptiongeneration-acknowledged state))) (->SubscriptionCursor (subscriptiongeneration-generation state) value)) nil)))
   :else (subscription-fail! :rpc/subscription-invalid-state "subscription handoff contains an invalid value"))) nil)))
 
 (defn ^Boolean mark-delivered! [^SubscriptionSession session ^SubscriptionNotice notice]
-  (let [^SubscriptionRegistry registry (subscriptionsession-registry session)]
+  (let [registry (subscriptionsession-registry session)]
   (locking (subscriptionregistry-lock registry) (let [bind__2 (session-generation session)]
-  (if bind__2 (let [^SubscriptionGeneration state bind__2]
-  (let [^SubscriptionCursor observed (subscriptionnotice-observed notice)
-   ^StoreCoordinate observed-coordinate (subscriptioncursor-coordinate observed)
-   ^StoreCoordinate offered (deref (subscriptiongeneration-offered state))
-   ^StoreCoordinate delivered (deref (subscriptiongeneration-delivered state))]
+  (if bind__2 (let [state bind__2]
+  (let [observed (subscriptionnotice-observed notice)
+   observed-coordinate (subscriptioncursor-coordinate observed)
+   offered (deref (subscriptiongeneration-offered state))
+   delivered (deref (subscriptiongeneration-delivered state))]
   (if (and (state-current-under-lock? registry state) (= :active (deref (subscriptiongeneration-phase state))) (= (subscriptiongeneration-generation state) (subscriptioncursor-generation observed)) (coordinate-at-or-before? observed-coordinate offered)) (do
   (if (coordinate-before? delivered observed-coordinate) (do
   (reset! (subscriptiongeneration-delivered state) observed-coordinate)))
   true) false))) false)))))
 
 (defn acknowledge! [^SubscriptionSession session ^SubscriptionCursor cursor]
-  (let [^SubscriptionRegistry registry (subscriptionsession-registry session)]
+  (let [registry (subscriptionsession-registry session)]
   (locking (subscriptionregistry-lock registry) (let [now-ns (registry-now-ns-under-lock! registry)
-   ^SubscriptionGeneration state (let [bind__3 (session-generation session)]
-  (if bind__3 (let [^SubscriptionGeneration present bind__3]
+   state (let [bind__3 (session-generation session)]
+  (if bind__3 (let [present bind__3]
   present) (subscription-fail! :rpc/subscription-unavailable "subscription session has no generation")))]
   (if (expire-state-under-lock! registry state now-ns) (do
   (subscription-fail! :rpc/subscription-expired "subscription generation has expired")))
@@ -339,10 +339,10 @@
   (subscription-fail! :rpc/subscription-unavailable "subscription generation is not active")))
   (if (not (= (subscriptiongeneration-generation state) (subscriptioncursor-generation cursor))) (do
   (subscription-fail! :rpc/subscription-generation-mismatch "ACK names another subscription generation")))
-  (let [^StoreCoordinate coordinate (subscriptioncursor-coordinate cursor)
-   ^StoreCoordinate current (deref (subscriptionregistry-coordinate registry))
-   ^StoreCoordinate acknowledged (deref (subscriptiongeneration-acknowledged state))
-   ^StoreCoordinate delivered (deref (subscriptiongeneration-delivered state))]
+  (let [coordinate (subscriptioncursor-coordinate cursor)
+   current (deref (subscriptionregistry-coordinate registry))
+   acknowledged (deref (subscriptiongeneration-acknowledged state))
+   delivered (deref (subscriptiongeneration-delivered state))]
   (require-current-binding! coordinate current :rpc/subscription-incarnation-mismatch "ACK belongs to another Store incarnation")
   (if (coordinate-before? coordinate acknowledged) (do
   (subscription-fail! :rpc/subscription-stale-ack "ACK regresses the subscription cursor")))
@@ -352,45 +352,45 @@
   (->SubscriptionAcknowledged (->SubscriptionCursor (subscriptiongeneration-generation state) coordinate) current))))))
 
 (defn retire-session! [^SubscriptionSession session reason]
-  (let [^SubscriptionRegistry registry (subscriptionsession-registry session)]
+  (let [registry (subscriptionsession-registry session)]
   (locking (subscriptionregistry-lock registry) (let [bind__4 (session-generation session)]
-  (if bind__4 (let [^SubscriptionGeneration state bind__4]
+  (if bind__4 (let [state bind__4]
   (do
   (if (generation-live? state) (do
   (retire-under-lock! registry state reason (contains? #{:disconnected :adapter-failed} reason)))))))))
   nil))
 
 (defn ^Boolean expire-if-due! [^SubscriptionSession session]
-  (let [^SubscriptionRegistry registry (subscriptionsession-registry session)]
+  (let [registry (subscriptionsession-registry session)]
   (locking (subscriptionregistry-lock registry) (let [bind__5 (session-generation session)]
-  (if bind__5 (let [^SubscriptionGeneration state bind__5]
+  (if bind__5 (let [state bind__5]
   (let [now-ns (registry-now-ns-under-lock! registry)]
   (expire-state-under-lock! registry state now-ns))) false)))))
 
 (defn lease-remaining-ns! [^SubscriptionSession session]
-  (let [^SubscriptionRegistry registry (subscriptionsession-registry session)]
+  (let [registry (subscriptionsession-registry session)]
   (locking (subscriptionregistry-lock registry) (let [bind__6 (session-generation session)]
-  (if bind__6 (let [^SubscriptionGeneration state bind__6]
+  (if bind__6 (let [state bind__6]
   (max 0 (- (subscriptiongeneration-lease-deadline-ns state) (registry-now-ns-under-lock! registry)))) 0)))))
 
 (defn ^Boolean session-active? [^SubscriptionSession session]
   (let [bind__7 (session-generation session)]
-  (if bind__7 (let [^SubscriptionGeneration state bind__7]
+  (if bind__7 (let [state bind__7]
   (= :active (deref (subscriptiongeneration-phase state)))) false)))
 
 (defn ^Boolean session-opening? [^SubscriptionSession session]
   (let [bind__8 (session-generation session)]
-  (if bind__8 (let [^SubscriptionGeneration state bind__8]
+  (if bind__8 (let [state bind__8]
   (= :opening (deref (subscriptiongeneration-phase state)))) false)))
 
 (defn ^Boolean session-terminal? [^SubscriptionSession session]
   (let [bind__9 (session-generation session)]
-  (if bind__9 (let [^SubscriptionGeneration state bind__9]
+  (if bind__9 (let [state bind__9]
   (= :retired (deref (subscriptiongeneration-phase state)))) true)))
 
 (defn session-retirement [^SubscriptionSession session]
   (let [bind__10 (session-generation session)]
-  (if bind__10 (let [^SubscriptionGeneration state bind__10]
+  (if bind__10 (let [state bind__10]
   (deref (subscriptiongeneration-retirement state))) nil)))
 
 (defn ^Boolean retirement-closes-adapter? [^SubscriptionSession session]
@@ -438,9 +438,9 @@
   (rpc/rpc-subscription-event! (cursor-wire! (subscriptionnotice-acknowledged notice)) (cursor-wire! (subscriptionnotice-observed notice))))
 
 (defn handle-rpc-request! [^SubscriptionSession session request]
-  (let [^String space (t/rpcrequest-space request)
+  (let [space (t/rpcrequest-space request)
    operation (t/rpcrequest-op request)
-   ^StoreCoordinate current (current-coordinate (subscriptionsession-registry session))]
+   current (current-coordinate (subscriptionsession-registry session))]
   (if (not (= space (storecoordinate-space current))) (do
   (subscription-fail! :rpc/space-mismatch "subscription request belongs to another Store space")))
   (if (t/rpcrequest-expected-version request) (do
@@ -451,5 +451,5 @@
   (subscription-fail! :rpc/unexpected-timeout "subscription requests use the generation lease")))
   (let [command (decode-command! operation (t/rpc-request-payload-value request))
    outcome (handle-command! session command)
-   ^StoreCoordinate observed (outcome-observed outcome)]
+   observed (outcome-observed outcome)]
   (rpc/rpc-response! space operation (storecoordinate-version observed) nil nil (outcome-payload! outcome)))))

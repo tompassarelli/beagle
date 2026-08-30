@@ -38,9 +38,7 @@
 (defn- strict-utf8-bytes! [^String value maximum ^String label]
   (let [expected (utf8-length! value maximum label)]
   (try
-  (let [encoder (doto (.newEncoder StandardCharsets/UTF_8)
-  (.onMalformedInput CodingErrorAction/REPORT)
-  (.onUnmappableCharacter CodingErrorAction/REPORT))
+  (let [encoder (doto (.newEncoder StandardCharsets/UTF_8) (.onMalformedInput CodingErrorAction/REPORT) (.onUnmappableCharacter CodingErrorAction/REPORT))
    buffer (.encode encoder (CharBuffer/wrap value))
    bytes (byte-array (.remaining buffer))]
   (.get buffer bytes)
@@ -50,9 +48,7 @@
 
 (defn- ^String strict-utf8-string! [bytes ^String label]
   (try
-  (let [decoder (doto (.newDecoder StandardCharsets/UTF_8)
-  (.onMalformedInput CodingErrorAction/REPORT)
-  (.onUnmappableCharacter CodingErrorAction/REPORT))]
+  (let [decoder (doto (.newDecoder StandardCharsets/UTF_8) (.onMalformedInput CodingErrorAction/REPORT) (.onUnmappableCharacter CodingErrorAction/REPORT))]
   (str (.decode decoder (ByteBuffer/wrap bytes))))
   (catch CharacterCodingException _
     (codec-fail! :term-codec-invalid-utf8 (str label " is not valid UTF-8")))))
@@ -449,7 +445,7 @@
   (rpc-write-present! out payload)
   (if (nil? payload) nil (rpc-write-term! out payload))))
 
-(defn ^"[B" store-rpc-encode-packet-v2! [packet]
+(defn store-rpc-encode-packet-v2! [packet]
   (let [body-size (store-rpc-body-bytes! packet)
    body (ByteArrayOutputStream. body-size)
    kind (t/storerpcpacketv2-kind packet)
@@ -459,7 +455,7 @@
   (and (= kind :request) request) (write-rpc-request! body request)
   (and (or (= kind :response) (= kind :event)) response) (write-rpc-response! body response)
   :else nil)
-  (if (= body-size (.size body)) (let [^ByteArrayOutputStream out (ByteArrayOutputStream. (+ rpc-v2-header-bytes body-size))]
+  (if (= body-size (.size body)) (let [out (ByteArrayOutputStream. (+ rpc-v2-header-bytes body-size))]
   (.write out store-rpc-v2-magic)
   (rpc-write-u16-le! out rpc-v2-major)
   (rpc-write-u16-le! out rpc-v2-minor)
@@ -598,8 +594,7 @@
   (let [byte-count (alength bytes)]
   (if (> byte-count store-rpc-v2-max-packet-bytes) (rpc-fail! :rpc-packet-too-large "Store RPC packet exceeds the configured byte limit") nil)
   (if (< byte-count rpc-v2-header-bytes) (rpc-fail! :rpc-truncated "Store RPC packet ended inside its header") nil)
-  (let [buffer (doto (ByteBuffer/wrap bytes)
-  (.order ByteOrder/LITTLE_ENDIAN))]
+  (let [buffer (doto (ByteBuffer/wrap bytes) (.order ByteOrder/LITTLE_ENDIAN))]
   (if (rpc-magic-valid! buffer) nil (rpc-fail! :rpc-invalid-magic "Store RPC magic does not match"))
   (let [major (rpc-read-u16-le! buffer "major version")
    minor (rpc-read-u16-le! buffer "minor version")

@@ -39,7 +39,7 @@
 (defn monotonic-now-ns! []
   (System/nanoTime))
 
-(defn ^SubscriptionJvmConnection new-connection [registry ^Socket socket ^OutputStream output]
+(defn ^SubscriptionJvmConnection new-connection [registry socket output]
   (->SubscriptionJvmConnection (subscription/new-session registry) socket output (atom nil) (atom nil) (atom nil)))
 
 (defn connection-session [^SubscriptionJvmConnection connection]
@@ -57,8 +57,8 @@
   (if bind__0 (let [request-id bind__0]
   request-id) (adapter-fail! :rpc/subscription-invalid-state "subscription event has no OPEN request id"))))
 
-(defn- write-bytes-under-lock! [^SubscriptionJvmConnection connection ^bytes bytes]
-  (let [^OutputStream output (subscriptionjvmconnection-output connection)]
+(defn- write-bytes-under-lock! [^SubscriptionJvmConnection connection bytes]
+  (let [output (subscriptionjvmconnection-output connection)]
   (.write output bytes)
   (.flush output)
   (alength bytes)))
@@ -68,14 +68,14 @@
    coordinate (subscription/subscriptioncursor-coordinate observed)
    response (rpc/rpc-response! (subscription/storecoordinate-space coordinate) subscription/subscription-event-operation (subscription/storecoordinate-version coordinate) nil nil (subscription/notice-payload! notice))
    packet (rpc/store-rpc-event-packet (open-request-id! connection) response)
-   ^bytes bytes (rpc/store-rpc-encode-packet-v2! packet)]
+   bytes (rpc/store-rpc-encode-packet-v2! packet)]
   (write-bytes-under-lock! connection bytes)
   (subscription/mark-delivered! (subscriptionjvmconnection-session connection) notice)
   nil))
 
 (defn- writer-loop! [^SubscriptionJvmConnection connection]
   (let [session (subscriptionjvmconnection-session connection)
-   ^OutputStream output (subscriptionjvmconnection-output connection)]
+   output (subscriptionjvmconnection-output connection)]
   (try
   (loop []
   (if (subscription/session-active? session) (do
@@ -127,7 +127,7 @@
 
 (defn- ^SubscriptionWriteResult write-response-under-lock! [^SubscriptionJvmConnection connection request-id operation response]
   (let [packet (rpc/store-rpc-response-packet request-id response)
-   ^bytes bytes (rpc/store-rpc-encode-packet-v2! packet)
+   bytes (rpc/store-rpc-encode-packet-v2! packet)
    opening (successful-open? connection operation response)]
   (if opening (do
   (reset! (subscriptionjvmconnection-open-request-id connection) request-id)
@@ -143,8 +143,8 @@
     (throw error)))))
 
 (defn ^SubscriptionWriteResult handle-request-and-write! [^SubscriptionJvmConnection connection request-id request error-response]
-  (let [^OutputStream output (subscriptionjvmconnection-output connection)
-   ^String space (t/rpcrequest-space request)
+  (let [output (subscriptionjvmconnection-output connection)
+   space (t/rpcrequest-space request)
    operation (t/rpcrequest-op request)]
   (locking output (let [response (try
   (subscription/handle-rpc-request! (subscriptionjvmconnection-session connection) request)

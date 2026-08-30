@@ -44,10 +44,10 @@
    lease-deadline-ns Int
    phase (Atom SubscriptionPhase)
    retirement (Atom SubscriptionRetirement?)
-   handoff Any])
+   handoff ArrayBlockingQueue])
 
 (defrecord SubscriptionRegistry
-  [lock Any
+  [lock Object
    coordinate (Atom StoreCoordinate)
    generations (Atom (Map String SubscriptionGeneration))
    next-generation (Atom Int)
@@ -372,7 +372,7 @@
     (if (and (generation-live? state)
              (coordinate-before? offered observed))
       (let [generation String (subscriptiongeneration-generation state)
-            handoff Any (subscriptiongeneration-handoff state)]
+            handoff ArrayBlockingQueue (subscriptiongeneration-handoff state)]
         (reset! (subscriptiongeneration-offered state) observed)
         (.poll ^ArrayBlockingQueue handoff)
         (when-not (.offer ^ArrayBlockingQueue handoff observed)
