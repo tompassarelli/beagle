@@ -46,7 +46,7 @@
 
 ;; --- #(...) anonymous fn shorthand ------------------------------------------
 ;;
-;; Clojure reader sugar: #(inc %) → (fn [%1] (inc %1)). Placeholders:
+;; Clojure reader sugar: #(inc %) → (fn [%1 Any] Any (inc %1)). Placeholders:
 ;;   %, %1..%N  — positional params (% is an alias for %1)
 ;;   %&         — rest param
 ;; The rewrite happens at read time (like Clojure); the resulting (fn ...)
@@ -73,10 +73,16 @@
   (define body (walk items))
   (define params
     (append
-     (for/list ([i (in-range 1 (+ max-idx 1))])
-       (string->symbol (string-append "%" (number->string i))))
-     (if rest-used? (list '& '%&) '())))
-  (list 'fn (cons '#%brackets params) body))
+     (apply
+      append
+      (for/list ([i (in-range 1 (+ max-idx 1))])
+        (list (string->symbol (string-append "%" (number->string i)))
+              'Any)))
+     (if rest-used? (list '& '%& 'Any) '())))
+  ;; Reader shorthand is the one deliberate dynamic function boundary. Emit
+  ;; its Any parameter and return annotations directly so the ordinary strict
+  ;; fn parser remains unambiguous and definition inference stays monomorphic.
+  (list 'fn (cons '#%brackets params) 'Any body))
 
 ;; Reader conditionals (#? and #?@) — Clojure-style read-time dispatch.
 ;;

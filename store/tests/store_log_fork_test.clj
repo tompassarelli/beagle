@@ -44,10 +44,10 @@
                   (.digest (java.security.MessageDigest/getInstance "SHA-256")
                            content))))
 
-(defn- image [db] (store/dump-term-store (database/database-store db)))
+(defn- image [db] (store/dump-term-store (database/database-store! db)))
 
 (defn- live? [db proposition]
-  (boolean (some #{proposition} (database/live-propositions db))))
+  (boolean (some #{proposition} (database/live-propositions! db))))
 
 (def space "store-log-fork-space")
 
@@ -93,8 +93,8 @@
 (check! "fork deletes the stale parent image"
         (not (.exists (java.io.File. stale-image))))
 
-(def parent-ref (database/read-branch-ref log branch/default-branch))
-(def child-ref (database/read-branch-ref log "lane"))
+(def parent-ref (database/read-branch-ref! log branch/default-branch))
+(def child-ref (database/read-branch-ref! log "lane"))
 
 (check! "parent and child refs name the identical sealed chain"
         (and (= parent-ref child-ref)
@@ -191,7 +191,7 @@
              (not (live? grand-db (t/triple "parent" :wrote 1)))))
 (check! "the grandchild's base segment stays the only non-continuation member"
         (let [chain (branch/refdocument-segments
-                     (database/read-branch-ref log "lane-2"))]
+                     (database/read-branch-ref! log "lane-2"))]
           (= [false true]
              (mapv (fn [record]
                      (boolean
@@ -211,7 +211,7 @@
 (check! "an empty store's sealed segment records no start sequence"
         (zero? (branch/segmentrecord-start-sequence
                 (first (branch/refdocument-segments
-                        (database/read-branch-ref empty-log "lane"))))))
+                        (database/read-branch-ref! empty-log "lane"))))))
 (def empty-child (database/open-branch! empty-log "lane" space))
 (database/assert! empty-child (t/triple "first" :after "fork") {})
 (check! "a branch of an empty store begins at sequence one"
@@ -272,14 +272,14 @@
            [(count (:chain second-fork))
             (mapv branch/segmentrecord-end-sequence
                   (branch/refdocument-segments
-                   (database/read-branch-ref resumed-log "lane-2")))]))
+                   (database/read-branch-ref! resumed-log "lane-2")))]))
 (check! "a further fork with no write between refuses rather than seal twice"
         (= :segment-already-sealed
            (error-code #(database/fork-store! resumed-log "lane" "lane-3"))))
 (check! "the refused fork leaves the branch openable and unnamed"
         (and (live? (database/open-branch! resumed-log "lane" space)
                     (t/triple "seed" :n 2))
-             (nil? (database/read-branch-ref resumed-log "lane-3"))))
+             (nil? (database/read-branch-ref! resumed-log "lane-3"))))
 
 ;; ---------------------------------------------------------- writer authority
 (def locked-log (store-path "locked.storelog"))
@@ -316,7 +316,7 @@
         (let [record
               (first
                (branch/refdocument-segments
-                (database/read-branch-ref tampered-log "lane")))
+                (database/read-branch-ref! tampered-log "lane")))
               parsed (database/read-triple-log! replacement-log)]
           (and (= (branch/segmentrecord-byte-count record)
                   (alength replacement-bytes))

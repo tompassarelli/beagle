@@ -39,7 +39,7 @@
                 java.nio.file.StandardOpenOption/WRITE
                 java.nio.file.StandardOpenOption/TRUNCATE_EXISTING])))
 
-(defn- image [db] (store/dump-term-store (database/database-store db)))
+(defn- image [db] (store/dump-term-store (database/database-store! db)))
 
 (def space "store-log-chain-boot-space")
 
@@ -76,7 +76,7 @@
 (doseq [step (drop 3 script)] (step lane))
 
 (def lane-tail (branch/branch-tail-path! chained-log "lane"))
-(def lane-ref (database/read-branch-ref chained-log "lane"))
+(def lane-ref (database/read-branch-ref! chained-log "lane"))
 (def sealed-path
   (branch/segment-path
    chained-log
@@ -122,7 +122,7 @@
    log
    (branch/segmentrecord-sha256
     (first (branch/refdocument-segments
-            (database/read-branch-ref log "lane"))))))
+            (database/read-branch-ref! log "lane"))))))
 
 (def missing-log (forked-store! "missing.storelog"))
 (java.nio.file.Files/delete (.toPath (java.io.File. (sealed-of missing-log))))
@@ -167,7 +167,7 @@
   (database/assert! db (t/triple "after" :second-fork 1) {}))
 (database/fork-store! hole-log "lane-2" "lane-3")
 (def full-chain
-  (branch/refdocument-segments (database/read-branch-ref hole-log "lane-3")))
+  (branch/refdocument-segments (database/read-branch-ref! hole-log "lane-3")))
 (check! "the three-fork fixture really has three sealed segments"
         (= 3 (count full-chain)))
 (java.nio.file.Files/write
@@ -189,7 +189,7 @@
 (let [db (database/open-branch! gap-log "lane-2" space)]
   (database/assert! db (t/triple "after" :second-fork 1) {}))
 (def gap-chain
-  (branch/refdocument-segments (database/read-branch-ref gap-log "lane-2")))
+  (branch/refdocument-segments (database/read-branch-ref! gap-log "lane-2")))
 (java.nio.file.Files/write
  (.toPath (java.io.File. (branch/ref-path! gap-log "lane-2")))
  (.getBytes (branch/print-ref

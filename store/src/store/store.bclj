@@ -30,6 +30,11 @@
 (def active-position-tail-bytes Int 16)
 (def active-cell-tail-bytes Int 32)
 
+;; A logged cohort may cross the boxed-tail bound only while its records are
+;; private. The database binds this marker and publishes the final root after
+;; the cohort's one durability barrier.
+(def ^:dynamic *deferred-packed-rollover* Any nil)
+
 (defrecord TermStoreLoadResult
   [ok Bool
    code Keyword?
@@ -212,23 +217,38 @@
   [store t/TermStore
    rows Int
    bytes Int] Nil
-  (if (or (nil? (store-prefix store))
-          (and (<= (+ (tail-row-count store) rows)
-                   (t/termstore-tail-row-limit store))
-               (<= (+ (deref (t/termstore-tail-bytes store)) bytes)
-                   (t/termstore-tail-byte-limit store))))
-    nil
-    (throw
-     (ex-info
-      "store: boxed mutation tail requires a packed checkpoint rollover"
-      {:type :packed-tail-rollover-required
-       :store/code :packed-tail-rollover-required
-       :tail-rows (tail-row-count store)
-       :tail-bytes (deref (t/termstore-tail-bytes store))
-       :requested-rows rows
-       :requested-bytes bytes
-       :row-limit (t/termstore-tail-row-limit store)
-       :byte-limit (t/termstore-tail-byte-limit store)}))))
+  (let [row-limit Int (t/termstore-tail-row-limit store)
+        byte-limit Int (t/termstore-tail-byte-limit store)
+        tail-rows Int (tail-row-count store)
+        tail-bytes Int (deref (t/termstore-tail-bytes store))
+        demand-data Any {:tail-rows tail-rows
+                         :tail-bytes tail-bytes
+                         :requested-rows rows
+                         :requested-bytes bytes
+                         :row-limit row-limit
+                         :byte-limit byte-limit}
+        fits-current? Bool (and (<= (+ tail-rows rows) row-limit)
+                                (<= (+ tail-bytes bytes) byte-limit))
+        fits-empty? Bool (and (<= (+ tail-base-rows rows) row-limit)
+                              (<= (+ tail-base-bytes bytes) byte-limit))]
+    (cond
+      [(and *deferred-packed-rollover* (not fits-empty?))
+       (throw
+        (ex-info
+         "store: one transaction exceeds the empty boxed-tail bound"
+         (assoc demand-data
+                :type :packed-tail-capacity-exceeded
+                :store/code :packed-tail-capacity-exceeded)))]
+      [(or (nil? (store-prefix store)) fits-current?) nil]
+      [*deferred-packed-rollover*
+       (do (reset! *deferred-packed-rollover* true) nil)]
+      [:else
+       (throw
+        (ex-info
+         "store: boxed mutation tail requires a packed checkpoint rollover"
+         (assoc demand-data
+                :type :packed-tail-rollover-required
+                :store/code :packed-tail-rollover-required)))])))
 
 (defn- account-tail-bytes! [store t/TermStore amount Int] Nil
   (swap! (t/termstore-tail-bytes store) + amount)

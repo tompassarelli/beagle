@@ -34,6 +34,10 @@
    'realized?  (fn-of '(Any) 'Bool)
    'deliver    (fn-of '(Any Any) 'Any)
    'promise    (fn-of '() 'Any)
+   ;; Clojure's locking macro evaluates a monitor followed by one or more body
+   ;; forms and returns the final body value. The catalog checks every form;
+   ;; the result stays Any because variadic last-value typing is not expressible.
+   'locking    (fn-of '(Any Any) 'Any #:rest 'Any)
    ;; --- type coercion: CLJ-specific -----------------------------------------
    'float      (fn-of '(Any) 'Float)
    'short      (fn-of '(Any) 'Int)
@@ -131,7 +135,7 @@
    ;; --- clojure.java.io ----------------------------------------------------
    (q 'clojure.java.io 'file)          (fn-of '(String) 'Any #:rest 'String)
    (q 'clojure.java.io 'reader)        (fn-of '(Any) 'Any)
-   (q 'clojure.java.io 'writer)        (fn-of '(Any) 'Any)
+   (q 'clojure.java.io 'writer)        (fn-of '(Any) 'Any #:rest 'Any)
    (q 'clojure.java.io 'input-stream)  (fn-of '(Any) 'Any)
    (q 'clojure.java.io 'output-stream) (fn-of '(Any) 'Any)
    (q 'clojure.java.io 'resource)      (fn-of '(String) 'Any)
@@ -350,6 +354,7 @@
    (q 'System 'getenv)            (type-fn (list (p 'String)) #f
                                       (type-union (list (p 'String) (p 'Nil))))
    (q 'System 'currentTimeMillis) (fn-of '() 'Int)
+   (q 'System 'nanoTime)          (fn-of '() 'Int)
    (q 'System 'exit)              (fn-of '(Int) 'Nil)
    ;; --- Java interop: dynamic vars ----------------------------------------
    '*command-line-args* (type-app 'Vec (list (p 'String)))

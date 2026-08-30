@@ -90,7 +90,7 @@
 
 (defn- all-facts [database]
   (reduce (fn [entries proposition] (let [entry (proposition-entry proposition)]
-  (if (some? entry) (conj entries entry) entries))) [] (database/live-propositions database)))
+  (if (some? entry) (conj entries entry) entries))) [] (database/live-propositions! database)))
 
 (defn- facts-for-key [entries ^String stage ^String result-key]
   (filterv (fn [^CompileFact entry] (and (= stage (compilefact-stage entry)) (= result-key (compilefact-result-key entry)))) entries))

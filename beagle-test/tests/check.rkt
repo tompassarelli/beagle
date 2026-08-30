@@ -1898,6 +1898,33 @@ BEAGLE
   '(def t Int (System/currentTimeMillis))
   '(def u Any (SomeUnknownClass/method 1)))
 
+(check-ok "JVM monotonic clock retains Int through arithmetic"
+  '(define-target clj)
+  '(def deadline Int (+ (System/nanoTime) 1)))
+
+(check-ok "Clojure locking checks its monitor and body forms"
+  '(define-target clj)
+  '(def monitor Any (atom nil))
+  '(def result Any (locking monitor (+ 1 2))))
+
+(check-ok "mapv accepts a typed list and preserves its result vector"
+  '(def indexes (Vec Int) (mapv inc (range 3))))
+
+(check-ok "into accepts Clojure's transducer arity"
+  `(def indexed Any (into ,(st) (map inc) (range 3))))
+
+(check-ok "ex-info accepts an explicit cause"
+  '(def cause Any (Exception. "cause"))
+  `(def wrapped Any (ex-info "wrapped" ,(mt) cause)))
+
+(check-ok "keep accepts Clojure's transducer arity"
+  `(def non-nil Any
+     (into ,(br) (keep identity) ,(br 1 'nil 2))))
+
+(check-ok "clojure.java.io writer accepts option pairs"
+  `(ns test.io-writer (:require ,(br 'clojure.java.io ':as 'io)))
+  '(def sink Any (io/writer "/tmp/beagle-writer" :append true)))
+
 (check-ok "qualified: nix target is untouched by the pass"
   '(define-target nix)
   '(def x Any (lib/mkDefault 1)))
@@ -1908,6 +1935,9 @@ BEAGLE
 
 (check-ok "numeric: all-Int chain keeps Int"
   '(def a Int (+ 1 (* 2 3))))
+
+(check-ok "numeric: chained comparison keeps Clojure variadic arity"
+  '(def ordered Bool (<= 0 1 2)))
 
 (check-ok "numeric: mixed Int/Float produces Float"
   '(def b Float (+ 1 2.5)))
@@ -2111,6 +2141,24 @@ BEAGLE
   '(defn channel-size [(file RandomAccessFile)] Int
      (.size (.getChannel file))))
 
+(check-ok "RandomAccessFile readFully accepts an exact byte-array slice"
+  `(ns test.jvm-read-fully (:import ,(br 'java.io 'RandomAccessFile)))
+  '(defn read-exact [(file RandomAccessFile) (bytes (Arr I8))
+                     (offset Int) (length Int)] Nil
+     (.readFully file bytes offset length)))
+
+(check-ok "java.io.File path and canonical accessors carry precise types"
+  `(ns test.jvm-file (:import ,(br 'java.io 'File)))
+  '(defn canonical-child [(parent File) (name String)] String
+     (let [child File (File. parent name)
+           canonical File (.getCanonicalFile child)
+           ancestor File? (.getParentFile canonical)]
+       (if (and (.isAbsolute canonical)
+                (.isFile canonical)
+                (some? ancestor))
+         (.getCanonicalPath canonical)
+         (.getPath canonical)))))
+
 (check-ok "ByteBuffer and mapped FileChannel APIs carry precise receiver types"
   `(ns test.jvm-buffer (:import ,(br 'java.nio 'ByteBuffer 'MappedByteBuffer)
                                 ,(br 'java.nio.channels 'FileChannel)))
@@ -2120,6 +2168,13 @@ BEAGLE
      (let [mapped MappedByteBuffer (.map channel mode 0 4096)
            view ByteBuffer (.duplicate mapped)]
        (.getLong view 0))))
+
+(check-ok "ByteBuffer and MappedByteBuffer getShort support relative and indexed reads"
+  `(ns test.jvm-get-short (:import ,(br 'java.nio 'ByteBuffer 'MappedByteBuffer)))
+  '(defn read-shorts [(buffer ByteBuffer)] Int
+     (+ (.getShort buffer) (.getShort buffer 0)))
+  '(defn read-mapped-shorts [(buffer MappedByteBuffer)] Int
+     (+ (.getShort buffer) (.getShort buffer 0))))
 
 (check-err/rx "known ByteBuffer rejects a method from another JVM receiver"
   #rx"not a method"

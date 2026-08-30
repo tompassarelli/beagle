@@ -26,7 +26,7 @@
             #(and (t/triple? %)
                   (= id (t/triple-t1 %))
                   (= :store/fact-envelope-v1 (t/triple-t2 %)))
-            (database/live-propositions db)))
+            (database/live-propositions! db)))
           stored-hex (when proposition (t/triple-t3 proposition))
           decoded
           (when stored-hex

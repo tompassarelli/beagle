@@ -294,7 +294,7 @@
         (zero? (:exit build)))
 (check! "flat hosted STORELOG still accepts valid Deflate records"
         (= #{(t/triple (apply str (repeat 256 "compressible")) :value 1)}
-           (set (database/live-propositions
+           (set (database/live-propositions!
                  (database/open-database! (:path deflated-base) space)))))
 (let [path (.getPath (io/file scratch "deflated-torn-repair.storelog"))
       source ^bytes (:bytes deflated-base)

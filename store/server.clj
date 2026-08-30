@@ -281,7 +281,7 @@
 ;; TermStore is an identity the writer keeps mutating, so the read view is a
 ;; fork of the current state rather than the live store itself.
 (defn- snapshot-of [db]
-  (let [root (term-store/fork-state @(database/database-store db))]
+  (let [root (term-store/fork-state @(database/database-store! db))]
     {:generation @server-generation
      :space (database/database-space db)
      :version (dec (deref (t/termstore-next-sequence root)))
@@ -378,7 +378,7 @@
   (if (contains? native-rpc-operations operation) :supported :unsupported))
 
 (defn- current-version [db]
-  (t/triple-t3 (database/current-transaction db)))
+  (t/triple-t3 (database/current-transaction! db)))
 
 (defn- require-term! [value label]
   (when-not (t/term? value)
@@ -455,7 +455,7 @@
      (require-int! epoch "fence epoch")]))
 
 (defn- current-fence [db resource]
-  (when-let [lease (database/current-lease db resource)]
+  (when-let [lease (database/current-lease! db resource)]
     [(:holder lease) (occurrence-epoch (:occurrence lease))
      (:occurrence lease) (:expires-ms lease)]))
 
@@ -528,14 +528,14 @@
              {:action :assert :proposition proposition})
            actions)
      (mapv (fn [index] [index true]) (range (count actions)))]
-    (prepare-actions! (database/live-propositions db) actions)))
+    (prepare-actions! (database/live-propositions! db) actions)))
 
 (defn- predicted-mutation-occurrences [db operations]
   (when (seq operations)
     (let [transaction
           (t/transaction-coordinate
            (database/database-space db)
-           (term-store/next-sequence (database/database-store db)))]
+           (term-store/next-sequence (database/database-store! db)))]
       (mapv #(t/occurrence-coordinate transaction %) (range (count operations))))))
 
 (defn- mutation-result [decisions occurrences]
@@ -573,8 +573,8 @@
           occurrences (predicted-mutation-occurrences db operations)
           served-version
           (if (seq operations)
-            (term-store/next-sequence (database/database-store db))
-            (term-store/current-sequence (database/database-store db)))
+            (term-store/next-sequence (database/database-store! db))
+            (term-store/current-sequence (database/database-store! db)))
           payload (mutation-result decisions occurrences)
           _ (require-encodable-rpc-response!
              request served-version payload)
@@ -980,9 +980,9 @@
       (server-fail! :query-invalid-snapshot
                     "query snapshot is outside available history" {}))
     (if (= version head)
-      @(database/database-store db)
+      @(database/database-store! db)
       (let [history-store (query-history-store! db version)
-            head-root @(database/database-store history-store)
+            head-root @(database/database-store! history-store)
             base (load-query-checkpoint-root! history-store version)
             context (if base
                       (atom base)
@@ -1556,7 +1556,7 @@
                      root (query-page-root! db version)
                      view (database/store-view db root)
                      cutoff (when-not page unpaged-row-cutoff)]
-                 (collect-rows (database/matching-live-propositions
+                 (collect-rows (database/matching-live-propositions!
                                 view
                                 (nth values 0)
                                 (nth values 1)
@@ -1583,7 +1583,7 @@
         build #(let [db (database/store-view @active-store (:root snapshot))
                      root (query-page-root! db version)
                      view (database/store-view db root)]
-                 (collect-rows (database/occurrences view)
+                 (collect-rows (database/occurrences! view)
                                (constantly true)
                                (when-not page unpaged-row-cutoff)
                                cancellation))
@@ -1676,7 +1676,7 @@
   (cancelled! cancellation))
 
 (defn- predicted-next-lease-epoch [db]
-  (let [sequence (term-store/next-sequence (database/database-store db))]
+  (let [sequence (term-store/next-sequence (database/database-store! db))]
     (t/occurrence-coordinate
      (t/transaction-coordinate (database/database-space db) sequence) 0)))
 
@@ -1757,7 +1757,7 @@
          (if-not (and (= holder current-holder) (= epoch current-epoch))
            (rpc/rpc-lease-released! false)
            (let [served-version
-                 (term-store/next-sequence (database/database-store db))
+                 (term-store/next-sequence (database/database-store! db))
                  payload (rpc/rpc-lease-released! true)
                  _ (require-encodable-rpc-response!
                     request served-version payload)
@@ -1783,11 +1783,11 @@
   (cancelled! cancellation)
   (try
     (let [db (database/store-view @active-store (:root snapshot))
-          dump (term-store/dump-term-store (database/database-store db))
+          dump (term-store/dump-term-store (database/database-store! db))
           space-id (database/database-space db)
           copy (term-store/new-term-store space-id)
           profile-violations
-          (kernel/lint-declared-profile (database/live-propositions db) space-id)]
+          (kernel/lint-declared-profile (database/live-propositions! db) space-id)]
       (term-store/load-term-store! copy dump)
       (rpc/rpc-validation!
        true
@@ -1842,7 +1842,7 @@
         {:keys [hits misses bytes evictions]} @query-result-cache
         cache (rpc/rpc-record! :rpc/result-cache
                                 [hits misses bytes evictions])]
-    (rpc/rpc-status! state (count (database/live-propositions db))
+    (rpc/rpc-status! state (count (database/live-propositions! db))
                       @runtime-engine cache)))
 
 (defn- request-body-bytes [request]

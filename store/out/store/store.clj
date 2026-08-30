@@ -51,6 +51,8 @@
 
 (def active-cell-tail-bytes 32)
 
+(def ^:dynamic *deferred-packed-rollover* nil)
+
 (defrecord TermStoreLoadResult [ok code message])
 
 (defn termstoreloadresult-ok [r] (:ok r))
@@ -206,7 +208,20 @@
   (+ tail-base-rows (+ (* 2 atoms) (+ (* 2 triples) (+ transactions (+ (* 2 operations) (+ (* 2 bucket-count) (+ active-positions cell-count)))))))))
 
 (defn- ensure-tail-room! [store rows bytes]
-  (if (or (nil? (store-prefix store)) (and (<= (+ (tail-row-count store) rows) (t/termstore-tail-row-limit store)) (<= (+ (deref (t/termstore-tail-bytes store)) bytes) (t/termstore-tail-byte-limit store)))) nil (throw (ex-info "store: boxed mutation tail requires a packed checkpoint rollover" {:type :packed-tail-rollover-required :store/code :packed-tail-rollover-required :tail-rows (tail-row-count store) :tail-bytes (deref (t/termstore-tail-bytes store)) :requested-rows rows :requested-bytes bytes :row-limit (t/termstore-tail-row-limit store) :byte-limit (t/termstore-tail-byte-limit store)}))))
+  (let [row-limit (t/termstore-tail-row-limit store)
+   byte-limit (t/termstore-tail-byte-limit store)
+   tail-rows (tail-row-count store)
+   tail-bytes (deref (t/termstore-tail-bytes store))
+   demand-data {:tail-rows tail-rows :tail-bytes tail-bytes :requested-rows rows :requested-bytes bytes :row-limit row-limit :byte-limit byte-limit}
+   fits-current? (and (<= (+ tail-rows rows) row-limit) (<= (+ tail-bytes bytes) byte-limit))
+   fits-empty? (and (<= (+ tail-base-rows rows) row-limit) (<= (+ tail-base-bytes bytes) byte-limit))]
+  (cond
+  (and *deferred-packed-rollover* (not fits-empty?)) (throw (ex-info "store: one transaction exceeds the empty boxed-tail bound" (assoc demand-data :type :packed-tail-capacity-exceeded :store/code :packed-tail-capacity-exceeded)))
+  (or (nil? (store-prefix store)) fits-current?) nil
+  *deferred-packed-rollover* (do
+  (reset! *deferred-packed-rollover* true)
+  nil)
+  :else (throw (ex-info "store: boxed mutation tail requires a packed checkpoint rollover" (assoc demand-data :type :packed-tail-rollover-required :store/code :packed-tail-rollover-required))))))
 
 (defn- account-tail-bytes! [store amount]
   (swap! (t/termstore-tail-bytes store) + amount)
@@ -401,7 +416,7 @@
    t2 (known-term-handle store (t/triple-t2 term))
    t3 (known-term-handle store (t/triple-t3 term))
    handles [t1 t2 t3]
-   ^Boolean all-known (loop [position 0]
+   all-known (loop [position 0]
   (if (>= position (count handles)) true (if (some? (nth handles position)) (recur (inc position)) false)))]
   (if all-known (let [h1 (if (some? t1) t1 0)
    h2 (if (some? t2) t2 0)
@@ -450,7 +465,7 @@
   (if (>= position (count operations)) {:buckets bucket-count :assertions asserted-count} (let [operation (nth operations position)
    proposition (t/commitoperation-proposition operation)
    handle (known-term-handle store proposition)
-   ^Boolean needs-bucket (and (not (contains? seen proposition)) (or (nil? handle) (< (find-active-bucket-position store (if (some? handle) handle 0)) 0)))]
+   needs-bucket (and (not (contains? seen proposition)) (or (nil? handle) (< (find-active-bucket-position store (if (some? handle) handle 0)) 0)))]
   (recur (+ position 1) (conj seen proposition) (+ bucket-count (if needs-bucket 1 0)) (+ asserted-count (if (= t/assert-action (t/commitoperation-action operation)) 1 0))))))
    bucket-count (:buckets overlay)
    asserted-count (:assertions overlay)
@@ -565,7 +580,7 @@
   (known-term-handle store t2)))
    h3 (if (some? t3) (do
   (known-term-handle store t3)))
-   ^Boolean all-known (and (or (nil? t1) (some? h1)) (and (or (nil? t2) (some? h2)) (or (nil? t3) (some? h3))))]
+   all-known (and (or (nil? t1) (some? h1)) (and (or (nil? t2) (some? h2)) (or (nil? t3) (some? h3))))]
   (if (not all-known) [] (if (and (nil? t1) (and (nil? t2) (nil? t3))) (active-triple-handles store) (let [prefix (store-prefix store)
    prefix-positions (if (nil? prefix) [] (packed/matching-triple-positions prefix h1 h2 h3))
    prefix-handles (reduce (fn [handles position] (let [handle (triple-handle position)]
@@ -579,7 +594,7 @@
   (recur (inc position) (if (and (triple-row-matches? row h1 h2 h3) (active-handle? store handle)) (conj handles handle) handles))))))))))
 
 (defn- set-active-state! [store handle prefix-count positions]
-  (let [^Boolean folding (store-fold-open store)
+  (let [folding (store-fold-open store)
    known (find-active-bucket-position store handle)]
   (if (>= known 0) (do
   (if folding (reset! (nth (store-active-cells store) known) positions) nil)
@@ -726,7 +741,7 @@
    bucket-count 0
    asserted-count 0]
   (if (>= position (count actions)) {:buckets bucket-count :assertions asserted-count} (let [handle (nth handles position)
-   ^Boolean needs-bucket (and (not (contains? seen handle)) (< (find-active-bucket-position store handle) 0))]
+   needs-bucket (and (not (contains? seen handle)) (< (find-active-bucket-position store handle) 0))]
   (recur (+ position 1) (conj seen handle) (+ bucket-count (if needs-bucket 1 0)) (+ asserted-count (if (= t/assert-action (nth actions position)) 1 0))))))
    bucket-count (:buckets overlay)
    asserted-count (:assertions overlay)

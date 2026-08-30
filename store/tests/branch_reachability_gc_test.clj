@@ -56,7 +56,7 @@
     (database/assert! (database/open-database! source space)
                       (t/triple name :root true) {})
     (database/fork-store! source "child")
-    (let [document (database/read-branch-ref source branch/default-branch)
+    (let [document (database/read-branch-ref! source branch/default-branch)
           segment (first (branch/refdocument-segments document))
           sha (branch/segmentrecord-sha256 segment)]
       (write-bytes!
@@ -70,7 +70,7 @@
 (database/assert! (database/open-database! target space) head-fact {})
 (database/fork-store! target "live-head")
 (def head-document
-  (database/read-branch-ref target branch/default-branch))
+  (database/read-branch-ref! target branch/default-branch))
 (def head-sha
   (branch/segmentrecord-sha256
    (first (branch/refdocument-segments head-document))))
@@ -132,7 +132,7 @@
              (.isFile (java.io.File. unmanaged))))
 (check! "a cold branch open still folds its reachable head"
         (= #{head-fact}
-           (set (database/live-propositions
+           (set (database/live-propositions!
                  (database/open-branch!
                   target branch/default-branch space)))))
 

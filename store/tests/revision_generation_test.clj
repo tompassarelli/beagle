@@ -86,7 +86,7 @@
 
           (let [before-restart-bytes (read-all log)
                 before-restart-image
-                (store/dump-term-store (database/database-store database))
+                (store/dump-term-store (database/database-store! database))
                 restarted (database/open-database! log space)
                 restart-revision (database/branch-revision! log)
                 restart-binding (revision-set restart-revision)
@@ -103,7 +103,7 @@
             (check! "restart replay reproduces the identical store image"
                     (= before-restart-image
                        (store/dump-term-store
-                        (database/database-store restarted)))))))))
+                        (database/database-store! restarted)))))))))
   (finally
     (fs/delete-tree scratch)))
 

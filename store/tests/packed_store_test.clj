@@ -64,10 +64,10 @@
 (def rollover-second (t/triple "rollover-left-b" :edge "rollover-right-b"))
 (def rollover-first-result (database/assert! rollover-db rollover-first {}))
 (def rollover-after-first
-  (:storage (database/database-status rollover-db)))
+  (:storage (database/database-status! rollover-db)))
 (def rollover-second-result (database/assert! rollover-db rollover-second {}))
 (def rollover-after-second
-  (:storage (database/database-status rollover-db)))
+  (:storage (database/database-status! rollover-db)))
 
 (check! "the first unique transaction fits the configured boxed tail"
         (and (= (t/transaction-coordinate "rollover-space" 1)
@@ -90,13 +90,13 @@
 (def rollover-retract-result
   (database/retract! rollover-db rollover-first {}))
 (def rollover-after-retract
-  (:storage (database/database-status rollover-db)))
+  (:storage (database/database-status! rollover-db)))
 (check! "cross-boundary retraction changes liveness without copying the prefix run"
         (and (:ok rollover-retract-result)
              (not (some #{rollover-first}
-                        (database/live-propositions rollover-db)))
+                        (database/live-propositions! rollover-db)))
              (some #{rollover-second}
-                   (database/live-propositions rollover-db))
+                   (database/live-propositions! rollover-db))
              (<= (:active-overlay-positions rollover-after-retract) 1)
              (<= (:tail-rows rollover-after-retract)
                  (:tail-row-limit rollover-after-retract))))
@@ -121,7 +121,7 @@
 (doseq [proposition [tail-spo tail-pos tail-osp]]
   (database/assert! db proposition {}))
 
-(def indexed-root @(database/database-store db))
+(def indexed-root @(database/database-store! db))
 (defn matching-propositions [t1 t2 t3]
   (set (store/matching-live-propositions indexed-root t1 t2 t3 nil)))
 
@@ -149,7 +149,7 @@
           [(rel d/triple-relation
                 [(c "shared-osp-subject") (v "value")
                  (c "shared-osp-object")])])]))
-(def indexed-propositions (database/live-propositions db))
+(def indexed-propositions (database/live-propositions! db))
 (def materialized-result (q/run! indexed-propositions indexed-plan))
 (def store-result
   (q/run-plan-projected!
@@ -160,9 +160,75 @@
 (check! "Store-backed Datalog candidates preserve materialized query results"
         (= (result-rows materialized-result) (result-rows store-result)))
 
-(def expected-live (database/live-propositions db))
-(def expected-occurrences (database/occurrences db))
-(def expected-withdrawals (database/withdrawals db))
+;; Database-level matching must apply supersession liveness after the packed
+;; index lookup, including before a caller's maximum truncates the result.
+(def matching-scratch (scratch-directory "store-packed-effective-match-"))
+(def matching-log (java.io.File. matching-scratch "history.storelog"))
+(database/create-triple-log! (.getPath matching-log) "matching-space")
+(def matching-db
+  (database/open-database! (.getPath matching-log) "matching-space"))
+(def historical-proposition
+  (t/triple "matching-subject" :matching-state "historical"))
+(def replacement-proposition
+  (t/triple "matching-subject" :matching-state "replacement"))
+(def historical-result
+  (database/assert! matching-db historical-proposition {}))
+(def historical-coordinate
+  (t/operationoccurrence-coordinate
+   (first (:occurrences historical-result))))
+(database/checkpoint-packed! matching-db)
+(database/supersede! matching-db historical-coordinate replacement-proposition {})
+(def effective-matches
+  (database/matching-live-propositions!
+   matching-db "matching-subject" :matching-state nil nil))
+(def bounded-effective-matches
+  (database/matching-live-propositions!
+   matching-db "matching-subject" :matching-state nil 1))
+(check! "indexed matching excludes superseded occurrences before limiting"
+        (and (= [replacement-proposition] effective-matches)
+             (= [replacement-proposition] bounded-effective-matches)))
+
+;; A STORELOG revision is its decoded transaction sequence, not its record
+;; count. Deflated records with sequence gaps must bind a checkpoint to the
+;; exact byte prefix and reopen without replaying an already-packed record.
+(def gapped-scratch (scratch-directory "store-packed-gapped-prefix-"))
+(def gapped-log (java.io.File. gapped-scratch "history.storelog"))
+(database/create-triple-log!
+ (.getPath gapped-log) "gapped-space" {:deflate? true})
+(def append-record! @(ns-resolve 'database 'append-record-durable!))
+(def gap-ten (t/triple "gap" :sequence 10))
+(def gap-twelve (t/triple "gap" :sequence 12))
+(append-record!
+ (.getPath gapped-log)
+ {:tx-seq 10
+  :operations [{:ordinal 0 :action 1 :triple gap-ten}]}
+ true)
+(append-record!
+ (.getPath gapped-log)
+ {:tx-seq 12
+  :operations [{:ordinal 0 :action 1 :triple gap-twelve}]}
+ true)
+(def gapped-db
+  (database/open-database! (.getPath gapped-log) "gapped-space"))
+(def gapped-checkpoint (database/checkpoint-packed! gapped-db))
+(def gapped-reopened
+  (database/open-database! (.getPath gapped-log) "gapped-space"))
+(def gapped-status (database/database-status! gapped-reopened))
+(def gapped-storage (:storage gapped-status))
+(check! "deflated gapped transaction sequences publish and reopen exactly"
+        (and (= 12 (:version gapped-checkpoint))
+             (= (t/transaction-coordinate "gapped-space" 12)
+                (:version gapped-status))
+             (= #{gap-ten gap-twelve}
+                (set (database/live-propositions! gapped-reopened)))
+             (= :packed-checkpoint (:boot-source gapped-storage))
+             (= 2 (:prefix-records gapped-storage))
+             (zero? (:suffix-records gapped-storage))
+             (zero? (:decoded-record-count gapped-storage))))
+
+(def expected-live (database/live-propositions! db))
+(def expected-occurrences (database/occurrences! db))
+(def expected-withdrawals (database/withdrawals! db))
 (def newest-checkpoint (database/checkpoint-packed! db))
 (def checkpoint-directory
   (.getParentFile (java.io.File. (:manifest newest-checkpoint))))
@@ -196,12 +262,12 @@
 
 (def reopened
   (database/open-database! (.getPath log-file) "packed-space"))
-(def storage (:storage (database/database-status reopened)))
+(def storage (:storage (database/database-status! reopened)))
 
 (check! "newest index corruption falls back without semantic drift"
-        (and (= expected-live (database/live-propositions reopened))
-             (= expected-occurrences (database/occurrences reopened))
-             (= expected-withdrawals (database/withdrawals reopened))))
+        (and (= expected-live (database/live-propositions! reopened))
+             (= expected-occurrences (database/occurrences! reopened))
+             (= expected-withdrawals (database/withdrawals! reopened))))
 (check! "warm boot validates the prefix and decodes only the exact suffix"
         (and (= :packed-checkpoint (:boot-source storage))
              (= 3 (:prefix-records storage))

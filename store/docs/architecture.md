@@ -110,7 +110,7 @@ set projection by recursive structural Triple equality, so those equal live
 occurrences contribute one row there.
 
 The retained JVM database facade has a separate effective-view rule:
-`database/live-occurrences` and `database/live-propositions` suppress a target
+`database/live-occurrences!` and `database/live-propositions!` suppress a target
 named by a live `:kernel/supersedes` proposition. That rule does not withdraw
 the target or change `TermStore` liveness, and it is not a universal native
 `rpc/scan` or Datalog `triple` behavior.

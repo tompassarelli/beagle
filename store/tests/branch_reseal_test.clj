@@ -56,7 +56,7 @@
     (if (> index 70)
       parent
       (let [child (format "branch-%02d" index)
-            before-ref (database/read-branch-ref log parent)
+            before-ref (database/read-branch-ref! log parent)
             before-revision
             (when (= index 65) (database/branch-revision! log parent))
             receipt (database/fork-store! log parent child)
@@ -81,9 +81,9 @@
 (check! "v2 revision identity survives physical reseal and fork"
         (= (:before-revision @boundary) (:after-revision @boundary)))
 
-(def final-ref (database/read-branch-ref log current))
+(def final-ref (database/read-branch-ref! log current))
 (def final-db (database/open-branch! log current space))
-(def live (set (database/live-propositions final-db)))
+(def live (set (database/live-propositions! final-db)))
 (check! "the branch continues beyond 64 physical segment generations"
         (and (= 70 (Long/parseLong (subs current 7)))
              (< (count (branch/refdocument-segments final-ref))
@@ -170,7 +170,7 @@
            (and (= (:revision fixture)
                    (database/branch-revision! (:path fixture)))
                 (= #{(:root-fact fixture) (:tail-fact fixture)}
-                   (set (database/live-propositions (:opened fixture))))))
+                   (set (database/live-propositions! (:opened fixture))))))
          recovered))
 (check! "reseal recovery publishes one transition only after the ref is durable"
         (every? #(= 1 (count (:events %))) recovered))

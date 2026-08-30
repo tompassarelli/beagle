@@ -282,16 +282,16 @@
    derived from one already checked here."
   ([m db] (compare-projections m db false))
   ([m db exhaustive?]
-   (let [engine-occurrences (database/occurrences db)
-         engine-withdrawals (database/withdrawals db)
-         engine-live (database/live-occurrences db)
+   (let [engine-occurrences (database/occurrences! db)
+         engine-withdrawals (database/withdrawals! db)
+         engine-live (database/live-occurrences! db)
          model-occurrences (model/occurrences m)
          model-withdrawals (model/withdrawals m)
          model-live (model/live-occurrences m)
          model-live-propositions (model/live-propositions m)]
      (some identity
            [(diff :current-transaction
-                  (model/current-transaction m) (database/current-transaction db))
+                  (model/current-transaction m) (database/current-transaction! db))
             (diff :occurrence-count
                   (count model-occurrences) (count engine-occurrences))
             (diff :withdrawal-count
@@ -304,23 +304,23 @@
             (diff :occurrences model-occurrences engine-occurrences)
             (diff :withdrawals model-withdrawals engine-withdrawals)
             (diff :supersession-triples
-                  (model/supersession-triples m) (database/supersession-triples db))
+                  (model/supersession-triples m) (database/supersession-triples! db))
             (diff :store-live-propositions
                   (model/store-live-propositions m)
-                  (store/live-propositions (database/database-store db)))
+                  (store/live-propositions (database/database-store! db)))
             (when exhaustive?
               (diff :public-live-propositions
-                    model-live-propositions (database/live-propositions db)))]))))
+                    model-live-propositions (database/live-propositions! db)))]))))
 
 (defn compare-occurrence-resolution [db receipt]
   (some (fn [occurrence]
           (let [coordinate (t/operationoccurrence-coordinate occurrence)]
             (diff :occurrence-resolution occurrence
-                  (database/occurrence db coordinate))))
+                  (database/occurrence! db coordinate))))
         (:occurrences receipt)))
 
 (defn compare-temporal-projections [m db]
-  (let [root @(database/database-store db)
+  (let [root @(database/database-store! db)
         current (dec (:next-sequence m))
         upper (quot current 2)
         lower (max -1 (- upper 3))
@@ -387,15 +387,15 @@
                        ;; Replay determinism is byte-exact at the store level,
                        ;; not merely projection-equal.
                        (diff :cold-restart-term-store-dump
-                             (store/dump-term-store (database/database-store db))
+                             (store/dump-term-store (database/database-store! db))
                              (store/dump-term-store
-                              (database/database-store restarted))))]
+                              (database/database-store! restarted))))]
             {:mismatch (assoc mismatch :index :cold-restart)}
             {:stats {:ops (count ops)
                      :committed committed
-                     :occurrences (count (database/occurrences db))
-                     :withdrawals (count (database/withdrawals db))
-                     :live (count (database/live-propositions db))
+                     :occurrences (count (database/occurrences! db))
+                     :withdrawals (count (database/withdrawals! db))
+                     :live (count (database/live-propositions! db))
                      :log-bytes (.length file)}}))
         (let [op (nth ops index)
               expected (guarded #(model-apply m op))

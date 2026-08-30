@@ -144,7 +144,7 @@
                                      (= :sp1/accepted (t/triple-t2 proposition))
                                      (= true (t/triple-t3 proposition)))
                             (t/triple-t1 proposition))))
-                  (database/live-propositions reopened))]
+                  (database/live-propositions! reopened))]
         (check! "lock holder releases cleanly"
                 (and (:exited? holder-result)
                      (zero? (:exit holder-result))))

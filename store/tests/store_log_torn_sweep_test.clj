@@ -50,7 +50,7 @@
 
 (database/create-triple-log! source-path space)
 (def db (database/open-database! source-path space))
-(def empty-image (store/dump-term-store (database/database-store db)))
+(def empty-image (store/dump-term-store (database/database-store! db)))
 
 (def nested-2
   (t/triple (t/triple "Alice" :knows "Bob")
@@ -72,7 +72,7 @@
         end (.length file)]
     (swap! boundaries conj
            {:label label :start start :end end
-            :image (store/dump-term-store (database/database-store db))})
+            :image (store/dump-term-store (database/database-store! db))})
     result))
 
 (step! "single assert"
@@ -141,7 +141,7 @@
     (write-bytes! cut-path (prefix-bytes source-bytes cut))
     (try
       (let [opened (database/open-database! cut-path space {:repair-torn? true})
-            image (store/dump-term-store (database/database-store opened))
+            image (store/dump-term-store (database/database-store! opened))
             reported (:recovered-tail opened)
             repaired (database/read-triple-log! cut-path)
             marker (database/assert! opened (t/triple "sweep-marker" :cut cut) {})
@@ -155,7 +155,7 @@
           (not= (t/transaction-coordinate space (inc expected-kept)) (:ok marker))
           (assoc :write-rejected true)
           (not (some #{(t/triple "sweep-marker" :cut cut)}
-                     (database/live-propositions cold)))
+                     (database/live-propositions! cold)))
           (assoc :marker-not-durable true)))
       (catch Throwable error
         {:threw (or (:store/code (ex-data error)) (str error))}))))
@@ -170,7 +170,7 @@
     (write-bytes! passive-path written)
     (try
       (let [opened (database/open-database! passive-path space)
-            image (store/dump-term-store (database/database-store opened))
+            image (store/dump-term-store (database/database-store! opened))
             reported (:torn-tail opened)
             write-code (when expect-torn?
                          (error-code #(database/assert! opened nested-2 {})))]
@@ -198,7 +198,7 @@
     (write-bytes! cut-path written)
     (try
       (let [opened (database/open-database! cut-path space {:repair-torn? true})
-            image (store/dump-term-store (database/database-store opened))]
+            image (store/dump-term-store (database/database-store! opened))]
         (condp = image
           before {:outcome :repaired-to-prefix}
           after {:outcome :flip-was-benign}

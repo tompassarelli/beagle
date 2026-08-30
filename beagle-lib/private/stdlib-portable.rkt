@@ -39,7 +39,7 @@
    'count      (fn-of '(Any) 'Int)
    'empty?     (fn-of '(Any) 'Bool)
    'seq        (fn-of '(Any) 'Any)
-   'into       (fn-of '(Any Any) 'Any)
+   'into       (fn-of '(Any Any) 'Any #:rest 'Any)
    'conj       (fn-of '(Any) 'Any #:rest 'Any)
    'cons       (fn-of '(Any Any) 'Any)
    ;; Native's transient vector builder is a linear lexical value. The type
@@ -78,7 +78,9 @@
                  #:rest (p 'Any))
    'mapv       (poly-fn '(A B)
                  (list (type-fn (list (tv 'A)) #f (tv 'B))
-                       (type-app 'Vec (list (tv 'A))))
+                       (type-union
+                        (list (type-app 'Vec (list (tv 'A)))
+                              (type-app 'List (list (tv 'A))))))
                  (type-app 'Vec (list (tv 'B))))
    'filter     (poly-fn '(A)
                  (list (type-fn (list (tv 'A)) #f (p 'Any))
@@ -172,7 +174,7 @@
    ;; flow changes. (> 2.5 1.0) was a false positive before 2026-06-12.
    '<          (fn-of '(Number Number) 'Bool)
    '>          (fn-of '(Number Number) 'Bool)
-   '<=         (fn-of '(Number Number) 'Bool)
+   '<=         (fn-of '(Number Number) 'Bool #:rest 'Number)
    '>=         (fn-of '(Number Number) 'Bool)
    'identical? (fn-of '(Any Any) 'Bool)
    'compare    (fn-of '(Any Any) 'Int)
@@ -263,7 +265,7 @@
    'sequential? (fn-of '(Any) 'Bool)
    'fn?        (fn-of '(Any) 'Bool)
    ;; --- error / control ----------------------------------------------------
-   'ex-info    (fn-of '(String Any) 'Any)
+   'ex-info    (fn-of '(String Any) 'Any #:rest 'Any)
    'ex-data    (fn-of '(Any) 'Any)
    'ex-message (fn-of '(Any) 'String)
    'throw      (fn-of '(Any) 'Any)
@@ -313,7 +315,7 @@
    'assoc-in   (fn-of '(Any Any Any) 'Any)
    ;; --- higher-order: more -------------------------------------------------
    'map-indexed (fn-of '(Any Any) 'Any)
-   'keep       (fn-of '(Any Any) 'Any)
+   'keep       (fn-of '(Any) 'Any #:rest 'Any)
    'keep-indexed (fn-of '(Any Any) 'Any)
    'run!       (fn-of '(Any Any) 'Nil)
    'juxt       (fn-of '(Any) 'Any #:rest 'Any)

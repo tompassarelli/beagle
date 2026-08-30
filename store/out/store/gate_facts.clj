@@ -108,11 +108,11 @@
 
 (defn- facts-for [database ^FactRoute selected]
   (reduce (fn [entries proposition] (let [entry (proposition-entry proposition (factroute-candidate-root selected))]
-  (if (some? entry) (conj entries entry) entries))) [] (database/live-propositions database)))
+  (if (some? entry) (conj entries entry) entries))) [] (database/live-propositions! database)))
 
 (defn- links-for [database ^FactRoute selected]
   (reduce (fn [links proposition] (let [link (proposition-link proposition (factroute-candidate-root selected))]
-  (if (some? link) (conj links link) links))) [] (database/live-propositions database)))
+  (if (some? link) (conj links link) links))) [] (database/live-propositions! database)))
 
 (defn- entry-with-id [entries ^String fact-id]
   (reduce (fn [found ^FactEntry entry] (if (= fact-id (factentry-id entry)) entry found)) nil entries))
@@ -207,7 +207,7 @@
   (if (not= "GateMaintenanceReceiptV1" (factentry-kind receipt)) (fail "finalize receipt must be GateMaintenanceReceiptV1" :gate-facts/not-a-receipt) nil)
   (with-writer! selected (fn [database] (let [known (facts-for database selected)
    durable-links (links-for database selected)
-   ^Boolean candidate-present (some? (some (fn [^FactEntry entry] (= "GateCandidateV1" (factentry-kind entry))) known))
+   candidate-present (some? (some (fn [^FactEntry entry] (= "GateCandidateV1" (factentry-kind entry))) known))
    misses (filterv (fn [^FactEntry entry] (= "FactMissEventV1" (factentry-kind entry))) known)]
   (if candidate-present nil (fail "finalize requires a durable exact candidate" :gate-facts/candidate-root-unresolved))
   (if (not= (count misses) (count requested-links)) (fail "maintenance receipt does not account for every durable miss" :gate-facts/unaccounted-miss) nil)
@@ -223,7 +223,7 @@
 (defn cold-query! [^FactRoute selected expected-ids]
   (let [database (cold-open! selected)
    entries (facts-for database selected)
-   ^Boolean candidate-present (some? (some (fn [^FactEntry entry] (= "GateCandidateV1" (factentry-kind entry))) entries))]
+   candidate-present (some? (some (fn [^FactEntry entry] (= "GateCandidateV1" (factentry-kind entry))) entries))]
   (if candidate-present (response-for! database selected) (fail "exact candidate root was not admitted in the opened Store" :gate-facts/candidate-root-unresolved))))
 
 (defn- request-vector [^String expected-tag expected-count]

@@ -12,6 +12,7 @@ copy	src/store/graph_control_mcp.clj	out/store/graph_control_mcp.clj
 copy	src/store/code_commit_gate.clj	out/store/code_commit_gate.clj
 copy	src/store/projection_lifecycle.clj	out/store/projection_lifecycle.clj
 copy	src/store/candidate_transformer.clj	out/store/candidate_transformer.clj
+beagle	src/database.bclj	database.clj
 beagle	src/store/slots.bclj	out/store/slots.clj
 beagle	src/store/types.bclj	out/store/types.clj
 beagle	src/store/rpc_limits.bclj	out/store/rpc_limits.clj

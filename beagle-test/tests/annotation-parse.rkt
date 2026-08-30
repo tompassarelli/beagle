@@ -75,6 +75,8 @@
     "(defn f [x y] Any x)")
 (ok "wholly inferred rest remains readable"
     "(defn f [x & more] Any x)")
+(ok "reader anonymous-function shorthand remains a typed Any boundary"
+    "(def f (Fn [Any] Any) #(+ (int %) 1))")
 (ok "typed sequential destructuring parameter"
     "(defn f [([x y] (HVec Float Float)) (opts Any)] Float x)")
 (ok "typed map destructuring parameter"

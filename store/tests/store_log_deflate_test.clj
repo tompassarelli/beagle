@@ -46,7 +46,7 @@
 (defn fold-propositions [path]
   (let [db (database/open-database! path "deflate-parity")]
     (set (map t/operationoccurrence-proposition
-              (database/live-occurrences db)))))
+              (database/live-occurrences! db)))))
 
 (check! "deflate and plain generations fold to identical propositions"
         (= (fold-propositions plain-path) (fold-propositions gz-path)))
@@ -59,7 +59,7 @@
   (check! "second deflate transaction commits" (:ok result))
   (check! "reopen folds both deflate records"
           (= (+ 4000 100)
-             (count (database/live-occurrences
+             (count (database/live-occurrences!
                      (database/open-database! gz-path "deflate-parity"))))))
 
 ;; torn tail: truncate mid-record, passive open reports, repair recovers
@@ -71,7 +71,7 @@
     (check! "torn deflate tail is reported" (some? (:torn-tail passive))))
   (let [repaired (database/open-database! torn "deflate-parity" {:repair-torn? true})]
     (check! "torn deflate tail repairs to the valid prefix"
-            (= 4000 (count (database/live-occurrences repaired))))))
+            (= 4000 (count (database/live-occurrences! repaired))))))
 
 ;; corrupt compressed payload fails closed as corruption, not garbage data
 (let [bytes (java.nio.file.Files/readAllBytes (.toPath (io/file gz-path)))

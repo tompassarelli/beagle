@@ -25,7 +25,7 @@
   (database/assert! (database/open-database! path "branch-watch-space")
                     (t/triple "watch" :value value) {})
   (database/fork-store! path child)
-  (database/read-branch-ref path branch/default-branch))
+  (database/read-branch-ref! path branch/default-branch))
 
 (defn- copy-segments! [source target document]
   (java.nio.file.Files/createDirectories
@@ -75,7 +75,7 @@
         (and (= (:previous first-result) (:previous first-event))
              (= (:current first-result) (:current first-event))
              (= (:current first-event)
-                (database/branch-ref-identity target branch/default-branch))))
+                (database/branch-ref-identity! target branch/default-branch))))
 
 (def second-result
   (database/compare-and-set-branch-ref!

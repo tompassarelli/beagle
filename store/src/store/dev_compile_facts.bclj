@@ -19,7 +19,7 @@
 (declare-extern database/create-triple-log! (Fn [String String] Any))
 (declare-extern database/open-database! (Fn [String String] Any))
 (declare-extern database/commit! (Fn [Any Any] Any))
-(declare-extern database/live-propositions (Fn [Any] (Vec Any)))
+(declare-extern database/live-propositions! (Fn [Any] (Vec Any)))
 (declare-extern database/branch-revision! (Fn [String] Any))
 (declare-extern writer-authority/acquire! (Fn [String] Any))
 (declare-extern writer-authority/release! (Fn [Any] Any))
@@ -171,7 +171,7 @@
      (let [entry CompileFact? (proposition-entry proposition)]
        (if (some? entry) (conj entries entry) entries)))
    []
-   (database/live-propositions database)))
+   (database/live-propositions! database)))
 
 (defn- facts-for-key
   [entries (Vec CompileFact)

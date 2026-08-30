@@ -459,6 +459,44 @@ CLJ
   (define tag (and t (clj-tag-for-type t)))
   (if tag (format "^~a " tag) ""))
 
+;; A comparison or boolean connective compiles to a primitive boolean. Clojure
+;; rejects ^Boolean metadata on a local initialized by that expression with
+;; "Can't type hint a local with a primitive initializer". The Beagle type is
+;; already checked, and a boxed local hint buys nothing, so omit it only at the
+;; let-binding emission boundary. Var, return, and parameter tags stay intact.
+(define (clj-let-tag-prefix t)
+  (if (and (type-prim? t) (eq? (type-prim-name t) 'Bool))
+      ""
+      (clj-tag-prefix t)))
+
+;; Clojure 1.12 defines clojure.core/bytes (and the sibling primitive-array
+;; coercions). On Var metadata, `^bytes` is therefore macro-resolved to that
+;; function object instead of retained as the byte-array class tag; callers
+;; later fail with "Unable to resolve classname: clojure.core$bytes@...".
+;; Parameters and locals still accept the readable short tags, but Vars need
+;; unambiguous JVM array descriptors.
+(define (primitive-array-jvm-descriptor t)
+  (and (type-app? t)
+       (eq? (type-app-ctor t) 'Arr)
+       (= 1 (length (type-app-args t)))
+       (type-prim? (car (type-app-args t)))
+       (case (type-prim-name (car (type-app-args t)))
+         [(Bool) "[Z"]
+         [(I8) "[B"]
+         [(Char) "[C"]
+         [(Float) "[D"]
+         [(F32) "[F"]
+         [(I32) "[I"]
+         [(Int) "[J"]
+         [(I16) "[S"]
+         [else #f])))
+
+(define (clj-var-tag-prefix t)
+  (define descriptor (and t (primitive-array-jvm-descriptor t)))
+  (if descriptor
+      (format "^~v " descriptor)
+      (clj-tag-prefix t)))
+
 (define (clj-emit-program prog)
   (parameterize ([current-emit-src-table (program-src-table prog)]
                  [current-type-table (program-type-table prog)]
@@ -648,21 +686,21 @@ CLJ
     [(def-form? f)
      (format "(def ~a~a~a~a ~a)"
              (if (def-form-dynamic? f) "^:dynamic " "")
-             (clj-tag-prefix (def-form-type f))
+             (clj-var-tag-prefix (def-form-type f))
              (def-form-name f)
              (if (def-form-doc f) (format " ~v" (def-form-doc f)) "")
              (emit-expr (def-form-value f)))]
 
     [(defonce-form? f)
      (format "(defonce ~a~a~a ~a)"
-             (clj-tag-prefix (defonce-form-type f))
+             (clj-var-tag-prefix (defonce-form-type f))
              (defonce-form-name f)
              (if (defonce-form-doc f) (format " ~v" (defonce-form-doc f)) "")
              (emit-expr (defonce-form-value f)))]
 
     [(defn-form? f)
      (define kw (if (defn-form-private? f) "defn-" "defn"))
-     (define name-tag (clj-tag-prefix (defn-form-return-type f)))
+     (define name-tag (clj-var-tag-prefix (defn-form-return-type f)))
      (define-values (params-str body-str)
        (emit-callable-signature+body
         (defn-form-params f)
@@ -1106,6 +1144,15 @@ CLJ
      (define fn-ref (call-form-fn e))
      (define fn-key (reference-key fn-ref))
      (cond
+       ;; Reader metadata is represented by a `with-meta` node in the normal
+       ;; parse path.  Keep the reader marker safe if it reaches emission
+       ;; through a legacy/expanded call node: emitting it as a Clojure
+       ;; invocation (`(#%meta tag value)`) produces an unreadable JVM form.
+       [(and (eq? fn-ref '#%meta)
+             (= 2 (length (call-form-args e))))
+        (format "^~a ~a"
+                (emit-expr-core (first (call-form-args e)))
+                (emit-expr (second (call-form-args e))))]
        ;; Scalar constructors/accessors erase to identity (zero runtime cost)
        [(and (set-member? (current-emit-scalar-fns) fn-key)
              (= 1 (length (call-form-args e))))
@@ -1896,7 +1943,7 @@ CLJ
 (define (let-binding-tag-prefix binding)
   (if (and (let-binding? binding)
            (symbol? (let-binding-name binding)))
-      (clj-tag-prefix (let-binding-type binding))
+      (clj-let-tag-prefix (let-binding-type binding))
       ""))
 
 ;; A constrained callable cannot expose any authored parameter name before all

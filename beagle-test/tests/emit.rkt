@@ -13,6 +13,16 @@
   (emit-program
    (parse-program (map (lambda (f) (datum->syntax #f f)) forms))))
 
+(define (compile-source source)
+  (define path (make-temporary-file "emit-source-~a.bclj"))
+  (dynamic-wind
+   void
+   (lambda ()
+     (call-with-output-file path (lambda (out) (display source out))
+                           #:exists 'truncate/replace)
+     (emit-program (parse-program (read-beagle-syntax path))))
+   (lambda () (delete-file path))))
+
 (define (write-rooted-source! path source)
   (make-parent-directory* path)
   (call-with-output-file path
@@ -96,6 +106,35 @@
   (check-true (matches? #rx"\\[\\^bytes bytes \\^longs entries index\\]" out))
   (check-false (matches? #rx"\\^long([ ^])" out)))
 
+(test-case "primitive array Vars use unambiguous JVM descriptor tags"
+  (define out
+    (compile '(def payload (Arr I8) (byte-array 1))
+             '(defn payload-copy [] (Arr I8) payload)))
+  (check-true (matches? #rx"\\(def \\^\"\\[B\" payload" out))
+  (check-true (matches? #rx"\\(defn \\^\"\\[B\" payload-copy" out)))
+
+(test-case "reader shorthand emits a real Clojure fn"
+  (define out
+    (compile-source
+     (string-append "#lang beagle/clj\n"
+                    "(ns emit.shorthand)\n"
+                    "(defn bytes [(xs (Vec Int))] (Vec Int)\n"
+                    "  (vec (map #(bit-and (int %) 255) xs)))\n")))
+  (check-true (matches? #rx"\\(fn \\[\\%1\\]" out))
+  (check-false (matches? #rx"\\(map #\\(" out))
+  (check-false (matches? #rx"#%meta" out)))
+
+(test-case "reader metadata on JVM expressions emits Clojure metadata"
+  (define out
+    (compile-source
+     (string-append "#lang beagle/clj\n"
+                    "(ns emit.meta)\n"
+                    "(defn decode [(bytes (Arr I8))] String\n"
+                    "  (String. ^bytes bytes\n"
+                    "    java.nio.charset.StandardCharsets/UTF_8))\n")))
+  (check-true (matches? #rx"\\(String\\. \\^bytes bytes" out))
+  (check-false (matches? #rx"#%meta" out)))
+
 (test-case "authored Java imports make class hints safe on params and lets"
   (define out
     (compile '(import java.io.RandomAccessFile)
@@ -105,6 +144,13 @@
                   (.size channel)))))
   (check-true (matches? #rx"\\[\\^RandomAccessFile file\\]" out))
   (check-true (matches? #rx"\\[\\^FileChannel channel \\(\\.getChannel file\\)\\]" out)))
+
+(test-case "boolean locals omit boxed hints rejected for primitive initializers"
+  (define out
+    (compile `(defn below [(value Int)] Bool
+                (let ,(br 'inside 'Bool '(< value 2)) inside))))
+  (check-true (matches? #rx"\\[inside \\(< value 2\\)\\]" out))
+  (check-false (matches? #rx"\\^Boolean inside" out)))
 
 ;; Omitted binding types are gone, so a vector mixing a bare binder with a
 ;; grouped declaration is rejected — naming the binder left without a type.

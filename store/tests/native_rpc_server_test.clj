@@ -305,8 +305,8 @@
                        (subs (packed/checkpointmanifest-page-sha256 manifest)
                              0 8)
                        16))
-                   (= (database/live-propositions @server/active-store)
-                      (database/live-propositions {:term-store restored
+                   (= (database/live-propositions! @server/active-store)
+                      (database/live-propositions! {:term-store restored
                                                    :space-id space
                                                    :mutation-state (atom {:status :ready})})))))
     (let [scan (request! port space :rpc/scan
@@ -768,7 +768,7 @@
           scan-payload (wire/rpc-triple-pattern! nil predicate nil)
           scan-reference (fn []
                            (filterv #(= predicate (t/triple-t2 %))
-                                    (database/live-propositions
+                                    (database/live-propositions!
                                      @server/active-store)))
           occurrence-reference (fn []
                                  (mapv
@@ -777,7 +777,7 @@
                                      (t/operationoccurrence-coordinate occurrence)
                                      (t/operationoccurrence-action occurrence)
                                      (t/operationoccurrence-proposition occurrence)))
-                                  (database/occurrences @server/active-store)))]
+                                  (database/occurrences! @server/active-store)))]
       (doseq [batch (partition-all 100 (range fixture-count))]
         (request! port space :rpc/batch
                   (wire/rpc-batch!
@@ -839,8 +839,8 @@
                        (nil? (error-code status))))))
 
       (let [visited (atom 0)
-            live database/live-propositions
-            bounded (with-redefs [database/live-propositions
+            live database/live-propositions!
+            bounded (with-redefs [database/live-propositions!
                                   (fn [db]
                                     (map (fn [proposition]
                                            (swap! visited inc)
@@ -902,7 +902,7 @@
           (request! port space :rpc/assert
                     (wire/rpc-write! proposition wire/rpc-subject-any nil)))
         (let [reference (filterv #(= :page-dup (t/triple-t2 %))
-                                 (database/live-propositions
+                                 (database/live-propositions!
                                   @server/active-store))
               paged (paged-read port space :rpc/scan dup-payload
                                 3 :rpc/triples)]
@@ -1204,7 +1204,7 @@
                       (t/triple-t3 (t/triple-t1 coordinate))
                       (t/rpcresponse-served-version version))
                    (some #{proposition}
-                         (database/live-propositions @server/active-store)))))
+                         (database/live-propositions! @server/active-store)))))
     (finally
       (server/shutdown!)
       (deref long-server 3000 nil))))

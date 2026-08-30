@@ -22,7 +22,7 @@
             (and (t/triple? value)
                  (result-subject? (t/triple-t1 value))
                  (= "DevCompileUnitResultV1" (t/triple-t2 value))))
-          (database/live-propositions database)))]
+          (database/live-propositions! database)))]
     (when-not proposition
       (throw (ex-info "no typed development compile fact to tamper" {})))
     (let [subject (t/triple-t1 proposition)

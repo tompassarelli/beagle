@@ -26,7 +26,7 @@
   (database/assert! (database/open-database! path "branch-ref-cas-space")
                     (t/triple "winner" :value value) {})
   (database/fork-store! path child)
-  (database/read-branch-ref path branch/default-branch))
+  (database/read-branch-ref! path branch/default-branch))
 
 (defn- copy-segments! [source target document]
   (java.nio.file.Files/createDirectories
@@ -65,7 +65,7 @@
 (def results [@contender-a @contender-b])
 (def winner (first (filter :swapped? results)))
 (def loser (first (remove :swapped? results)))
-(def installed (database/read-branch-ref target branch/default-branch))
+(def installed (database/read-branch-ref! target branch/default-branch))
 
 (println "branch ref CAS:")
 (check! "two contenders against one expected ref produce one winner"
@@ -80,7 +80,7 @@
 (def restarted
   (database/open-branch! target branch/default-branch
                          "branch-ref-cas-space"))
-(def live (set (database/live-propositions restarted)))
+(def live (set (database/live-propositions! restarted)))
 (check! "restart folds the winning content-addressed head"
         (= 1 (count (filter #(and (= "winner" (t/triple-t1 %))
                                   (= :value (t/triple-t2 %)))

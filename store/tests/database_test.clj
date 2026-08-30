@@ -64,19 +64,19 @@
         (= (t/occurrence-coordinate first-tx 0) first-coordinate))
 (check! "transaction time is an ordinary typed metadata Triple"
         (some #{(t/triple first-tx :kernel/recorded-at recorded)}
-              (database/live-propositions db)))
+              (database/live-propositions! db)))
 (check! "actor and source record are ordinary metadata propositions"
         (and (some #{(t/triple first-tx :kernel/asserted-by "Tom")}
-                   (database/live-propositions db))
+                   (database/live-propositions! db))
              (some #{(t/triple first-coordinate :kernel/source-record "database-test")}
-                   (database/live-propositions db))))
+                   (database/live-propositions! db))))
 
 (def duplicate (database/assert! db email {}))
 (def duplicate-coordinate
   (t/operationoccurrence-coordinate (first (:occurrences duplicate))))
 (check! "equal propositions remain separately occurrence-addressable"
         (and (not= first-coordinate duplicate-coordinate)
-             (= 2 (count (filter #{email} (database/live-propositions db))))))
+             (= 2 (count (filter #{email} (database/live-propositions! db))))))
 
 (def withdrawn
   (database/withdraw-occurrence! db duplicate-coordinate {:actor "Tom"}))
@@ -85,7 +85,7 @@
              (= [first-coordinate]
                 (mapv t/operationoccurrence-coordinate
                       (filter #(= email (t/operationoccurrence-proposition %))
-                              (database/live-occurrences db))))))
+                              (database/live-occurrences! db))))))
 (check! "withdrawal history points to the exact occurrence coordinate"
         (some #(= duplicate-coordinate
                   (t/operationoccurrence-coordinate
@@ -102,16 +102,16 @@
   (t/operationoccurrence-coordinate (first (:occurrences superseded))))
 (check! "supersession is an ordinary occurrence-to-occurrence Triple"
         (some #{(t/triple final-coordinate :kernel/supersedes draft-coordinate)}
-              (database/supersession-triples db)))
+              (database/supersession-triples! db)))
 (check! "effective liveness follows supersession without mutating identity"
-        (and (not (some #{draft} (database/live-propositions db)))
-             (some #{final} (database/live-propositions db))
+        (and (not (some #{draft} (database/live-propositions! db)))
+             (some #{final} (database/live-propositions! db))
              (some #{draft} (store/live-propositions
-                             (database/database-store db)))))
+                             (database/database-store! db)))))
 
 ;; Global transaction-coordinate OCC is conservative until schema-specific
 ;; conflict domains migrate; every accepted write still advances one exact tx.
-(def race-base (database/current-transaction db))
+(def race-base (database/current-transaction! db))
 (def race-results
   (mapv deref
         (mapv (fn [n]
@@ -123,31 +123,31 @@
         (= 1 (count (filter :ok race-results))))
 (check! "all other same-base racers receive an OCC conflict"
         (= 23 (count (filter #(= :conflict (:reject %)) race-results))))
-(let [before (store/operation-count (database/database-store db))
+(let [before (store/operation-count (database/database-store! db))
       stale (database/assert! db nested {:base race-base})]
   (check! "stale OCC rejection leaks no TermStore operation"
           (and (= :conflict (:reject stale))
                (= before (store/operation-count
-                          (database/database-store db))))))
+                          (database/database-store! db))))))
 
 (def view-result (database/view-select! db "review-view" first-coordinate {}))
 (check! "view selection names an occurrence using an ordinary Triple"
         (and (:ok view-result)
              (= [first-coordinate]
                 (mapv t/operationoccurrence-coordinate
-                      (database/view-occurrences db "review-view")))))
+                      (database/view-occurrences! db "review-view")))))
 (database/view-deselect! db "review-view" first-coordinate {})
 (check! "withdrawing the selection empties the view without touching its target"
-        (and (empty? (database/view-occurrences db "review-view"))
+        (and (empty? (database/view-occurrences! db "review-view"))
              (some #{first-coordinate}
                    (map t/operationoccurrence-coordinate
-                        (database/live-occurrences db)))))
+                        (database/live-occurrences! db)))))
 
 (def lease-1 (database/acquire-lease! db "resource-A" "worker-A" 1000 10000))
 (def lease-epoch-1 (:ok lease-1))
 (check! "lease epoch is its assertion occurrence coordinate"
         (and (t/occurrence-coordinate? lease-epoch-1)
-             (database/lease-fence-valid? db "resource-A" "worker-A"
+             (database/lease-fence-valid?! db "resource-A" "worker-A"
                                        lease-epoch-1 10500)))
 (check! "unexpired lease rejects a rival holder"
         (= :lease-held
@@ -158,9 +158,9 @@
 (def lease-epoch-2 (:ok lease-2))
 (check! "renewal rotates the occurrence fence and supersedes the old lease"
         (and (not= lease-epoch-1 lease-epoch-2)
-             (not (database/lease-fence-valid? db "resource-A" "worker-A"
+             (not (database/lease-fence-valid?! db "resource-A" "worker-A"
                                             lease-epoch-1 10600))
-             (database/lease-fence-valid? db "resource-A" "worker-A"
+             (database/lease-fence-valid?! db "resource-A" "worker-A"
                                        lease-epoch-2 10600)))
 (check! "stale release cannot cross the occurrence fence"
         (= :lease-fence-mismatch
@@ -169,7 +169,7 @@
 (check! "epoch-exact release withdraws the current lease"
         (and (:ok (database/release-lease! db "resource-A" "worker-A"
                                        lease-epoch-2))
-             (nil? (database/current-lease db "resource-A"))))
+             (nil? (database/current-lease! db "resource-A"))))
 
 (def numeric-result
   (database/assert! db (t/triple "measurement" :value (float 1.5)) {}))
@@ -179,16 +179,16 @@
                     (t/operationoccurrence-proposition
                      (first (:occurrences numeric-result))))))
 
-(def before-restart (store/dump-term-store (database/database-store db)))
+(def before-restart (store/dump-term-store (database/database-store! db)))
 (def restarted (database/open-database! (.getPath log-file) "database-space"))
 (check! "cold STORELOG replay reconstructs the exact TermStore v2 dump"
         (= before-restart
-           (store/dump-term-store (database/database-store restarted))))
+           (store/dump-term-store (database/database-store! restarted))))
 (check! "cold replay preserves system history and effective projections"
-        (and (= (database/occurrences db) (database/occurrences restarted))
-             (= (database/withdrawals db) (database/withdrawals restarted))
-             (= (database/live-occurrences db)
-                (database/live-occurrences restarted))))
+        (and (= (database/occurrences! db) (database/occurrences! restarted))
+             (= (database/withdrawals! db) (database/withdrawals! restarted))
+             (= (database/live-occurrences! db)
+                (database/live-occurrences! restarted))))
 
 ;; A torn trailing record is dropped as a whole. Passive readers report it and
 ;; cannot append; an authority-holding boot truncates exactly to valid-bytes.
@@ -200,7 +200,7 @@
 (check! "passive boot drops and reports a torn trailing transaction record"
         (and (:torn-tail passive)
              (= before-restart
-                (store/dump-term-store (database/database-store passive)))))
+                (store/dump-term-store (database/database-store! passive)))))
 (check! "passive torn generation refuses concatenating a later transaction"
         (= :torn-tail-repair-required
            (error-code #(database/assert! passive nested {}))))
@@ -213,7 +213,7 @@
 (database/assert! repaired nested {})
 (def after-repair (database/open-database! (.getPath log-file) "database-space"))
 (check! "a repaired generation accepts and cold-replays the next whole record"
-        (some #{nested} (database/live-propositions after-repair)))
+        (some #{nested} (database/live-propositions! after-repair)))
 
 ;; A thrown append cannot reveal whether the record reached stable storage. The
 ;; database rebuilds its readable state from disk but stays mutation-fenced.
@@ -238,7 +238,7 @@
         (and (= :recovery-required
                 (:status (database/database-recovery-state pre-append-db)))
              (= (t/transaction-coordinate "pre-append-space" 0)
-                (database/current-transaction pre-append-db))
+                (database/current-transaction! pre-append-db))
              (empty? (:records
                       (database/read-triple-log! (.getPath pre-append-file))))))
 (check! "pre-append database rejects retry until restart"
@@ -271,9 +271,77 @@
                       (:records (database/read-triple-log! (.getPath cohort-file)))))))
 (check! "a successful cohort publishes its final private root atomically"
         (and (= (t/transaction-coordinate "cohort-space" 2)
-                (database/current-transaction cohort-db))
+                (database/current-transaction! cohort-db))
              (= #{(t/triple "group" :item 1) (t/triple "group" :item 2)}
-                (set (database/live-propositions cohort-db)))))
+                (set (database/live-propositions! cohort-db)))))
+
+(def checkpoint-publish-var
+  (ns-resolve 'store.checkpoint 'publish!))
+(def checkpoint-publish-original @checkpoint-publish-var)
+(def rollover-cohort-file
+  (java.io.File. scratch "rollover-cohort.storelog"))
+(database/create-triple-log!
+ (.getPath rollover-cohort-file) "rollover-cohort-space")
+(def rollover-cohort-db
+  (database/open-database!
+   (.getPath rollover-cohort-file) "rollover-cohort-space"
+   {:tail-row-limit 217 :tail-byte-limit 1048576}))
+(def rollover-seed (t/triple "rollover-seed-left" :edge "rollover-seed-right"))
+(def rollover-first (t/triple "rollover-first-left" :edge "rollover-first-right"))
+(def rollover-second (t/triple "rollover-second-left" :edge "rollover-second-right"))
+(database/assert! rollover-cohort-db rollover-seed {})
+(def rollover-events (atom []))
+(def rollover-barriers (atom 0))
+(def rollover-record-counts (atom []))
+(def rollover-checkpoints (atom []))
+(def rollover-cohort-result
+  (with-redefs-fn
+    {append-cohort-var
+     (fn [path records deflate?]
+       (swap! rollover-barriers inc)
+       (swap! rollover-record-counts conj (count records))
+       (let [result (append-cohort-original path records deflate?)]
+         (swap! rollover-events conj :cohort-force-returned)
+         result))
+     checkpoint-publish-var
+     (fn [context directory source-for-revision]
+       (swap! rollover-events conj :checkpoint-publish)
+       (let [result
+             (checkpoint-publish-original
+              context directory source-for-revision)]
+         (swap! rollover-checkpoints conj result)
+         result))}
+    #(database/commit-cohort!
+      rollover-cohort-db
+      [(fn [db] (database/assert! db rollover-first {}))
+       (fn [db] (database/assert! db rollover-second {}))])))
+(def rollover-storage
+  (:storage (database/database-status! rollover-cohort-db)))
+(def rollover-reopened
+  (database/open-database!
+   (.getPath rollover-cohort-file) "rollover-cohort-space"
+   {:tail-row-limit 217 :tail-byte-limit 1048576}))
+(check! "cohort rollover publishes only after its durable record barrier"
+        (and (= [:cohort-force-returned :checkpoint-publish]
+                @rollover-events)
+             (= 1 @rollover-barriers)
+             (= [2] @rollover-record-counts)
+             (= 2 (:record-count rollover-cohort-result))))
+(check! "cohort rollover publishes only its final revision with an empty bounded suffix"
+        (and (= (t/transaction-coordinate "rollover-cohort-space" 3)
+                (:version rollover-cohort-result))
+             (= [3] (mapv :version @rollover-checkpoints))
+             (= 3 (:prefix-transactions rollover-storage))
+             (= 0 (:suffix-transactions rollover-storage))
+             (<= (:tail-rows rollover-storage)
+                 (:tail-row-limit rollover-storage))))
+(check! "cohort rollover reopens with the exact published live state"
+        (and (= #{rollover-seed rollover-first rollover-second}
+                (set (database/live-propositions! rollover-cohort-db)))
+             (= (store/dump-term-store
+                 (database/database-store! rollover-cohort-db))
+                (store/dump-term-store
+                 (database/database-store! rollover-reopened)))))
 
 (def failed-cohort-file (java.io.File. scratch "failed-cohort.storelog"))
 (database/create-triple-log! (.getPath failed-cohort-file) "failed-cohort-space")
@@ -296,7 +364,7 @@
              (= :recovery-required
                 (:status (database/database-recovery-state failed-cohort-db)))
              (= (t/transaction-coordinate "failed-cohort-space" 0)
-                (database/current-transaction failed-cohort-db))
+                (database/current-transaction! failed-cohort-db))
              (empty? (:records
                       (database/read-triple-log! (.getPath failed-cohort-file))))))
 
@@ -319,7 +387,7 @@
         (and (= :recovery-required
                 (:status (database/database-recovery-state post-force-db)))
              (= (t/transaction-coordinate "post-force-space" 1)
-                (database/current-transaction post-force-db))
+                (database/current-transaction! post-force-db))
              (= [1] (mapv :tx-seq
                            (:records
                             (database/read-triple-log!
@@ -340,7 +408,7 @@
                       (:records
                        (database/read-triple-log! (.getPath post-force-file)))))
              (= (t/transaction-coordinate "post-force-space" 2)
-                (database/current-transaction
+                (database/current-transaction!
                  (database/open-database! (.getPath post-force-file)
                                           "post-force-space")))))
 
@@ -369,7 +437,7 @@
                 (error-code
                  #(database/assert! corrupt-db (t/triple "bad" :retry true) {})))
              (= :database-corrupt
-                (error-code #(database/current-transaction corrupt-db)))))
+                (error-code #(database/current-transaction! corrupt-db)))))
 
 (check! "public write responses expose no cid handle"
         (not-any? #(and (map? %) (contains? % :cid))
