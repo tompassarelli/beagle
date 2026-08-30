@@ -875,7 +875,8 @@ export function createCompilerBridge({
       return text.slice(text.lastIndexOf("/") + 1);
     },
     location(context, node) {
-      const point = context.source.getLineAndCharacterOfPosition(node.getStart(context.source));
+      const anchor = node ?? context.source;
+      const point = context.source.getLineAndCharacterOfPosition(anchor.getStart(context.source));
       return {
         file: logicalCanonical(context.projectRoot, context.source.fileName, "TypeScript source file"),
         line: point.line + 1,
