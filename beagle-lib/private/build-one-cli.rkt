@@ -10,7 +10,8 @@
          "lint.rkt"
          "module-overlay-check.rkt"
          "module-source-root.rkt"
-         "module-source-root-cli.rkt")
+         "module-source-root-cli.rkt"
+         "typescript-foreign-resolver-v1.rkt")
 
 (define (parse-build-one-arguments args)
   (define-values (roots remaining)
@@ -39,7 +40,8 @@
 
 (define (run-build-one-cli args)
   (define-values (roots input) (parse-build-one-arguments args))
-  (define closure (resolve-module-source-closure (list input) roots))
+  (define closure
+    (resolve-production-module-source-closure (list input) roots))
   (define checked
     (check-module-source-closure
      closure

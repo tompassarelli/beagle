@@ -1,0 +1,9 @@
+#lang beagle/js
+
+(ns typescript-foreign-interface-v1.rename-consumer
+  (:require ["@fixture/foreign-interface-v1"
+             :refer [parse UserId]
+             :rename {parse choose}]))
+
+(js/export
+  (def selected UserId (choose "public-route")))

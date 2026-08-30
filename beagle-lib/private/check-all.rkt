@@ -13,6 +13,7 @@
          "module-overlay-check.rkt"
          "module-source-root.rkt"
          "module-source-root-cli.rkt"
+         "typescript-foreign-resolver-v1.rkt"
          "validate-nix.rkt"
          "extensions.rkt"
          "targets.rkt")
@@ -552,7 +553,7 @@
           (lambda (error)
             (capture! (car files) 'resolve error #f)
             #f)])
-      (resolve-module-source-closure explicit-inputs roots)))
+      (resolve-production-module-source-closure explicit-inputs roots)))
 
   (when closure
     (for ([snapshot (in-list (module-source-closure-snapshots closure))])

@@ -1,0 +1,7 @@
+#lang beagle/js
+
+(ns export-xmodule.native-esm-identity
+  (:require ["pkg.name" :as native :refer [send-message]]
+            [pkg.name :as local :refer [wire_name]]))
+
+(def marker String (send-message (wire_name "value")))

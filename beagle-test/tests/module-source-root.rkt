@@ -5,6 +5,8 @@
          racket/list
          racket/path
          racket/string
+         beagle/private/foreign-interface-v1
+         beagle/private/module-interface
          beagle/private/module-overlay-check
          beagle/private/module-source-root)
 
@@ -42,6 +44,50 @@
   (for/list ([module (in-list (overlay-check-result-modules result))])
     (cons (checked-overlay-module-source module)
           (string->bytes/utf-8 (checked-overlay-module-emitted module)))))
+
+(define ZERO-SHA256 (make-string 64 #\0))
+
+(define (minimal-foreign-module-source module-specifier export-name)
+  (foreign-interface-v1->module-source
+   (validate-foreign-interface-v1
+    (hash
+     'kind FOREIGN-INTERFACE-KIND
+     'schemaVersion FOREIGN-INTERFACE-SCHEMA-VERSION
+     'frontend "typescript"
+     'moduleSpecifier module-specifier
+     'exports
+     (list
+      (hash 'name export-name
+            'space "value"
+            'node "n:string"
+            'runtimeName export-name))
+     'nodes
+     (list (hash 'id "n:string" 'kind "primitive" 'name "string"))
+     'obligations '()
+     'provenance
+     (hash
+      'adapter
+      (hash 'source "src/adapter.bjs"
+            'sourceSha256 ZERO-SHA256
+            'compiled (format "compiled/~a.mjs" ZERO-SHA256)
+            'compiledSha256 ZERO-SHA256
+            'version "1.0.0")
+      'typescript
+      (hash 'version "5.9.3"
+            'path "node_modules/typescript/lib/typescript.js"
+            'sha256 ZERO-SHA256)
+      'compilerOptions (hash)
+      'moduleSpecifier module-specifier
+      'conditions '()
+      'package (hash 'path "package.json" 'sha256 ZERO-SHA256)
+      'lockfile (hash 'path "bun.lock" 'sha256 ZERO-SHA256)
+      'consultedFiles '())
+     'stats
+     (hash 'nodeCount 1
+           'exportCount 1
+           'obligationCount 0
+           'anyCount 0
+           'generatedSourceCount 0)))))
 
 (define entry-text
   (string-append
@@ -116,6 +162,93 @@
                   (checked-output enumerated-result))
     (check-equal? (overlay-check-result-overlay-digest rooted-result)
                   (overlay-check-result-overlay-digest enumerated-result)))))
+
+(test-case
+ "foreign resolution is physical once and frozen for coherent and incremental reparsing"
+ (with-source-tree
+  (lambda (tree)
+    (define entry-path (build-path tree "entry.bjs"))
+    (write-source!
+     entry-path
+     (string-append
+      "#lang beagle/js\n"
+      "(ns app.entry\n"
+      "  (:require [\"pkg.name\" :as native :refer [send-message]]))\n"
+      "(def marker String \"ok\")\n"))
+    (define foreign-source
+      (minimal-foreign-module-source "pkg.name" "send-message"))
+    (define resolutions '())
+    (define closure
+      (resolve-module-source-closure
+       (list (module-source-input "app/entry.bjs" entry-path))
+       '()
+       #:foreign-module-resolver
+       (lambda (identity physical-importer)
+         (set! resolutions
+               (cons (cons identity physical-importer) resolutions))
+         foreign-source)))
+    (define exact-identity (module-identity 'native-esm "pkg.name"))
+    (check-equal? (length resolutions) 1)
+    (check-equal? (caar resolutions) exact-identity)
+    (check-equal?
+     (cdar resolutions)
+     (module-source-closure-physical-path closure "app/entry.bjs"))
+    (check-true
+     (immutable?
+      (module-source-closure-foreign-module-resolutions closure)))
+    (check-eq?
+     (module-source-closure-resolve-foreign-module
+      closure exact-identity "app/entry.bjs")
+     foreign-source)
+    (define checked (check-module-source-closure closure #:emit? #f))
+    (check-true
+     (overlay-check-result-ok? checked)
+     (format "~a" (overlay-check-result-diagnostics checked)))
+    (define incremental
+      (check-module-source-closure/incremental
+       closure
+       (make-incremental-module-check-cache)))
+    (check-true
+     (overlay-check-result-ok?
+      (incremental-overlay-check-result-check-result incremental))
+     (format
+      "~a"
+      (overlay-check-result-diagnostics
+       (incremental-overlay-check-result-check-result incremental))))
+    (check-equal?
+     (length resolutions)
+     1
+     "coherent and incremental reparsing must consume the frozen result without rerunning the resolver"))))
+
+(test-case
+ "a false foreign resolution is physical once and then fails closed"
+ (with-source-tree
+  (lambda (tree)
+    (define entry-path (build-path tree "entry.bjs"))
+    (write-source!
+     entry-path
+     (string-append
+      "#lang beagle/js\n"
+      "(ns app.entry\n"
+      "  (:require [\"pkg.name\" :as native :refer [send-message]]))\n"
+      "(def marker String \"ok\")\n"))
+    (define resolutions '())
+    (check-exn
+     #rx"pkg[.]name.*foreign (module resolver|interface)"
+     (lambda ()
+       (resolve-module-source-closure
+        (list (module-source-input "app/entry.bjs" entry-path))
+        '()
+        #:foreign-module-resolver
+        (lambda (identity physical-importer)
+          (set! resolutions
+                (cons (cons identity physical-importer) resolutions))
+          #f))))
+    (check-equal? (length resolutions) 1)
+    (check-equal? (caar resolutions)
+                  (module-identity 'native-esm "pkg.name"))
+    (check-equal? (cdar resolutions)
+                  (simplify-path (path->complete-path entry-path) #f)))))
 
 (test-case
  "a namespace collision is rejected independently of root order"

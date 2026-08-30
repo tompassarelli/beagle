@@ -159,6 +159,14 @@ declare -A BEAGLE_TEST_PHASE_DEADLINE=(
     [checkout-first]=30
     # honest <1s. Same floor reasoning, smaller work.
     [qualified-ref-scaffold]=15
+    # Many isolated Babashka admissions plus sealed dispatch/publication probes;
+    # 120s admits cold startup while remaining a useful hang detector.
+    [hosted-preflight-routing]=120
+    # One public check/build/AST route plus the exact TypeScript projection.
+    # The parser-first landing currently forbids timing this new phase, so this
+    # is an explicit first-run hang ceiling, to be priced from the first
+    # permitted full-route observation before release.
+    [typescript-foreign-interface-v1-public-route]=600
     # honest 2s once the typed planner and Rust supervisor are cached; 240s
     # admits a cold compiler/supervisor build without turning slowness into a
     # false product verdict.
@@ -668,15 +676,21 @@ run_beagle_test_shards() {
 beagle_test_fact_write_declared_claims() {
     local runner="$BEAGLE_ROOT/beagle-lib/private/tier-runner.rkt"
     local phase
-    for phase in racket-scope checkout-first qualified-ref-scaffold consumer-smoke; do
+    [[ -n "$BEAGLE_TEST_BUN" ]] || {
+        echo "beagle-test: Bun is required for JavaScript gate phases; enter the Beagle development shell" >&2
+        return 1
+    }
+    for phase in \
+        racket-scope \
+        checkout-first \
+        qualified-ref-scaffold \
+        hosted-preflight-routing \
+        typescript-foreign-interface-v1-public-route \
+        consumer-smoke; do
         beagle_test_fact_write_claim \
             "$phase" "$(beagle_test_deadline "$phase")" "$phase" \
             "$BEAGLE_ROOT/bin/test/$phase/run.sh" || return 1
     done
-    [[ -n "$BEAGLE_TEST_BUN" ]] || {
-        echo "beagle-test: Bun is required for byte-stable-emit; enter the Beagle development shell" >&2
-        return 1
-    }
     beagle_test_fact_write_claim \
         "byte-stable-emit" "$(beagle_test_deadline byte-stable-emit)" \
         "byte-stable-emit" "$BEAGLE_TEST_BUN" \
@@ -734,11 +748,15 @@ if [[ "$BEAGLE_TEST_SELECT_CHANGED" == 1 ]]; then
     beagle_selection_report "$BEAGLE_ROOT"
     if [[ "$BEAGLE_SELECTION_MODE" == narrow ]]; then
         for beagle_test_phase in "${BEAGLE_SELECTION_PHASES[@]}"; do
+            case "$beagle_test_phase" in
+                byte-stable-emit|typescript-foreign-interface-v1-public-route)
+                    [[ -n "$BEAGLE_TEST_BUN" ]] || {
+                        echo "beagle-test: Bun is required for JavaScript gate phases; enter the Beagle development shell" >&2
+                        exit 2
+                    }
+                    ;;
+            esac
             if [[ "$beagle_test_phase" == byte-stable-emit ]]; then
-                [[ -n "$BEAGLE_TEST_BUN" ]] || {
-                    echo "beagle-test: Bun is required for byte-stable-emit; enter the Beagle development shell" >&2
-                    exit 2
-                }
                 run_beagle_test_phase "$beagle_test_phase" "$BEAGLE_TEST_BUN" \
                     "$BEAGLE_ROOT/bin/test/byte-stable-emit/run.mjs" "$RACKET" || exit $?
             else
@@ -765,10 +783,14 @@ run_beagle_test_phase "checkout-first" \
     "$BEAGLE_ROOT/bin/test/checkout-first/run.sh" || exit $?
 run_beagle_test_phase "qualified-ref-scaffold" \
     "$BEAGLE_ROOT/bin/test/qualified-ref-scaffold/run.sh" || exit $?
+run_beagle_test_phase "hosted-preflight-routing" \
+    "$BEAGLE_ROOT/bin/test/hosted-preflight-routing/run.sh" || exit $?
 [[ -n "$BEAGLE_TEST_BUN" ]] || {
-    echo "beagle-test: Bun is required for byte-stable-emit; enter the Beagle development shell" >&2
+    echo "beagle-test: Bun is required for JavaScript gate phases; enter the Beagle development shell" >&2
     exit 2
 }
+run_beagle_test_phase "typescript-foreign-interface-v1-public-route" \
+    "$BEAGLE_ROOT/bin/test/typescript-foreign-interface-v1-public-route/run.sh" || exit $?
 run_beagle_test_phase "byte-stable-emit" "$BEAGLE_TEST_BUN" \
     "$BEAGLE_ROOT/bin/test/byte-stable-emit/run.mjs" "$RACKET" || exit $?
 run_beagle_test_phase "consumer-smoke" \

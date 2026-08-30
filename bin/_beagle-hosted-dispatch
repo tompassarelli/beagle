@@ -10,6 +10,18 @@ _beagle_hosted_error() {
     return 2
 }
 
+_beagle_hosted_discard() {
+    rm -f -- "$@" ||
+        _beagle_hosted_error "cannot remove staged hosted build artifacts"
+}
+
+_beagle_hosted_abort_staged_build() {
+    local message="$1"
+    shift
+    _beagle_hosted_discard "$@" || return 2
+    _beagle_hosted_error "$message"
+}
+
 _beagle_hosted_target_for_source() {
     local source="$1" target
     for target in "${BEAGLE_HOSTED_TARGET_IDS[@]}"; do
@@ -44,10 +56,11 @@ _beagle_hosted_prepare_native() {
     [[ -r "$selector" ]] ||
         _beagle_hosted_error "native hosted compiler selector is unavailable: $selector" || return
     # shellcheck source=../self-host/native/stage0-select.sh
-    source "$selector"
+    source "$selector" ||
+        _beagle_hosted_error "cannot load native hosted compiler selector: $selector" || return
     beagle_select_stage0 \
         "$BEAGLE_DIR/self-host/seed" \
-        "$default_native" || return $?
+        "$default_native" || return 2
     [[ "$STAGE0" == native && -n "$NATIVE_BIN" ]] ||
         _beagle_hosted_error "native hosted compiler selection returned no executable" || return
 
@@ -78,7 +91,8 @@ _beagle_hosted_prepare_native() {
             _beagle_hosted_error "selected checkout-local native hosted compiler lacks seed provenance: $sidecar" || return
         command -v nix >/dev/null 2>&1 ||
             _beagle_hosted_error "cannot verify selected native hosted compiler provenance (nix unavailable)" || return
-        recorded_hash="$(tr -d '\r\n' < "$sidecar")"
+        recorded_hash="$(tr -d '\r\n' < "$sidecar")" ||
+            _beagle_hosted_error "cannot read selected native hosted compiler provenance: $sidecar" || return
         current_hash="$(nix hash path "$BEAGLE_DIR/self-host/seed")" ||
             _beagle_hosted_error "cannot hash hosted compiler seed: $BEAGLE_DIR/self-host/seed" || return
         [[ -n "$recorded_hash" && "$recorded_hash" == "$current_hash" ]] ||
@@ -141,7 +155,7 @@ _beagle_hosted_check_or_ast() {
     shift
     _beagle_hosted_parse_single_source "$command" "$@" || return $?
 
-    local target
+    local target status
     target="$(_beagle_hosted_target_for_source "$BEAGLE_HOSTED_SOURCE")" || {
         [[ "$BEAGLE_HOSTED_SOURCE" == *".${BEAGLE_TARGET_SRC_EXT[core]}" ]] &&
             return "$BEAGLE_HOSTED_NOT_APPLICABLE"
@@ -152,22 +166,20 @@ _beagle_hosted_check_or_ast() {
         _beagle_hosted_error "$command source file not found: $BEAGLE_HOSTED_SOURCE" || return
 
     _beagle_hosted_prepare_native || return $?
-    exec "$BEAGLE_HOSTED_NATIVE" "$command" --target "$target" \
-        "${BEAGLE_HOSTED_MODULE_ROOTS[@]}" "$BEAGLE_HOSTED_SOURCE"
+    if "$BEAGLE_HOSTED_NATIVE" "$command" --target "$target" \
+        "${BEAGLE_HOSTED_MODULE_ROOTS[@]}" -- "$BEAGLE_HOSTED_SOURCE"; then
+        return 0
+    else
+        status=$?
+        return "$status"
+    fi
 }
 
 _beagle_hosted_build() {
     local explicit_target="" target_seen=false after_double_dash=false
     local arg source source_profile target output_extension namespace relative out
+    local out_directory out_real source_real scratch tmp status
     local -a module_roots=() positionals=()
-
-    for arg in "$@"; do
-        case "$arg" in
-            --materializer|--materializer=*)
-                return "$BEAGLE_HOSTED_NOT_APPLICABLE"
-                ;;
-        esac
-    done
 
     while [[ $# -gt 0 ]]; do
         arg="$1"
@@ -201,6 +213,9 @@ _beagle_hosted_build() {
             --module-root=*)
                 module_roots+=(--module-root "${arg#*=}")
                 ;;
+            --materializer|--materializer=*)
+                return "$BEAGLE_HOSTED_NOT_APPLICABLE"
+                ;;
             --)
                 after_double_dash=true
                 ;;
@@ -233,10 +248,12 @@ _beagle_hosted_build() {
     if [[ ${#positionals[@]} -eq 2 ]]; then
         out="${positionals[1]}"
     else
-        namespace="$(sed -nE 's/^[[:space:]]*\(ns[[:space:]]+([A-Za-z0-9._-]+).*/\1/p' "$source" | head -1 | tr -d '[:space:]')"
+        namespace="$(sed -nE 's/^[[:space:]]*\(ns[[:space:]]+([A-Za-z0-9._-]+).*/\1/p' -- "$source" | head -1 | tr -d '[:space:]')" ||
+            _beagle_hosted_error "cannot derive output namespace from hosted source: $source" || return
         [[ -n "$namespace" ]] || namespace=beagle.user
         if [[ "$output_extension" == clj ]]; then
-            relative="$(printf '%s\n' "$namespace" | tr '.-' '/_')"
+            relative="$(printf '%s\n' "$namespace" | tr '.-' '/_')" ||
+                _beagle_hosted_error "cannot derive hosted output path from namespace: $namespace" || return
         else
             relative="${namespace//./\/}"
         fi
@@ -244,24 +261,50 @@ _beagle_hosted_build() {
     fi
 
     _beagle_hosted_prepare_native || return $?
-    mkdir -p "$(dirname "$out")"
-    local tmp status
-    tmp="$(mktemp "${out}.XXXXXX")"
+    source_real="$(realpath -- "$source")" ||
+        _beagle_hosted_error "cannot resolve hosted build source: $source" || return
+    out_directory="$(dirname -- "$out")" ||
+        _beagle_hosted_error "cannot resolve hosted output directory: $out" || return
+    scratch="$(mktemp -- "${TMPDIR:-/tmp}/beagle-hosted-build.XXXXXX")" ||
+        _beagle_hosted_error "cannot create hosted build staging file" || return
     if "$BEAGLE_HOSTED_NATIVE" emit --target "$target" \
-        "${module_roots[@]}" "$(realpath "$source")" > "$tmp"; then
-        mv "$tmp" "$out"
+        "${module_roots[@]}" -- "$source_real" > "$scratch"; then
+        status=0
     else
         status=$?
-        rm -f "$tmp"
+    fi
+    if [[ $status -ne 0 ]]; then
+        _beagle_hosted_discard "$scratch" || return 2
         return "$status"
     fi
-    printf '%s -> %s\n' "$source" "$out" >&2
+
+    mkdir -p -- "$out_directory" ||
+        _beagle_hosted_abort_staged_build \
+            "cannot create hosted output directory: $out_directory" \
+            "$scratch" || return
+    tmp="$(mktemp -- "${out}.XXXXXX")" ||
+        _beagle_hosted_abort_staged_build \
+            "cannot create hosted publication file beside: $out" \
+            "$scratch" || return
+    cp -- "$scratch" "$tmp" ||
+        _beagle_hosted_abort_staged_build \
+            "cannot stage hosted build output for publication: $out" \
+            "$scratch" "$tmp" || return
+    mv -- "$tmp" "$out" ||
+        _beagle_hosted_abort_staged_build \
+            "cannot publish hosted build output atomically: $out" \
+            "$scratch" "$tmp" || return
+    _beagle_hosted_discard "$scratch" || return 2
+    printf '%s -> %s\n' "$source" "$out" >&2 || return 2
 
     if [[ "$output_extension" == nix && "${BEAGLE_NIX_EVAL_CHECK:-0}" == 1 ]]; then
         if command -v nix-instantiate >/dev/null 2>&1; then
-            nix-instantiate --parse "$out" >/dev/null
+            out_real="$(realpath -- "$out")" ||
+                _beagle_hosted_error "cannot resolve emitted Nix for parse validation: $out" || return
+            nix-instantiate --parse -- "$out_real" >/dev/null ||
+                _beagle_hosted_error "emitted Nix failed parse validation: $out" || return
         else
-            _beagle_hosted_error "BEAGLE_NIX_EVAL_CHECK=1 but nix-instantiate is unavailable"
+            _beagle_hosted_error "BEAGLE_NIX_EVAL_CHECK=1 but nix-instantiate is unavailable" || return
         fi
     fi
 }

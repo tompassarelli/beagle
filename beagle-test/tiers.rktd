@@ -71,6 +71,12 @@
              "code-as-facts-rename.rkt" ; hermetic recursive-fact edit/reconstruction floor; Beagle Store owns scope resolution
              "cross-module-dynvar.rkt"  ; G-A — cross-module `binding` of an imported ^:dynamic var
              "export-xmodule.rkt"       ; a js/export'd definition keeps its signature across modules + on the query surface
+             "foreign-interface-v1-schema.rkt"
+             "foreign-interface-v1-checker.rkt"
+             "foreign-module-rename.rkt"
+             "foreign-module-resolution.rkt"
+             "jst-call-contract-regression.rkt"
+             "typescript-foreign-resolver-v1.rkt"
              "ts-externs.rkt"           ; TypeScript declarations -> typed beagle wrappers (beagle ts-externs)
              "variant-xmodule.rkt"      ; an imported defunion's ctor/accessor/field/exhaustiveness surface == same-module
              "generic-type-arity.rkt"   ; local/imported parametric constructors require their exact argument count

@@ -97,7 +97,7 @@ check "no Racket or Babashka descendant executed" \
     test -z "$(grep -E 'execve\("([^"]*/)?(racket|raco|bb|babashka)"' "$trace" || true)"
 
 native_execs="$(grep -Fc "execve(\"$native\"" "$trace")"
-check "all eight hosted decisions selected the Graal artifact" \
+check "all eight hosted commands selected the Graal artifact exactly once" \
     test "$native_execs" -eq 8
 
 printf 'hosted selfhost normal: %d passed, 0 failed; native=%s seed=%s\n' \

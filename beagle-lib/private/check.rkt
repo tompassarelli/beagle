@@ -18,6 +18,7 @@
          "macros.rkt"
          "diagnostic-kind.rkt"
          "callable-arity.rkt"
+         "foreign-interface-v1.rkt"
          "type-facts-v1.rkt")
 
 (define (named-reference? ref)
@@ -737,6 +738,27 @@
           details+src
           fact)))
 
+(define (call-with-foreign-diagnostic node query)
+  (with-handlers
+      ([exn:fail:foreign-interface?
+        (lambda (failure)
+          (raise-diag
+           'type-mismatch
+           (exn-message failure)
+           (hash-set*
+            (exn:fail:foreign-interface-details failure)
+            'foreign-error-kind
+            (symbol->string (exn:fail:foreign-interface-kind failure))
+            'foreign-interface-id
+            (exn:fail:foreign-interface-interface-id failure)
+            'foreign-node-id
+            (or (exn:fail:foreign-interface-node-id failure) 'null))
+           #:src (src-for node)))])
+    (query)))
+
+(define-syntax-rule (with-foreign-diagnostic node body ...)
+  (call-with-foreign-diagnostic node (lambda () body ...)))
+
 ;; --- "did you mean?" suggestions --------------------------------------------
 
 (define (extract-module-prefix sym)
@@ -1131,6 +1153,14 @@
              'predicate (format "~s" (type-refinement-predicate refinement)))
      #:src (src-for owner))))
 
+(define-syntax-rule (with-foreign-check-context prog body ...)
+  (parameterize
+      ([current-foreign-interfaces
+        (foreign-interfaces-for-module-imports
+         (program-imported-module-interfaces prog))]
+       [current-foreign-type-compatible? foreign-type-compatible-v1])
+    body ...))
+
 (define (type-check! prog)
   (when (>= (current-check-profile) 1)
     (clear-program-shadow-evidence! prog)
@@ -1148,7 +1178,9 @@
            (let ([src (program-source-file prog)])
              (and src (load-nixos-schema-cached src)))))
     (define macro-tbl (program-macro-derived-table prog))
-    (parameterize ([current-check-src-table (program-src-table prog)]
+    (with-foreign-check-context
+     prog
+     (parameterize ([current-check-src-table (program-src-table prog)]
                    [current-union-members UNION-MEMBERS]
                    [current-enum-types ENUM-TYPES]
                    [current-check-target (program-target prog)]
@@ -1200,28 +1232,9 @@
              (check-qualified-resolution! prog env)
              (check-scalar-provenance! prog)
              (check-nix-free-dotted! prog)
-             (check-purity! prog))))))))
+             (check-purity! prog)))))))))
 
 ;; --- concrete native boundaries ---------------------------------------------
-
-;; `Any` is universal during ordinary inference.
-(define (type-contains-any? t)
-  (cond
-    [(not t) #f]
-    [(type-prim? t) (eq? (type-prim-name t) 'Any)]
-    [(type-app? t) (ormap type-contains-any? (type-app-args t))]
-    [(type-union? t) (ormap type-contains-any? (type-union-alts t))]
-    [(type-fn? t)
-     (or (ormap type-contains-any? (type-fn-params t))
-         (and (type-fn-rest-type t)
-              (type-contains-any? (type-fn-rest-type t)))
-         (type-contains-any? (type-fn-ret t)))]
-    [(type-poly? t)
-     (or (type-contains-any? (type-poly-body t))
-         (and (type-poly-bounds t)
-              (for/or ([bound (in-hash-values (type-poly-bounds t))])
-                (type-contains-any? bound))))]
-    [else #f]))
 
 (define (constraint-synchronization-proof predicate)
   (cond
@@ -1268,7 +1281,7 @@
      node "Dyn requires at least one concrete alternative"
      (hasheq 'declared (type->string t))))
   (for ([alt (in-list alternatives)])
-    (when (type-contains-any? alt)
+    (when (type-has-any? alt)
       (dynamic-contract-error
        node
        (format "Dyn alternative ~a cannot contain Any" (type->string alt))
@@ -2665,11 +2678,11 @@
       (raise-binding-constraint target #f predicate #f context
                                 "a constraint requires an explicit declared type"
                                 owner))
-    (when (type-contains-any? declared)
+    (when (type-has-any? declared)
       (raise-binding-constraint target declared predicate declared context
                                 "the declared input contains Any" owner))
     (define inferred (infer-expr predicate env))
-    (when (or (not inferred) (type-contains-any? inferred))
+    (when (or (not inferred) (type-has-any? inferred))
       (raise-binding-constraint target declared predicate inferred context
                                 "the predicate type contains Any" owner))
     (define callable
@@ -2685,8 +2698,8 @@
                                 owner))
     (define input-type (car (type-fn-params callable)))
     (define return-type (type-fn-ret callable))
-    (when (or (type-contains-any? input-type)
-              (type-contains-any? return-type))
+    (when (or (type-has-any? input-type)
+              (type-has-any? return-type))
       (raise-binding-constraint target declared predicate callable context
                                 "the predicate signature contains Any" owner))
     (define input-ok?
@@ -3737,7 +3750,7 @@
   (define final (zonk-type type))
   (when (or (type-poly? final)
             (pair? (free-type-metas final))
-            (type-contains-any? final))
+            (type-has-any? final))
     (raise-diag
      'definition-inference
      (format
@@ -4670,6 +4683,10 @@
   (walk form #f))
 
 (define (check-form form env)
+  (with-foreign-diagnostic form
+    (check-form* form env)))
+
+(define (check-form* form env)
   (match form
     [(def-form name expected-type value _ _ _)
      ;; The declared type lives in expected-type; the pre-pass mirrors it into
@@ -5930,9 +5947,10 @@
 ;; is a no-op when no table is bound (the normal check path), so this adds
 ;; nothing to ordinary type-checking. The real cond body is infer-expr*.
 (define (infer-expr e env)
-  (define t (infer-expr* e env))
-  (store-type! e t)
-  t)
+  (with-foreign-diagnostic e
+    (define t (infer-expr* e env))
+    (store-type! e t)
+    t))
 
 (define (this-as-call? e)
   (and (call-form? e)
@@ -6896,6 +6914,12 @@
           inferred-call-type]
          [else raw-type]))
      (cond
+       [(type-foreign? fn-type)
+        (define arguments (call-form-args e))
+        (define argument-types
+          (for/list ([argument (in-list arguments)])
+            (infer-expr argument env)))
+        (foreign-call-v1 fn-type arguments argument-types)]
        [(type-fn? fn-type)
         (define arg-types
           (check-args call-name fn-type (call-form-args e) env e))
@@ -7030,16 +7054,64 @@
   (define receiver-type (infer-expr receiver env))
   (cond
     [(not (jst-selector? key))
-     (infer-expr key env)
-     ANY]
+     (define key-type (infer-expr key env))
+     (cond
+       [(type-foreign? receiver-type)
+        (or (foreign-index-type-v1
+             receiver-type key-type #:key-expression key)
+            (raise-diag
+             'type-mismatch
+             (format "property access: ~a has no matching index signature"
+                     (type->string receiver-type))
+             (hasheq 'form "property access"
+                     'receiver-type (type->string receiver-type)
+                     'key-type (type->string key-type))
+             #:src (src-for e)))]
+       [else ANY])]
     [else
      (define selector (jst-selector-name key))
      (cond
+       [(type-foreign? receiver-type)
+        (or (foreign-member-type-v1 receiver-type selector)
+            (raise-unknown-jst-record-member
+             "property access" receiver-type selector e))]
        [(jst-static-member-contract receiver-type selector) => values]
        [(jst-closed-record-receiver? receiver-type)
         (raise-unknown-jst-record-member
          "property access" receiver-type selector e)]
        [else ANY])]))
+
+(define (infer-jst-call-contract raw-contract selector receiver-type args env e)
+  (cond
+    [(type-foreign? raw-contract)
+     (define argument-types
+       (for/list ([argument (in-list args)])
+         (infer-expr argument env)))
+     (foreign-call-v1 raw-contract args argument-types)]
+    [raw-contract
+     (define contract
+       (if (type-poly? raw-contract)
+           (resolve-poly-call raw-contract args env)
+           raw-contract))
+     (cond
+       [(type-fn? contract)
+        (check-args (string->symbol selector) contract args env e)
+        (zonk-type (type-fn-ret contract))]
+       [else
+        (raise-diag
+         'type-mismatch
+         (format "member call: .~a on ~a has non-callable type ~a"
+                 selector
+                 (type->string receiver-type)
+                 (type->string contract))
+         (hasheq 'form "member call"
+                 'member selector
+                 'receiver-type (type->string receiver-type)
+                 'actual (type->string contract))
+         #:src (src-for e))])]
+    [else
+     (for-each (lambda (arg) (infer-expr arg env)) args)
+     ANY]))
 
 (define (infer-jst-call e env)
   (define receiver (jst-call-receiver e))
@@ -7048,41 +7120,41 @@
   (define receiver-type (infer-expr receiver env))
   (cond
     [(not (jst-selector? key))
-     (infer-expr key env)
-     (for-each (lambda (arg) (infer-expr arg env)) args)
-     ANY]
+     (define key-type (infer-expr key env))
+     (if (type-foreign? receiver-type)
+         (infer-jst-call-contract
+          (or (foreign-index-type-v1
+               receiver-type key-type #:key-expression key)
+              (raise-diag
+               'type-mismatch
+               (format "member call: ~a has no matching index signature"
+                       (type->string receiver-type))
+               (hasheq 'form "member call"
+                       'receiver-type (type->string receiver-type)
+                       'key-type (type->string key-type))
+               #:src (src-for e)))
+          "[computed]" receiver-type args env e)
+         (begin
+           (for-each (lambda (arg) (infer-expr arg env)) args)
+           ANY))]
     [else
      (define selector (jst-selector-name key))
      (define raw-contract
-       (jst-static-member-contract receiver-type selector))
+       (if (type-foreign? receiver-type)
+           (or (foreign-member-type-v1 receiver-type selector)
+               (raise-unknown-jst-record-member
+                "member call" receiver-type selector e))
+           (jst-static-member-contract receiver-type selector)))
      (cond
        [raw-contract
-        (define contract
-          (if (type-poly? raw-contract)
-              (resolve-poly-call raw-contract args env)
-              raw-contract))
-        (cond
-          [(type-fn? contract)
-           (check-args (string->symbol selector) contract args env e)
-           (zonk-type (type-fn-ret contract))]
-          [else
-           (raise-diag
-            'type-mismatch
-            (format "member call: .~a on ~a has non-callable type ~a"
-                    selector
-                    (type->string receiver-type)
-                    (type->string contract))
-            (hasheq 'form "member call"
-                    'member selector
-                    'receiver-type (type->string receiver-type)
-                    'actual (type->string contract))
-            #:src (src-for e))])]
+        (infer-jst-call-contract
+         raw-contract selector receiver-type args env e)]
        [(jst-closed-record-receiver? receiver-type)
-       (raise-unknown-jst-record-member
+        (raise-unknown-jst-record-member
          "member call" receiver-type selector e)]
        [else
-        (for-each (lambda (arg) (infer-expr arg env)) args)
-        ANY])]))
+        (infer-jst-call-contract
+         raw-contract selector receiver-type args env e)])]))
 
 (define (raise-readonly-jst-member receiver-type selector node)
   (raise-diag
@@ -7114,13 +7186,32 @@
   (define receiver-type (infer-expr receiver env))
   (cond
     [(not (jst-selector? key))
-     (infer-expr key env)
-     (infer-expr value env)
-     ANY]
+     (define key-type (infer-expr key env))
+     (cond
+       [(type-foreign? receiver-type)
+        (define expected
+          (or (foreign-index-type-v1
+               receiver-type key-type
+               #:key-expression key
+               #:write? #t)
+              (raise-diag
+               'type-mismatch
+               (format "property assignment: ~a has no matching index signature"
+                       (type->string receiver-type))
+               (hasheq 'form "property assignment"
+                       'receiver-type (type->string receiver-type)
+                       'key-type (type->string key-type))
+               #:src (src-for e))))
+        (check-jst-member-write! expected value env e)]
+       [else
+        (infer-expr value env)
+        ANY])]
     [else
      (define selector (jst-selector-name key))
      (define record-contract
-       (jst-record-member-contract receiver-type selector))
+       (if (type-foreign? receiver-type)
+           (foreign-member-type-v1 receiver-type selector #:write? #t)
+           (jst-record-member-contract receiver-type selector)))
      (cond
        [record-contract
         (check-jst-member-write! record-contract value env e)]
@@ -7129,23 +7220,33 @@
        [(jst-closed-record-receiver? receiver-type)
         (raise-unknown-jst-record-member
          "property assignment" receiver-type selector e)]
+       [(type-foreign? receiver-type)
+        (raise-unknown-jst-record-member
+         "property assignment" receiver-type selector e)]
        [else
         (infer-expr value env)])]))
 
 (define (infer-jst-new e env [expected-result #f])
   (define args (jst-new-args e))
   (define raw-contract (infer-expr (jst-new-callee e) env))
-  (define contract
-    (if (type-poly? raw-contract)
-        (resolve-poly-call raw-contract args env expected-result #t)
-        raw-contract))
   (cond
-    [(type-fn? contract)
-     (check-args 'new contract args env e)
-     (zonk-type (type-fn-ret contract))]
+    [(type-foreign? raw-contract)
+     (define argument-types
+       (for/list ([argument (in-list args)])
+         (infer-expr argument env)))
+     (foreign-construct-v1 raw-contract args argument-types)]
     [else
-     (for-each (lambda (arg) (infer-expr arg env)) args)
-     ANY]))
+     (define contract
+       (if (type-poly? raw-contract)
+           (resolve-poly-call raw-contract args env expected-result #t)
+           raw-contract))
+     (cond
+       [(type-fn? contract)
+        (check-args 'new contract args env e)
+        (zonk-type (type-fn-ret contract))]
+       [else
+        (for-each (lambda (arg) (infer-expr arg env)) args)
+        ANY])]))
 
 (define (infer-cond-clauses clauses env)
   (let loop ([cls clauses] [current-env env] [acc '()])
@@ -7710,7 +7811,9 @@
     (define nix-free-bound
       (and (eq? (program-target prog) 'nix)
            (nix-bound-symbols (program-forms prog))))
-    (parameterize ([current-check-src-table (program-src-table prog)]
+    (with-foreign-check-context
+     prog
+     (parameterize ([current-check-src-table (program-src-table prog)]
                    [current-body-locs-table body-locs-tbl]
                    [current-type-table type-tbl]
                    [current-interface-member-candidate-cache (make-hasheq)]
@@ -7784,7 +7887,7 @@
              ;; the original authored declaration syntax and continues after a
              ;; violation, rather than letting one aggregate handler truncate
              ;; the remaining definitions.
-             (check-purity! prog error-handler))))))))
+             (check-purity! prog error-handler)))))))))
 
 ;; =============================================================================
 ;; Scalar provenance lint pass

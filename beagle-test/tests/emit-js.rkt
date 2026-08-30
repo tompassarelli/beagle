@@ -8,6 +8,7 @@
          (file "../../beagle-lib/private/parse.rkt")
          (file "../../beagle-lib/private/check.rkt")
          (file "../../beagle-lib/private/emit.rkt")
+         (file "../../beagle-lib/private/foreign-interface-v1.rkt")
          (file "../../beagle-lib/private/module-interface.rkt")
          (file "../../beagle-lib/private/types.rkt"))
 
@@ -18,12 +19,15 @@
 (define (mt . xs) (cons MAP-TAG xs))
 (define (st . xs) (cons SET-TAG xs))
 
-(define (js-emit src-forms #:module-resolver [module-resolver #f])
+(define (js-emit src-forms
+                 #:module-resolver [module-resolver #f]
+                 #:foreign-module-resolver [foreign-module-resolver #f])
   (define prog
     (parse-program
      (map (lambda (f) (datum->syntax #f f)) src-forms)
      #:source-path "test.bjs"
-     #:module-resolver module-resolver))
+     #:module-resolver module-resolver
+     #:foreign-module-resolver foreign-module-resolver))
   ;; Mirror the real emit path (build-all/daemon pass #:capture-types? #t):
   ;; bind current-type-table during check so store-type! populates per-node
   ;; types, then register it on the program so emit reads it. Without this the
@@ -34,16 +38,172 @@
   (register-program-type-table! prog tbl)
   (emit-program prog))
 
+(define ZERO-SHA256 (make-string 64 #\0))
+
+(define (foreign-provenance module-specifier)
+  (hash
+   'adapter
+   (hash 'source "src/adapter.bjs"
+         'sourceSha256 ZERO-SHA256
+         'compiled (format "compiled/~a.mjs" ZERO-SHA256)
+         'compiledSha256 ZERO-SHA256
+         'version "1.0.0")
+   'typescript
+   (hash 'version "5.9.3"
+         'path "node_modules/typescript/lib/typescript.js"
+         'sha256 ZERO-SHA256)
+   'compilerOptions (hash)
+   'moduleSpecifier module-specifier
+   'conditions '()
+   'package (hash 'path "package.json" 'sha256 ZERO-SHA256)
+   'lockfile (hash 'path "bun.lock" 'sha256 ZERO-SHA256)
+   'consultedFiles '()))
+
+(define (fixture-foreign-module-source module-specifier exports nodes)
+  (define canonical-exports
+    (sort exports string<? #:key (lambda (export) (hash-ref export 'name))))
+  (define canonical-nodes
+    (sort nodes string<? #:key (lambda (node) (hash-ref node 'id))))
+  (foreign-interface-v1->module-source
+   (validate-foreign-interface-v1
+    (hash
+     'kind FOREIGN-INTERFACE-KIND
+     'schemaVersion FOREIGN-INTERFACE-SCHEMA-VERSION
+     'frontend "typescript"
+     'moduleSpecifier module-specifier
+     'exports canonical-exports
+     'nodes canonical-nodes
+     'obligations '()
+     'provenance (foreign-provenance module-specifier)
+     'stats
+     (hash 'nodeCount (length canonical-nodes)
+           'exportCount (length canonical-exports)
+           'obligationCount 0
+           'anyCount 0
+           'generatedSourceCount 0)))))
+
+(define (wire-export name node-id runtime-name space)
+  (hash 'name name
+        'space space
+        'node node-id
+        'runtimeName runtime-name))
+
+(define (wire-signature return-id)
+  (hash 'typeParameters '()
+        'parameters '()
+        'return return-id))
+
+(define STRING-NODE
+  (hash 'id "n:string" 'kind "primitive" 'name "string"))
+
+(define (foreign-function-module-source module-specifier name runtime-name)
+  (fixture-foreign-module-source
+   module-specifier
+   (list (wire-export name "n:function" runtime-name "value"))
+   (list
+    (hash 'id "n:function"
+          'kind "function"
+          'overloads (list (wire-signature "n:string")))
+    STRING-NODE)))
+
+(define (foreign-constructor-module-source module-specifier name)
+  (fixture-foreign-module-source
+   module-specifier
+   (list (wire-export name "n:constructor" name "both"))
+   (list
+    (hash 'id "n:constructor"
+          'kind "object"
+          'name (string-append name "Constructor")
+          'typeParameters '()
+          'properties '()
+          'indexes '()
+          'callSignatures '()
+          'constructSignatures (list (wire-signature "n:instance")))
+    (hash 'id "n:instance"
+          'kind "object"
+          'name name
+          'typeParameters '()
+          'properties '()
+          'indexes '()
+          'callSignatures '()
+          'constructSignatures '()))))
+
+(define (empty-foreign-module-source module-specifier)
+  (fixture-foreign-module-source module-specifier '() '()))
+
+(define (exact-foreign-module-resolver module-specifier source)
+  (lambda (identity _importer-source)
+    (and (equal? identity (module-identity 'native-esm module-specifier))
+         source)))
+
+(define (checked-module-source namespace declarations)
+  (define source-id
+    (string-append
+     (string-replace (symbol->string namespace) "." "/")
+     ".bjs"))
+  (define datums
+    (append (list (list 'ns namespace) '(define-target js)) declarations))
+  (define stxs
+    (map (lambda (datum) (datum->syntax #f datum)) datums))
+  (define program (parse-program stxs #:source-path source-id))
+  (type-check! program)
+  (module-source
+   namespace
+   source-id
+   stxs
+   (program->module-interface program #:source-id source-id)))
+
+(define INVENTORY-SOURCE
+  (checked-module-source
+   'inventory
+   '((js/export (defn count-items [] Int 0)))))
+
+(define IR-SOURCE
+  (checked-module-source
+   'ir
+   '((js/export (defrecord IrProgram [(name String)])))))
+
+(define (exact-module-resolver namespace source)
+  (lambda (requested-namespace _importer-source)
+    (and (eq? requested-namespace namespace) source)))
+
 (define-syntax-rule (check-js name expected-rx form ...)
   (test-case name
     (define result (js-emit (list '(ns test.app) '(define-target js) form ...)))
     (check-regexp-match expected-rx result)))
 
-(define-syntax-rule (check-js-contains name expected-str form ...)
+(define-syntax-rule
+  (check-js-contains/using name expected-str module-resolver foreign-resolver
+                           form ...)
   (test-case name
-    (define result (js-emit (list '(ns test.app) '(define-target js) form ...)))
+    (define result
+      (js-emit
+       (list '(ns test.app) '(define-target js) form ...)
+       #:module-resolver module-resolver
+       #:foreign-module-resolver foreign-resolver))
     (check-true (string-contains? result expected-str)
                 (format "expected ~v in:\n~a" expected-str result))))
+
+(define-syntax-rule (check-js-contains name expected-str form ...)
+  (check-js-contains/using name expected-str #f #f form ...))
+
+(define-syntax-rule
+  (check-native-js-contains name expected-str module-specifier source form ...)
+  (check-js-contains/using
+   name
+   expected-str
+   #f
+   (exact-foreign-module-resolver module-specifier source)
+   form ...))
+
+(define-syntax-rule
+  (check-module-js-contains name expected-str namespace source form ...)
+  (check-js-contains/using
+   name
+   expected-str
+   (exact-module-resolver namespace source)
+   #f
+   form ...))
 
 (run-tests
  (test-suite "JS emitter"
@@ -126,7 +286,7 @@
      (type-check! consumer)
      (define result (emit-program consumer))
      (check-true
-      (string-contains? result "import * as p from './provider.js';"))
+      (string-contains? result "import * as p from \"./provider.js\";"))
      (check-true
       (string-contains?
        result
@@ -165,7 +325,7 @@
      (check-true
       (string-contains?
        referred-result
-       "import { $beagle$record$Character$validate } from './provider.js';")
+       "import { $beagle$record$Character$validate } from \"./provider.js\";")
       (format "provider validator was not synthesized into :refer import:\n~a"
               referred-result))
      (check-true
@@ -339,8 +499,10 @@
      "new Set(["
      `(def s Any ,(st 1 2 3)))
 
-   (check-js-contains "module header with import"
+   (check-module-js-contains "module header with import"
      "import * as"
+     'inventory
+     INVENTORY-SOURCE
      (list 'require (br 'inventory ':as 'inv))
      '(def x Int (inv/count-items)))
 
@@ -675,23 +837,53 @@
 
    ;; --- bare npm imports -------------------------------------------------------
 
-   (check-js-contains "bare npm import -> no ./ prefix"
-     "import * as ds from 'datascript';"
-     (list 'require (br 'datascript ':as 'ds))
-     '(defn f [] Any (ds/create-conn)))
+   (check-native-js-contains "bare npm import -> no ./ prefix"
+     "import * as ds from \"datascript\";"
+     "datascript"
+     (foreign-function-module-source "datascript" "create-conn" "create_conn")
+     (list 'require (br "datascript" ':as 'ds))
+     '(defn f [] Int (do (ds/create-conn) 0)))
 
-   ;; Regression: validate-module-path! (ast.rkt) rejected `@scope/pkg` npm
-   ;; specifiers even though emit-module-header already special-cases an
-   ;; `@`-prefixed namespace and passes it through verbatim.
-   (check-js-contains "scoped npm import (@scope/pkg) -> passes through verbatim"
-     "import * as sdk from '@scope/pkg';"
-     (list 'require (br '@scope/pkg ':as 'sdk))
-     '(defn f [] Any (sdk/query)))
+   ;; String libspecs are exact native ESM identities; symbols are Beagle
+   ;; namespaces and therefore resolve relative to the importing module.
+   (check-native-js-contains "scoped npm import (@scope/pkg) -> passes through verbatim"
+     "import * as sdk from \"@scope/pkg\";"
+     "@scope/pkg"
+     (foreign-function-module-source "@scope/pkg" "query" "query")
+     (list 'require (br "@scope/pkg" ':as 'sdk))
+     '(defn f [] Int (do (sdk/query) 0)))
 
-   (check-js-contains "dotted npm subpath -> passes through verbatim"
-     "import * as loader from 'three/addons/loaders/GLTFLoader.js';"
-     (list 'require (br 'three/addons/loaders/GLTFLoader.js ':as 'loader))
-     '(defn f [] Any loader/GLTFLoader))
+   (check-native-js-contains "dotted npm subpath -> passes through verbatim"
+     "import * as loader from \"three/addons/loaders/GLTFLoader.js\";"
+     "three/addons/loaders/GLTFLoader.js"
+     (foreign-constructor-module-source
+      "three/addons/loaders/GLTFLoader.js"
+      "GLTFLoader")
+     (list 'require (br "three/addons/loaders/GLTFLoader.js" ':as 'loader))
+     '(defn f [] Int (do (new loader/GLTFLoader) 0)))
+
+   (test-case "native ESM specifier is one escaped string literal"
+     (define module-specifier
+       "pkg'\";\nglobalThis.__beagleInjected = true;\n//\\tail")
+     (define foreign-source (empty-foreign-module-source module-specifier))
+     (define result
+       (js-emit
+        (list '(ns test.app)
+              '(define-target js)
+              (list 'require (br module-specifier ':as 'hostile))
+              '(defn f [] Int 0))
+        #:foreign-module-resolver
+        (lambda (identity _importer-source)
+          (and (equal? identity (module-identity 'native-esm module-specifier))
+               foreign-source))))
+     (check-true
+      (string-contains?
+       result
+       "import * as hostile from \"pkg'\\\";\\nglobalThis.__beagleInjected = true;\\n//\\\\tail\";")
+      result)
+     (check-false
+      (string-contains? result ";\nglobalThis.__beagleInjected")
+      result))
 
    ;; importer test.app lives at test/app.js, so a root-level sibling module
    ;; resolves importer-relative as ../inventory/core.js (not ./ — that only
@@ -724,14 +916,16 @@
           (and (eq? namespace 'inventory.core) provider-source))))
      (check-true
       (string-contains? result
-                        "import * as core from '../inventory/core.js';")
+                        "import * as core from \"../inventory/core.js\";")
       result))
 
    ;; An alias-qualified class is a value imported from the namespace object.
-   (check-js-contains "alias-qualified constructor -> new alias.Class()"
-     "new THREE.Scene()"
-     (list 'require (br 'three ':as 'THREE))
-     '(defn f [] Any (new THREE/Scene)))
+   (check-native-js-contains "alias-qualified constructor -> new alias.Class()"
+     "new THREE[\"Scene\"]()"
+     "three"
+     (foreign-constructor-module-source "three" "Scene")
+     (list 'require (br "three" ':as 'THREE))
+     '(defn f [] Int (do (new THREE/Scene) 0)))
 
    ;; --- additional stdlib translations ----------------------------------------
 
@@ -744,10 +938,12 @@
      "$$bc$pr_str(x)"
      '(defn f [(x Any)] String (pr-str x)))
 
-   (check-js-contains "static call Module/->Ctor strips -> prefix"
-     "ir.IrProgram("
+   (check-module-js-contains "static call uses the exact public constructor name"
+     "ir[\"->IrProgram\"]("
+     'ir
+     IR-SOURCE
      (list 'require (br 'ir ':as 'ir))
-     '(defn f [] Any (ir/->IrProgram "test")))
+     '(defn f [] Int (do (ir/->IrProgram "test") 0)))
 
    (check-js-contains "to-array -> host runtime"
      "$$bh$to_array(xs)"

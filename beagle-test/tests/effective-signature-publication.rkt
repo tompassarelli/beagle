@@ -2,6 +2,7 @@
 
 (require rackunit
          rackunit/text-ui
+         racket/set
          beagle/lang/reader-impl
          beagle/private/ast
          beagle/private/check
@@ -59,9 +60,53 @@
          "(defn identity [value] Int value)\n")))
      (define interface
        (program->module-interface prog #:provisional? #t))
-     (check-equal? (module-interface-schema-version interface) 11)
+     (check-equal? (module-interface-schema-version interface) 12)
      (check-equal? (type->string (binding-type interface 'identity))
                    "(Fn [Any] Int)"))
+
+   (test-case "module digest canonically orders exact identities sharing a namespace"
+     (define namespace-require
+       (require-entry
+        'pkg.name
+        'beagle-package
+        '(shared)
+        (module-identity 'beagle-namespace 'pkg.name)
+        (hasheq 'shared 'beagle-shared)))
+     (define native-require
+       (require-entry
+        'pkg.name
+        'native-package
+        '(shared)
+        (module-identity 'native-esm "pkg.name")
+        (hasheq 'shared 'native-shared)))
+     (define (digest requires)
+       (module-interface-digest
+        (make-module-interface
+         #:namespace 'identity.consumer
+         #:target 'js
+         #:gen-class? #f
+         #:bindings (hasheq)
+         #:public-esm-exports (hasheq)
+         #:macros (hasheq)
+         #:macro-fingerprints (hasheq)
+         #:type-declarations (hasheq)
+         #:type-exports (hasheq)
+         #:record-contracts (hasheq)
+         #:errors (hasheq)
+         #:requires requires
+         #:dynamic-vars (seteq)
+         #:source-digest "fixture-source"
+         #:source-id "identity-consumer.bjs")))
+     (check-equal? (digest (list namespace-require native-require))
+                   (digest (list native-require namespace-require)))
+     (check-not-equal?
+      (digest (list namespace-require native-require))
+      (digest
+       (list namespace-require
+             (struct-copy
+              require-entry
+              native-require
+              [identity (module-identity 'beagle-namespace 'pkg.name)])))))
 
    (test-case "checked single and multi arity definitions publish inference"
      (define interface
@@ -74,7 +119,7 @@
           "(defn choose ([x] Int x) ([x y] String y))\n"))))
      (define identity (binding-type interface 'identity))
      (define choose (binding-type interface 'choose))
-     (check-equal? INTERFACE-SCHEMA-VERSION 11)
+     (check-equal? INTERFACE-SCHEMA-VERSION 12)
      (check-equal? (type->string identity) "(Fn [Int] Int)")
      (check-true (inferred-type-poly? choose))
      (check-equal? (free-type-metas identity) '())

@@ -171,7 +171,8 @@ projection="$tmp_dir/projection"
          (file \"$BEAGLE_ROOT/beagle-lib/private/ast-json.rkt\")
          (file \"$BEAGLE_ROOT/beagle-lib/private/module-interface.rkt\")
          (file \"$BEAGLE_ROOT/beagle-lib/private/module-overlay-check.rkt\")
-         (file \"$BEAGLE_ROOT/beagle-lib/private/module-source-root.rkt\"))
+         (file \"$BEAGLE_ROOT/beagle-lib/private/module-source-root.rkt\")
+         (file \"$BEAGLE_ROOT/beagle-lib/private/typescript-foreign-resolver-v1.rkt\"))
 
 (define arguments (vector->list (current-command-line-arguments)))
 (unless (>= (length arguments) 3)
@@ -195,7 +196,7 @@ projection="$tmp_dir/projection"
     (module-source-input
      (list-ref input-arguments (add1 index))
      (list-ref input-arguments index))))
-(define closure (resolve-module-source-closure inputs roots))
+(define closure (resolve-production-module-source-closure inputs roots))
 (define checked
   (check-module-source-closure
    closure

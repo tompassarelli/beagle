@@ -60,6 +60,12 @@ BEAGLE_SUITES_NIX=(
 BEAGLE_SUITES_JS=(
     emit-js-behavioral.rkt
     second-order-contracts.rkt   # JS checker-contract coverage
+    foreign-interface-v1-schema.rkt
+    foreign-interface-v1-checker.rkt
+    foreign-module-rename.rkt
+    foreign-module-resolution.rkt
+    jst-call-contract-regression.rkt
+    typescript-foreign-resolver-v1.rkt
     ts-externs.rkt               # TypeScript declarations -> typed wrappers
     export-xmodule.rkt           # js/export signature survival across modules
 )
@@ -98,6 +104,11 @@ BEAGLE_SUITES_FRONTEND_FOCUS=(
     annotation-macros.rkt
     rewrite-roundtrip.rkt
     signature-format.rkt
+    foreign-interface-v1-checker.rkt
+    foreign-module-rename.rkt
+    foreign-module-resolution.rkt
+    jst-call-contract-regression.rkt
+    typescript-foreign-resolver-v1.rkt
 )
 
 BEAGLE_SUITES_CHECKER_FOCUS=(
@@ -115,12 +126,18 @@ BEAGLE_SUITES_CHECKER_FOCUS=(
     expected-errors.rkt
     type-inference-core.rkt
     type-view.rkt
+    foreign-interface-v1-schema.rkt
+    foreign-interface-v1-checker.rkt
+    foreign-module-rename.rkt
+    foreign-module-resolution.rkt
+    jst-call-contract-regression.rkt
+    typescript-foreign-resolver-v1.rkt
 )
 
 # --- gate phases -----------------------------------------------------------
 #
-# The five gate phases are not suites and are selected separately. Four retain
-# shell-owned fixtures; byte-stable-emit is a direct Bun entrypoint.
+# Gate phases are not suites and are selected separately. Shell-owned fixtures
+# run as scripts; byte-stable-emit is a direct Bun entrypoint.
 #
 # checkout-first and qualified-ref-scaffold ALWAYS run: about a second each,
 # and both are whole-checkout guards. Nothing is bought by reasoning about
@@ -147,9 +164,24 @@ BEAGLE_SUITES_CHECKER_FOCUS=(
 # drives is Clojure-hosted, and the reading that says a Clojure emitter change
 # cannot reach it is less certain than the same reading for Nix and
 # JavaScript. When the reading is less certain, run it.
+#
+# typescript-foreign-interface-v1-public-route is the command-level proof for
+# the JavaScript/TypeScript foreign surface: check, build, AST, direct native
+# ESM, and the exact adapter projection. That target bucket selects it as one
+# semantic unit rather than duplicating path cases for each implementation
+# file the route traverses.
 # A narrowed compiler run is immediate feedback, not a release proof.  Whole-
 # checkout guards are selected only when one of their own inputs changes; they
 # no longer add unrelated process trees to every focused edit.
+BEAGLE_GATE_PHASE_ORDER=(
+    racket-scope
+    checkout-first
+    qualified-ref-scaffold
+    hosted-preflight-routing
+    typescript-foreign-interface-v1-public-route
+    byte-stable-emit
+    consumer-smoke
+)
 BEAGLE_PHASES_ALWAYS=()
 
 # --- change discovery ------------------------------------------------------
@@ -206,8 +238,11 @@ beagle_selection_classify_path() {
         beagle-lib/private/emit-jst.rkt|\
         beagle-lib/private/parse-jst.rkt|\
         beagle-lib/private/js-*.rkt|\
+        beagle-lib/private/foreign-interface-v1.rkt|\
+        beagle-lib/private/typescript-foreign-resolver-v1.rkt|\
         beagle-lib/private/ts-externs.rkt|\
-        beagle-lib/js/*)
+        beagle-lib/js/*|\
+        tools/typescript-foreign-interface-v1/*)
             echo "group:js" ;;
 
         # --- Clojure target -----------------------------------------------
@@ -251,6 +286,9 @@ beagle_selection_classify_path() {
         bin/test/racket-scope/*)          echo "phase:racket-scope" ;;
         bin/test/checkout-first/*)        echo "phase:checkout-first" ;;
         bin/test/qualified-ref-scaffold/*) echo "phase:qualified-ref-scaffold" ;;
+        bin/test/hosted-preflight-routing/*) echo "phase:hosted-preflight-routing" ;;
+        bin/test/typescript-foreign-interface-v1-public-route/*)
+            echo "phase:typescript-foreign-interface-v1-public-route" ;;
         bin/test/consumer-smoke/*)        echo "phase:consumer-smoke" ;;
         bin/test/byte-stable-emit/*)       echo "phase:byte-stable-emit" ;;
         tools/task-effects/*)              echo "phase:byte-stable-emit" ;;
@@ -352,7 +390,8 @@ beagle_selection_compute() {
                 group:nix)  for s in "${BEAGLE_SUITES_NIX[@]}"; do suites["$s"]=1; done
                             for s in "${BEAGLE_SUITES_EMISSION_FLOOR[@]}"; do suites["$s"]=1; done ;;
                 group:js)   for s in "${BEAGLE_SUITES_JS[@]}"; do suites["$s"]=1; done
-                            for s in "${BEAGLE_SUITES_EMISSION_FLOOR[@]}"; do suites["$s"]=1; done ;;
+                            for s in "${BEAGLE_SUITES_EMISSION_FLOOR[@]}"; do suites["$s"]=1; done
+                            phases[typescript-foreign-interface-v1-public-route]=1 ;;
                 group:clj)  for s in "${BEAGLE_SUITES_CLJ[@]}"; do suites["$s"]=1; done
                             for s in "${BEAGLE_SUITES_EMISSION_FLOOR[@]}"; do suites["$s"]=1; done
                             phases[consumer-smoke]=1 ;;
@@ -386,13 +425,15 @@ beagle_selection_compute() {
     done
 
     BEAGLE_SELECTION_MODE=narrow
-    mapfile -t BEAGLE_SELECTION_SUITES < <(printf '%s\n' "${!suites[@]}" | sort)
+    if ((${#suites[@]} > 0)); then
+        mapfile -t BEAGLE_SELECTION_SUITES < <(printf '%s\n' "${!suites[@]}" | sort)
+    fi
     local -A phase_set=()
     for p in "${BEAGLE_PHASES_ALWAYS[@]}"; do phase_set["$p"]=1; done
     for p in "${!phases[@]}"; do phase_set["$p"]=1; done
     # Report phases in gate order, never in hash order.
     BEAGLE_SELECTION_PHASES=()
-    for p in racket-scope checkout-first qualified-ref-scaffold byte-stable-emit consumer-smoke; do
+    for p in "${BEAGLE_GATE_PHASE_ORDER[@]}"; do
         [[ -n "${phase_set[$p]+set}" ]] && BEAGLE_SELECTION_PHASES+=("$p")
     done
     return 0
@@ -423,8 +464,8 @@ beagle_selection_report() {
     mapfile -t active < <(beagle_selection_active_suites "$root")
 
     echo "beagle-test: SELECTION=narrow"
-    echo "beagle-test: phases selected (${#BEAGLE_SELECTION_PHASES[@]}/5): ${BEAGLE_SELECTION_PHASES[*]}"
-    for p in racket-scope checkout-first qualified-ref-scaffold byte-stable-emit consumer-smoke; do
+    echo "beagle-test: phases selected (${#BEAGLE_SELECTION_PHASES[@]}/${#BEAGLE_GATE_PHASE_ORDER[@]}): ${BEAGLE_SELECTION_PHASES[*]}"
+    for p in "${BEAGLE_GATE_PHASE_ORDER[@]}"; do
         if [[ " ${BEAGLE_SELECTION_PHASES[*]} " != *" $p "* ]]; then
             echo "beagle-test:   phase SKIPPED $p (no changed path is one of its inputs)"
         fi

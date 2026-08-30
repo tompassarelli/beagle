@@ -1836,9 +1836,8 @@
 
 (define (require-module-import prog entry)
   (for/first ([import (in-list (program-imported-module-interfaces prog))]
-              #:when (eq? (module-interface-namespace
-                            (module-import-interface import))
-                           (require-entry-ns entry)))
+              #:when (equal? (module-import-identity import)
+                             (require-entry-identity entry)))
     import))
 
 (define (require-interface-binding prog entry name)
@@ -2330,12 +2329,13 @@
              [path (string-append (string-join parts "/") ".js")])
         (if (string-prefix? path "..") path (string-append "./" path))))))
 
-;; Beagle namespaces are dotted. A slash instead marks a bare npm package
-;; subpath, whose filename and extension are already the exact ESM specifier.
-(define (bare-js-module-specifier? ns-str)
-  (or (string-prefix? ns-str "@")
-      (string-contains? ns-str "/")
-      (not (string-contains? ns-str "."))))
+(define (require-module-path importer-ns entry)
+  (match (require-entry-identity entry)
+    [(module-identity 'native-esm (? string? specifier)) specifier]
+    [(module-identity 'beagle-namespace (? symbol? namespace))
+     (relative-js-module-path importer-ns (symbol->string namespace))]
+    [identity
+     (error 'beagle-js "unsupported require module identity: ~v" identity)]))
 
 (define (emit-module-header prog)
   (define importer-ns (symbol->string (program-namespace prog)))
@@ -2417,12 +2417,9 @@
     (filter
      (lambda (s) (not (string=? s "")))
      (for/list ([r (in-list rs)])
-       (define ns-str (symbol->string (require-entry-ns r)))
        (define refer (require-entry-refer r))
-       (define module-path
-         (if (bare-js-module-specifier? ns-str)
-             ns-str
-             (relative-js-module-path importer-ns ns-str)))
+       (define module-path-literal
+         (js-string-lit (require-module-path importer-ns r)))
        (if refer
          (let ([runtime-refer
                 (remove-duplicates
@@ -2439,18 +2436,16 @@
                  same-runtime-import-binding?)])
            (if (null? runtime-refer)
              ""
-             (format "import { ~a } from '~a';"
+             (format "import { ~a } from ~a;"
                      (string-join
                       (for/list ([entry (in-list runtime-refer)])
                         (runtime-import-spec r (car entry) (cdr entry)))
                       ", ")
-                     module-path)))
-         (let ([alias (or (require-entry-alias r)
-                          (let ([parts (string-split ns-str ".")])
-                            (string->symbol (last parts))))])
-           (format "import * as ~a from '~a';"
+                     module-path-literal)))
+         (let ([alias (require-prefix r)])
+           (format "import * as ~a from ~a;"
                    (js-module-binding-name alias)
-                   module-path))))))
+                   module-path-literal))))))
   (if (null? lines)
     ""
     (string-append (string-join lines "\n") "\n")))

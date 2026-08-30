@@ -70,6 +70,19 @@
 (struct type-poly  (vars body bounds [origin #:mutable #:auto])
   #:auto-value 'authored
   #:transparent) ; bounds: hasheq var→type or #f; origin: authored or inferred
+;; A foreign declaration graph owns the meaning of this type.  Keep only its
+;; content-addressed interface identity and canonical node identity in Beagle's
+;; ordinary type AST; checker-side graph lookup remains one explicit boundary.
+(struct type-foreign (interface-id node-id substitutions)
+  #:constructor-name make-type-foreign
+  #:omit-define-syntaxes
+  #:transparent)
+
+;; Preserve the original two-argument public constructor.  The raw
+;; three-field constructor stays module-private so every instantiated value
+;; crosses the canonicalization/Any boundary below.
+(define (type-foreign interface-id node-id)
+  (make-type-foreign interface-id node-id '()))
 
 (define (make-inferred-type-poly vars body)
   (define poly (type-poly vars body #f))
@@ -81,7 +94,112 @@
 
 (define (type? x)
   (or (type-prim? x) (type-fn? x) (type-app? x) (type-union? x)
-      (type-refinement? x) (type-var? x) (type-meta? x) (type-poly? x)))
+      (type-refinement? x) (type-var? x) (type-meta? x) (type-poly? x)
+      (type-foreign? x)))
+
+;; Instantiated foreign graph types carry only the declaration-parameter
+;; substitutions that give the referenced node its meaning.  The list is
+;; immutable, unique, and node-ID sorted, so equal semantic instantiations are
+;; ordinary `equal?` values and survive inference, interfaces, and diagnostics
+;; without a side table.
+(define (type-has-any? type [seen (seteq)])
+  (define current (and type (prune-type type)))
+  (cond
+    [(not current) #f]
+    [(set-member? seen current) #f]
+    [else
+     (define nested-seen (set-add seen current))
+     (cond
+       [(any-type? current) #t]
+       [(type-fn? current)
+        (or (ormap (lambda (parameter)
+                     (type-has-any? parameter nested-seen))
+                   (type-fn-params current))
+            (and (type-fn-rest-type current)
+                 (type-has-any? (type-fn-rest-type current) nested-seen))
+            (type-has-any? (type-fn-ret current) nested-seen))]
+       [(type-app? current)
+        (ormap (lambda (argument)
+                 (type-has-any? argument nested-seen))
+               (type-app-args current))]
+       [(type-union? current)
+        (ormap (lambda (alternative)
+                 (type-has-any? alternative nested-seen))
+               (type-union-alts current))]
+       [(type-poly? current)
+        (or (type-has-any? (type-poly-body current) nested-seen)
+            (and (type-poly-bounds current)
+                 (for/or ([bound (in-hash-values (type-poly-bounds current))])
+                   (type-has-any? bound nested-seen))))]
+       [(type-foreign? current)
+        (for/or ([substitution
+                  (in-list (type-foreign-substitutions current))])
+          (type-has-any? (cdr substitution) nested-seen))]
+       [else #f])]))
+
+(define (canonical-foreign-substitutions substitutions)
+  (unless (list? substitutions)
+    (raise-argument-error
+     'type-foreign/instantiated
+     "list?"
+     substitutions))
+  (define canonical
+    (sort
+     (for/list ([substitution (in-list substitutions)])
+       (unless (and (pair? substitution)
+                    (string? (car substitution))
+                    (positive? (string-length (car substitution)))
+                    (type? (cdr substitution)))
+         (raise-arguments-error
+          'type-foreign/instantiated
+          "expected (cons nonempty-node-id type)"
+          "substitution" substitution))
+       (when (type-has-any? (cdr substitution))
+         (raise-arguments-error
+          'type-foreign/instantiated
+          "Beagle Any cannot cross a foreign substitution boundary"
+          "node-id" (car substitution)
+          "type" (cdr substitution)))
+       (cons (car substitution) (cdr substitution)))
+     string<?
+     #:key car))
+  (for ([left (in-list canonical)]
+        [right (in-list (if (null? canonical) '() (cdr canonical)))])
+    (when (string=? (car left) (car right))
+      (raise-arguments-error
+       'type-foreign/instantiated
+       "duplicate foreign substitution"
+       "node-id" (car left))))
+  canonical)
+
+(define (type-foreign/instantiated interface-id node-id substitutions)
+  (define canonical (canonical-foreign-substitutions substitutions))
+  (if (null? canonical)
+      (type-foreign interface-id node-id)
+      (make-type-foreign interface-id node-id canonical)))
+
+(define (map-foreign-substitutions type transform)
+  (type-foreign/instantiated
+   (type-foreign-interface-id type)
+   (type-foreign-node-id type)
+   (for/list ([substitution
+               (in-list (type-foreign-substitutions type))])
+     (cons (car substitution) (transform (cdr substitution))))))
+
+(define (same-foreign-substitution-shape? left right)
+  (and (equal? (type-foreign-interface-id left)
+               (type-foreign-interface-id right))
+       (equal? (type-foreign-node-id left)
+               (type-foreign-node-id right))
+       (equal? (map car (type-foreign-substitutions left))
+               (map car (type-foreign-substitutions right)))))
+
+(define (for-each-foreign-substitution-pair procedure left right)
+  (for ([left-substitution
+         (in-list (type-foreign-substitutions left))]
+        [right-substitution
+         (in-list (type-foreign-substitutions right))])
+    (procedure (cdr left-substitution) (cdr right-substitution))))
 
 (define current-type-vars (make-parameter '()))
 ;; Set by checker: maps union-name → (listof member-symbol) for subtype checks
@@ -112,6 +230,16 @@
 ;; it raises a pointed parse error for a known provider with no such type.
 (define current-qualified-type-resolver
   (make-parameter (lambda (_type-datum) #f)))
+
+;; foreign-interface-v1.rkt installs the graph-aware relation while checking a
+;; program that imports foreign interfaces.  The default is deliberately exact
+;; and closed: a detached foreign type never becomes Any by accident.
+(define current-foreign-type-compatible?
+  (make-parameter
+   (lambda (actual expected)
+     (and (type-foreign? actual)
+          (type-foreign? expected)
+          (equal? actual expected)))))
 
 ;; The type parser is shared outside the source parser, so surface failures
 ;; default to ordinary exceptions. parse.rkt installs its structured error
@@ -413,6 +541,8 @@
      (and (= (length (type-union-alts a)) (length (type-union-alts b)))
           (andmap type-invariant-equal? (type-union-alts a) (type-union-alts b)))]
     [(and (type-var? a) (type-var? b)) (eq? (type-var-name a) (type-var-name b))]
+    [(or (type-foreign? a) (type-foreign? b))
+     (and (type-foreign? a) (type-foreign? b) (equal? a b))]
     [else (equal? a b)])))
 
 (define (type-compatible? actual expected)
@@ -420,6 +550,11 @@
         [expected (and expected (prune-type expected))])
    (cond
     [(or (not actual) (not expected)) #t]
+    ;; Foreign types precede Any's wildcard rule.  In particular, a TypeScript
+    ;; `any` node remains foreign-dynamic and cannot silently collapse into
+    ;; Beagle Any through the ordinary compatibility relation.
+    [(or (type-foreign? actual) (type-foreign? expected))
+     ((current-foreign-type-compatible?) actual expected)]
     [(any-type? actual)   #t]
     [(any-type? expected) #t]
     ;; Compatibility is observational and never solves a metavariable.  The
@@ -602,6 +737,8 @@
 (define (zonk-type type)
   (define current (prune-type type))
   (cond
+    [(type-foreign? current)
+     (map-foreign-substitutions current zonk-type)]
     [(or (not current) (type-prim? current) (type-var? current)
          (type-meta? current))
      current]
@@ -638,6 +775,10 @@
      (ormap (lambda (arg) (type-occurs? meta arg)) (type-app-args current))]
     [(type-union? current)
      (ormap (lambda (alt) (type-occurs? meta alt)) (type-union-alts current))]
+    [(type-foreign? current)
+     (for/or ([substitution
+               (in-list (type-foreign-substitutions current))])
+       (type-occurs? meta (cdr substitution)))]
     [(type-poly? current)
      (or (type-occurs? meta (type-poly-body current))
          (and (type-poly-bounds current)
@@ -673,9 +814,18 @@
   (define right (prune-type expected))
   (cond
     [(eq? left right) left]
-    [(and (any-type? left) (any-type? right)) right]
     [(type-meta? left) (bind-type-meta! left right)]
     [(type-meta? right) (bind-type-meta! right left)]
+    [(and (type-foreign? left)
+          (type-foreign? right)
+          (same-foreign-substitution-shape? left right))
+     (for-each-foreign-substitution-pair
+      unify-invariant-types! left right)
+     (zonk-type right)]
+    [(or (type-foreign? left) (type-foreign? right))
+     (raise-type-unification
+      left right "foreign types are invariant and cannot unify with Any")]
+    [(and (any-type? left) (any-type? right)) right]
     [(or (any-type? left) (any-type? right))
      (raise-type-unification left right "invariant Any mismatch")]
     [(and (closed-monomorphic-type? left)
@@ -711,6 +861,10 @@
           (closed-monomorphic-type? (type-fn-ret current)))]
     [(type-app? current) (andmap closed-monomorphic-type? (type-app-args current))]
     [(type-union? current) (andmap closed-monomorphic-type? (type-union-alts current))]
+    [(type-foreign? current)
+     (for/and ([substitution
+                (in-list (type-foreign-substitutions current))])
+       (closed-monomorphic-type? (cdr substitution)))]
     [else #t]))
 
 (define (unify-type-lists! actuals expecteds left right)
@@ -728,10 +882,22 @@
   (define right (prune-type expected))
   (cond
     [(eq? left right) left]
-    [(any-type? left) right]
-    [(any-type? right) left]
     [(type-meta? left) (bind-type-meta! left right)]
     [(type-meta? right) (bind-type-meta! right left)]
+    [(and (type-foreign? left)
+          (type-foreign? right)
+          (same-foreign-substitution-shape? left right))
+     (for-each-foreign-substitution-pair unify-types! left right)
+     (zonk-type right)]
+    ;; The foreign boundary precedes Beagle Any's escape semantics, matching
+    ;; type-compatible?.  In particular TypeScript `any` remains the opaque
+    ;; foreign-dynamic node and cannot be solved or laundered into Beagle Any.
+    [(or (type-foreign? left) (type-foreign? right))
+     (if (type-compatible? left right)
+         right
+         (raise-type-unification left right "incompatible foreign type"))]
+    [(any-type? left) right]
+    [(any-type? right) left]
     [(and (type-var? left) (type-var? right)
           (eq? (type-var-name left) (type-var-name right)))
      right]
@@ -788,6 +954,10 @@
        (walk (type-fn-ret current))]
       [(type-app? current) (for-each walk (type-app-args current))]
       [(type-union? current) (for-each walk (type-union-alts current))]
+      [(type-foreign? current)
+       (for ([substitution
+              (in-list (type-foreign-substitutions current))])
+         (walk (cdr substitution)))]
       [(type-poly? current)
        (walk (type-poly-body current))
        (when (type-poly-bounds current)
@@ -816,6 +986,10 @@
        (walk (type-fn-ret current))]
       [(type-app? current) (for-each walk (type-app-args current))]
       [(type-union? current) (for-each walk (type-union-alts current))]
+      [(type-foreign? current)
+       (for ([substitution
+              (in-list (type-foreign-substitutions current))])
+         (walk (cdr substitution)))]
       [(type-poly? current)
        (for-each (lambda (name) (set-add! names name)) (type-poly-vars current))
        (walk (type-poly-body current))
@@ -836,7 +1010,12 @@
   (define current (prune-type type))
   (cond
     [(type-meta? current) (hash-ref replacements current current)]
-    [(or (not current) (type-prim? current) (type-var? current)) current]
+    [(type-foreign? current)
+     (map-foreign-substitutions
+      current
+      (lambda (value) (rewrite-type-metas value replacements)))]
+    [(or (not current) (type-prim? current) (type-var? current))
+     current]
     [(type-fn? current)
      (type-fn (map (lambda (param) (rewrite-type-metas param replacements))
                    (type-fn-params current))
@@ -901,7 +1080,12 @@
 (define (substitute-type-vars type replacements)
   (cond
     [(type-var? type) (hash-ref replacements (type-var-name type) type)]
-    [(or (not type) (type-prim? type) (type-meta? type)) type]
+    [(type-foreign? type)
+     (map-foreign-substitutions
+      type
+      (lambda (value) (substitute-type-vars value replacements)))]
+    [(or (not type) (type-prim? type) (type-meta? type))
+     type]
     [(type-fn? type)
      (type-fn (map (lambda (param) (substitute-type-vars param replacements))
                    (type-fn-params type))
@@ -956,6 +1140,7 @@
         [(type-fn? t)    'fn]
         [(type-app? t)   'app]
         [(type-union? t) 'union]
+        [(type-foreign? t) 'foreign]
         [(type-var? t)   'var]
         [(type-meta? t)  'meta]
         [(type-poly? t)  'poly]
@@ -1018,6 +1203,22 @@
              (format "(U ~a)" (string-join (map recur alts) " "))))]
       [else
        (format "(U ~a)" (string-join (map recur alts) " "))])))
+(register-type-delab! 'foreign
+  (lambda (t recur)
+    (define substitutions (type-foreign-substitutions t))
+    (format "(Foreign ~a ~a~a)"
+            (type-foreign-interface-id t)
+            (type-foreign-node-id t)
+            (if (null? substitutions)
+                ""
+                (format
+                 " {~a}"
+                 (string-join
+                  (for/list ([substitution (in-list substitutions)])
+                    (format "~a=~a"
+                            (car substitution)
+                            (recur (cdr substitution))))
+                  ", "))))))
 (register-type-delab! 'var (lambda (t recur) (symbol->string (type-var-name t))))
 (register-type-delab! 'meta
   (lambda (t recur)
@@ -1066,6 +1267,15 @@
                           'ctor (symbol->string (type-app-ctor t))
                           'args (map type->jsexpr (type-app-args t)))]
     [(type-union? t) (node "union" 'alts (map type->jsexpr (type-union-alts t)))]
+    [(type-foreign? t)
+     (node "foreign"
+           'interface-id (type-foreign-interface-id t)
+           'node-id (type-foreign-node-id t)
+           'substitutions
+           (for/list ([substitution
+                       (in-list (type-foreign-substitutions t))])
+             (hasheq 'node-id (car substitution)
+                     'type (type->jsexpr (cdr substitution)))))]
     [(type-var? t)   (node "var" 'name (symbol->string (type-var-name t)))]
     [(type-meta? t)
      (define pruned (prune-type t))
@@ -1135,6 +1345,14 @@
      (for ([ea (in-list (type-app-args expected))]
            [aa (in-list (type-app-args actual))])
        (infer-type-var-bindings ea aa bindings nested-invariant?))]
+    [(and (type-foreign? expected)
+          (type-foreign? actual)
+          (same-foreign-substitution-shape? expected actual))
+     (for-each-foreign-substitution-pair
+      (lambda (expected-value actual-value)
+        (infer-type-var-bindings
+         expected-value actual-value bindings invariant-context?))
+      expected actual)]
     [else (void)]))
 
 (define (apply-type-bindings type bindings)
@@ -1143,6 +1361,10 @@
     [(type-var? type)
      (hash-ref bindings (type-var-name type) (type-prim 'Any))]
     [(type-prim? type) type]
+    [(type-foreign? type)
+     (map-foreign-substitutions
+      type
+      (lambda (value) (apply-type-bindings value bindings)))]
     [(type-fn? type)
      (type-fn (map (lambda (p) (apply-type-bindings p bindings)) (type-fn-params type))
               (and (type-fn-rest-type type)
@@ -1174,6 +1396,13 @@
  (struct-out type-var)
  (struct-out type-meta)
  (struct-out type-poly)
+ type-foreign
+ type-foreign?
+ type-foreign-interface-id
+ type-foreign-node-id
+ type-foreign-substitutions
+ type-foreign/instantiated
+ type-has-any?
  make-inferred-type-poly
  inferred-type-poly?
  current-type-vars
@@ -1184,6 +1413,7 @@
  current-user-parametric-arities
  current-type-aliases
  current-qualified-type-resolver
+ current-foreign-type-compatible?
  register-qualified-type-name!
  current-type-surface-error
  register-type-alias-display!

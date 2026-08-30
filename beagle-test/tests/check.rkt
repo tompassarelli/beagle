@@ -1886,7 +1886,8 @@ BEAGLE
   (list 'require (br 'babashka.fs ':as 'fs))
   '(def x Bool (fs/exists? "/tmp")))
 
-(check-silent "foreign :refer call is a known imported binding"
+(check-err/rx "foreign :refer requires a validated module interface"
+  #rx"required namespace @opentui/core could not be resolved"
   '(define-target js)
   (list 'ns 'test.foreign
         (list ':require

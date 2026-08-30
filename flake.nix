@@ -32,6 +32,40 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        typescriptForeignAdapterRoot = ./tools/typescript-foreign-interface-v1;
+        typescriptForeignPackage =
+          builtins.fromJSON
+            (builtins.readFile (typescriptForeignAdapterRoot + "/package.json"));
+        typescriptForeignVersion =
+          let
+            declared = typescriptForeignPackage.dependencies.typescript or null;
+          in
+          if declared == "5.9.3" then declared else
+          throw "beagle: TypeScript foreign adapter must pin typescript 5.9.3 exactly";
+        typescriptForeignIntegrity =
+          "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==";
+        typescriptForeignLock =
+          builtins.readFile (typescriptForeignAdapterRoot + "/bun.lock");
+        # Nix fetches the exact archive pinned by bun.lock. The installed
+        # adapter never runs a package manager or contacts the network.
+        typescriptForeignTarball =
+          assert pkgs.lib.assertMsg
+            (pkgs.lib.hasInfix
+              "\"typescript\": \"${typescriptForeignVersion}\""
+              typescriptForeignLock)
+            "beagle: TypeScript foreign adapter lock omits its exact package pin";
+          assert pkgs.lib.assertMsg
+            (pkgs.lib.hasInfix
+              "\"typescript@${typescriptForeignVersion}\""
+              typescriptForeignLock)
+            "beagle: TypeScript foreign adapter lock omits its resolved package";
+          assert pkgs.lib.assertMsg
+            (pkgs.lib.hasInfix typescriptForeignIntegrity typescriptForeignLock)
+            "beagle: TypeScript foreign adapter lock integrity does not match packaging";
+          pkgs.fetchurl {
+            url = "https://registry.npmjs.org/typescript/-/typescript-${typescriptForeignVersion}.tgz";
+            hash = typescriptForeignIntegrity;
+          };
         unicodeData15 = pkgs.fetchurl {
           url = "https://www.unicode.org/Public/15.0.0/ucd/UnicodeData.txt";
           hash = "sha256-gG6a7WUDcZfx7IXhK+bozYcPxWCLTeD//ZkPaJ83anM=";
@@ -77,7 +111,9 @@
         # Runtime tools the bin/* scripts shell out to. Kept minimal but
         # complete for the core CLIs (build/validate/syntax/doctor): racket for
         # the compiler, babashka for the .bb scripts, python3 + coreutils/grep/
-        # sed/awk/find/rg for the bash glue (beagle-doctor parses JSON with python3).
+        # sed/awk/find/rg for the bash glue (beagle-doctor parses JSON with
+        # python3). Bun executes the frozen TypeScript foreign adapter; it never
+        # installs that adapter's dependencies at runtime.
         runtimeDeps = [
           racket
           pkgs.babashka
@@ -106,7 +142,12 @@
           # it before admitting it into compiler receipts.
           BEAGLE_PACKAGED_COMPILER_COMMIT = self.rev or "";
 
-          nativeBuildInputs = [ pkgs.makeWrapper racket ];
+          nativeBuildInputs = [
+            pkgs.makeWrapper
+            racket
+            pkgs.gnutar
+            pkgs.gzip
+          ];
 
           dontConfigure = true;
 
@@ -137,13 +178,51 @@
             cp -r self-host/seed "$out/self-host/seed"
             cp self-host/native/stage0-select.sh \
               "$out/self-host/native/stage0-select.sh"
+            adapter_source_root=tools/typescript-foreign-interface-v1
+            for required in package.json bun.lock src/adapter.bjs src/run.mjs \
+              src/typescript-api.mjs; do
+              if [ ! -f "$adapter_source_root/$required" ]; then
+                echo "beagle: TypeScript foreign adapter source is missing: $required" >&2
+                exit 2
+              fi
+            done
+            if [ ! -f beagle-lib/lib/beagle/core.js ]; then
+              echo "beagle: JavaScript runtime for the typed adapter is missing" >&2
+              exit 2
+            fi
+            adapter_root="$out/tools/typescript-foreign-interface-v1"
+            mkdir -p "$adapter_root/node_modules/typescript"
+            cp "$adapter_source_root/package.json" "$adapter_source_root/bun.lock" \
+              "$adapter_root/"
+            cp -r "$adapter_source_root/src" "$adapter_root/src"
+            # Direct-import smoke only. Production resolution receives the
+            # Beagle runtime root explicitly and never consults node_modules.
+            ln -s ../../../beagle-lib/lib/beagle \
+              "$adapter_root/node_modules/beagle"
+            tar -xzf "${typescriptForeignTarball}" --strip-components=1 \
+              -C "$adapter_root/node_modules/typescript"
+            for required in package.json lib/typescript.js LICENSE.txt \
+              ThirdPartyNoticeText.txt; do
+              if [ ! -f "$adapter_root/node_modules/typescript/$required" ]; then
+                echo "beagle: pinned TypeScript package is missing: $required" >&2
+                exit 2
+              fi
+            done
+            actual_typescript_version="$(${pkgs.python3}/bin/python3 -c \
+              'import json, sys; print(json.load(open(sys.argv[1]))["version"])' \
+              "$adapter_root/node_modules/typescript/package.json")"
+            if [ "$actual_typescript_version" != "${typescriptForeignVersion}" ]; then
+              echo "beagle: packaged TypeScript version mismatch: $actual_typescript_version" >&2
+              exit 2
+            fi
             # bin/test/ is the test-harness DIRECTORY, not an executable — if it
             # lands on PATH it shadows POSIX `test` system-wide (root shell-outs
             # exec a directory -> EACCES; broke nixos-rebuild 2026-07-09).
             rm -rf "$out/bin/test"
             if [ -d share ]; then cp -r share "$out/share"; fi
             chmod -R u+w "$out/beagle-lib" "$out/bin" "$out/native-core" \
-              "$out/store" "$out/self-host/seed" "$out/self-host/native"
+              "$out/store" "$out/self-host/seed" "$out/self-host/native" \
+              "$adapter_root"
 
             # Collection link: racket resolves a collection by directory NAME on
             # the search path. The collection is named "beagle" but the dir is
@@ -174,6 +253,22 @@
               "$out/beagle-lib/private/ts-externs.rkt"
             )
             "$raco" make "''${hosted_cli_roots[@]}"
+
+            # The typed adapter is authoritative source. Its JavaScript is an
+            # immutable package artifact compiled by the same pinned compiler.
+            compiled_adapter="$adapter_root/lib/beagle/typescript-foreign-interface-v1/adapter.mjs"
+            mkdir -p "$(dirname "$compiled_adapter")"
+            ${racket}/bin/racket \
+              "$out/beagle-lib/private/build-one-cli.rkt" \
+              --source "$adapter_root/src/adapter.bjs" \
+              "tools/typescript-foreign-interface-v1/src/adapter.bjs" \
+              > "$compiled_adapter"
+            if [ ! -s "$compiled_adapter" ]; then
+              echo "beagle: compiled TypeScript foreign adapter is empty" >&2
+              exit 2
+            fi
+            ${pkgs.bun}/bin/bun "$compiled_adapter"
+            rm "$adapter_root/node_modules/beagle"
 
             # Directly-exec'd helper modules + bin/*.rkt scripts: compile if
             # present, but tolerate per-file failures (peripheral/dev tooling

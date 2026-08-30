@@ -8,6 +8,7 @@
          racket/port
          racket/string
          beagle/private/module-interface
+         beagle/private/foreign-interface-v1
          beagle/private/parse
          beagle/private/check
          beagle/private/emit
@@ -16,11 +17,80 @@
 
 (define-runtime-path fixtures-dir "fixtures/export-xmodule")
 
+(define ZERO-SHA256 (make-string 64 #\0))
+
+(define (foreign-function-source module-specifier exports)
+  (foreign-interface-v1->module-source
+   (validate-foreign-interface-v1
+    (hash
+     'kind FOREIGN-INTERFACE-KIND
+     'schemaVersion FOREIGN-INTERFACE-SCHEMA-VERSION
+     'frontend "typescript"
+     'moduleSpecifier module-specifier
+     'exports
+     (for/list ([export (in-list exports)])
+       (hash 'name (car export)
+             'space "value"
+             'node "n:function"
+             'runtimeName (cdr export)))
+     'nodes
+     (list
+      (hash 'id "n:function"
+            'kind "function"
+            'overloads
+            (list
+             (hash 'typeParameters '()
+                   'parameters
+                   (list
+                    (hash 'name "value"
+                          'type "n:string"
+                          'optional #f
+                          'rest #f))
+                   'return "n:string")))
+      (hash 'id "n:string" 'kind "primitive" 'name "string"))
+     'obligations '()
+     'provenance
+     (hash
+      'adapter
+      (hash 'source "src/adapter.bjs"
+            'sourceSha256 ZERO-SHA256
+            'compiled (format "compiled/~a.mjs" ZERO-SHA256)
+            'compiledSha256 ZERO-SHA256
+            'version "1.0.0")
+      'typescript
+      (hash 'version "5.9.3"
+            'path "node_modules/typescript/lib/typescript.js"
+            'sha256 ZERO-SHA256)
+      'compilerOptions (hash)
+      'moduleSpecifier module-specifier
+      'conditions '()
+      'package (hash 'path "package.json" 'sha256 ZERO-SHA256)
+      'lockfile (hash 'path "bun.lock" 'sha256 ZERO-SHA256)
+      'consultedFiles '())
+     'stats
+     (hash 'nodeCount 2
+           'exportCount (length exports)
+           'obligationCount 0
+           'anyCount 0
+           'generatedSourceCount 0)))))
+
+(define PACKAGE-SOURCE
+  (foreign-function-source "@scope/package/subpath"
+                           (list (cons "make" "make"))))
+
+(define (fixture-foreign-module-resolver identity _importer)
+  (and (equal? identity
+               (module-identity 'native-esm "@scope/package/subpath"))
+       PACKAGE-SOURCE))
+
 (define (fixture-provider relative namespace)
   (define provider-id (string-append "fixtures/export-xmodule/" relative))
   (define provider-path (build-path fixtures-dir relative))
   (define provider
-    (parse-program (read-beagle-syntax provider-path) #:source-path provider-id))
+    (parse-program
+     (read-beagle-syntax provider-path)
+     #:source-path provider-id
+     #:foreign-module-resolver fixture-foreign-module-resolver))
   (type-check! provider)
   (module-source
    namespace
@@ -54,7 +124,8 @@
    #:source-path (string-append "fixtures/export-xmodule/" name)
    #:module-resolver
    (lambda (namespace _importer)
-     (hash-ref providers-by-namespace namespace #f))))
+     (hash-ref providers-by-namespace namespace #f))
+   #:foreign-module-resolver fixture-foreign-module-resolver))
 
 (define (check-file name)
   (type-check! (fixture-program name)))
@@ -84,6 +155,63 @@
    'native-esm)
   (check-not-equal? (canonical-libspec-identity namespace-spec)
                     (canonical-libspec-identity esm-spec)))
+
+(test-case "native ESM resolution and emission preserve exact identity"
+  (define provider-interface
+    (struct-copy
+     module-interface
+     (module-source-interface
+      (fixture-provider "public-esm-names.bjs" 'pkg.name))
+     [namespace 'pkg.name]))
+  (define native-provider-source
+    (foreign-function-source
+     "pkg.name"
+     (list (cons "send-message" "native.marker"))))
+  (define namespace-provider-source
+    (module-source
+     'pkg.name
+     "pkg/name.bjs"
+     #f
+     (struct-copy module-interface provider-interface
+                  [public-esm-exports (hasheq 'wire_name "local.marker")])))
+  (define native-identity (module-identity 'native-esm "pkg.name"))
+  (define namespace-requests '())
+  (define foreign-requests '())
+  (define prog
+    (parse-program
+     (read-beagle-syntax
+      (build-path fixtures-dir "native-esm-identity.bjs"))
+     #:source-path "fixtures/export-xmodule/native-esm-identity.bjs"
+     #:module-resolver
+     (lambda (namespace _importer)
+       (set! namespace-requests (cons namespace namespace-requests))
+       (and (eq? namespace 'pkg.name) namespace-provider-source))
+     #:foreign-module-resolver
+     (lambda (identity _importer)
+       (set! foreign-requests (cons identity foreign-requests))
+       (and (equal? identity native-identity) native-provider-source))))
+  (type-check! prog)
+  (check-true (pair? namespace-requests))
+  (check-true
+   (andmap (lambda (namespace) (eq? namespace 'pkg.name))
+           namespace-requests))
+  (check-true (pair? foreign-requests))
+  (check-true
+   (andmap (lambda (identity) (equal? identity native-identity))
+           foreign-requests))
+  (define import-identities
+    (map module-import-identity (program-imported-module-interfaces prog)))
+  (check-not-false (member native-identity import-identities equal?))
+  (check-not-false
+   (member (module-identity 'beagle-namespace 'pkg.name)
+           import-identities equal?))
+  (define js (emit-program prog))
+  (check-regexp-match
+   #rx"import \\{ \"native[.]marker\" as send_message \\} from \"pkg[.]name\";"
+   js)
+  (check-regexp-match
+   #rx"import \\{ \"local[.]marker\" as wire__name \\} from \"[.][.]/pkg/name[.]js\";"
+   js))
 
 (test-case "require-global preserves a global rather than ESM identity"
   (define spec
@@ -169,7 +297,7 @@
 
 (test-case "JS emission aliases private bindings to verbatim public ESM names"
   (define js (emit-program (fixture-program "public-esm-names.bjs")))
-  (check-regexp-match #rx"import [*] as package[$] from '@scope/package/subpath';" js)
+  (check-regexp-match #rx"import [*] as package[$] from \"@scope/package/subpath\";" js)
   (check-regexp-match #rx"function send_message\\(" js)
   (check-regexp-match #rx"function wire__name\\(" js)
   (check-regexp-match #rx"export \\{ send_message as \"send-message\" \\};" js)
@@ -179,7 +307,7 @@
 (test-case "JS imports use the provider's verbatim public ESM names"
   (define js (emit-program (fixture-program "public-esm-consumer.bjs")))
   (check-regexp-match
-   #rx"import \\{ \"send-message\" as send_message, \"wire_name\" as wire__name \\} from './public-esm-names.js';"
+   #rx"import \\{ \"send-message\" as send_message, \"wire_name\" as wire__name \\} from \"[.]/public-esm-names[.]js\";"
    js)
   (check-regexp-match #rx"send_message\\(wire__name\\(text\\)\\)" js))
 
@@ -187,7 +315,7 @@
   (define js
     (emit-program (fixture-program "record-refer-consumer.bjs")))
   (check-regexp-match
-   #rx"import \\{ \"Pos\" as Pos, \"pos-x\" as pos_x \\} from './provider.js';"
+   #rx"import \\{ \"Pos\" as Pos, \"pos-x\" as pos_x \\} from \"[.]/provider[.]js\";"
    js)
   (check-false (regexp-match? #rx"\"->Pos\" as Pos" js)))
 
@@ -238,7 +366,7 @@
     (emit-program (fixture-program "shadowed-alias.bjs")))
   (check-true
    (string-contains?
-    js "import * as $beagle$import$p from './provider.js';"))
+    js "import * as $beagle$import$p from \"./provider.js\";"))
   (check-true (string-contains? js "function go(p)"))
   (check-true
    (string-contains? js "return $beagle$import$p[\"scale\"](p, 2.0);"))

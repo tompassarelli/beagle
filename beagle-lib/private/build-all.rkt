@@ -18,6 +18,7 @@
          "module-overlay-check.rkt"
          "module-source-root.rkt"
          "module-source-root-cli.rkt"
+         "typescript-foreign-resolver-v1.rkt"
          "canonical-value-v1.rkt"
          "error-format.rkt"
          "query.rkt"
@@ -357,7 +358,7 @@
           (lambda (error)
             (capture! (car files) 'resolve error #f)
             #f)])
-      (resolve-module-source-closure explicit-inputs roots)))
+      (resolve-production-module-source-closure explicit-inputs roots)))
   (when closure
     (for ([snapshot (in-list (module-source-closure-snapshots closure))])
       (define source-id (module-source-snapshot-source-id snapshot))

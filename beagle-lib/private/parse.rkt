@@ -22,6 +22,9 @@
          "ast.rkt"
          "callable-arity.rkt"
          "module-interface.rkt"
+         (only-in "foreign-interface-v1.rkt"
+                  foreign-type-application-v1
+                  module-interface-foreign-interface-v1)
          "parse-jst.rkt"
          "diagnostic-kind.rkt"
          "syntax/tokenize.rkt"
@@ -1487,6 +1490,8 @@
 ;; Authoritative candidate-overlay type namespaces.  Values are installed from a
 ;; module-interface during require registration, then consulted indirectly by
 ;; types.rkt's current-qualified-type-resolver at every annotation position.
+;; The callback owns both qualified spellings and explicit `:refer` spellings;
+;; unreferred bare names never enter its binding table.
 ;; External/non-overlay namespaces are deliberately absent and retain the
 ;; legacy nominal/JVM path.
 (define current-candidate-type-bindings (make-parameter #f))
@@ -1496,7 +1501,7 @@
 
 (define INTERFACE-TYPE-EXPORT-KINDS
   '(record protocol enum union parametric-union union-member
-    throwable-union throwable-member scalar alias))
+    throwable-union throwable-member scalar alias foreign))
 
 (define (raise-invalid-interface-type-export interface name detail . args)
   (apply
@@ -1529,29 +1534,42 @@
      interface name
      "arity must be an exact nonnegative integer, got ~v"
      arity))
-  (if (eq? kind 'parametric-union)
-      (unless (positive? arity)
-        (raise-invalid-interface-type-export
-         interface name "parametric union arity must be positive, got ~v" arity))
-      (unless (zero? arity)
-        (raise-invalid-interface-type-export
-         interface name "non-parametric type arity must be 0, got ~v" arity)))
-  (if (eq? kind 'alias)
-      (unless (type? expansion)
-        (raise-invalid-interface-type-export
-         interface name "alias expansion must be a canonical type, got ~v"
-         expansion))
-      (when expansion
-        (raise-invalid-interface-type-export
-         interface name "only aliases may carry an expansion, got ~v"
-         expansion))))
+  (case kind
+    [(parametric-union)
+     (unless (positive? arity)
+       (raise-invalid-interface-type-export
+        interface name "parametric union arity must be positive, got ~v" arity))]
+    [(foreign) (void)]
+    [else
+     (unless (zero? arity)
+       (raise-invalid-interface-type-export
+        interface name "non-parametric type arity must be 0, got ~v" arity))])
+  (case kind
+    [(alias)
+     (unless (type? expansion)
+       (raise-invalid-interface-type-export
+        interface name "alias expansion must be a canonical type, got ~v"
+        expansion))]
+    [(foreign)
+     (unless (and (type-foreign? expansion)
+                  (null? (type-foreign-substitutions expansion)))
+       (raise-invalid-interface-type-export
+        interface name
+        "foreign expansion must be an unsubstituted foreign type, got ~v"
+        expansion))]
+    [else
+     (when expansion
+       (raise-invalid-interface-type-export
+        interface name "only aliases and foreign types may carry an expansion, got ~v"
+        expansion))]))
 
-(define (qualified-type-head datum)
-  (cond
-    [(symbol? datum) (lower-qualified-reference datum)]
-    [(and (pair? datum) (symbol? (car datum)))
-     (lower-qualified-reference (car datum))]
-    [else #f]))
+(define (candidate-type-head datum)
+  (define head
+    (cond
+      [(symbol? datum) datum]
+      [(and (pair? datum) (symbol? (car datum))) (car datum)]
+      [else #f]))
+  (and head (or (lower-qualified-reference head) head)))
 
 (define (qualified-type-name ref)
   (register-qualified-type-name!
@@ -1560,20 +1578,27 @@
     (qualified-ref-name ref))
    (qualified-ref-name ref)))
 
-(define (resolve-candidate-qualified-type datum)
-  (define ref (qualified-type-head datum))
+(define (resolve-candidate-imported-type datum)
+  (define head (candidate-type-head datum))
+  (define ref (and (qualified-ref? head) head))
   (define prefix (and ref (qualified-ref-qualifier ref)))
-  (define written-name (and ref (qualified-type-name ref)))
+  (define written-name
+    (cond
+      [ref (qualified-type-name ref)]
+      [(symbol? head) head]
+      [else #f]))
   (define bindings (current-candidate-type-bindings))
   (define prefixes (current-candidate-type-prefixes))
   (cond
-    [(or (not ref) (not prefix) (not bindings) (not prefixes)) #f]
-    [(hash-ref bindings ref #f)
+    [(or (not head) (not bindings)) #f]
+    [(hash-ref bindings head #f)
      =>
      (lambda (entry)
        (define interface (car entry))
        (define export (cdr entry))
+       (define kind (interface-type-export-kind export))
        (define arity (interface-type-export-arity export))
+       (define expansion (interface-type-export-expansion export))
        (define canonical-ref
          (qualified-ref
           (module-interface-namespace interface)
@@ -1589,12 +1614,10 @@
              written-name
              arity
              (if (= arity 1) "" "s")))
-          (or (interface-type-export-expansion export)
-              (type-prim canonical-name))]
+          (or expansion (type-prim canonical-name))]
          [(pair? datum)
           (define args (cdr datum))
-          (unless
-              (eq? (interface-type-export-kind export) 'parametric-union)
+          (unless (memq kind '(parametric-union foreign))
             (raise-parse-error
              'type-application
              "type ~a exported by ~a is not parametric and cannot be applied"
@@ -1609,9 +1632,15 @@
              arity
              (if (= arity 1) "" "s")
              (length args)))
-          (type-app canonical-name (map parse-type args))]
+          (define parsed-arguments (map parse-type args))
+          (case kind
+            [(parametric-union)
+             (type-app canonical-name parsed-arguments)]
+            [(foreign)
+             (foreign-type-application-v1
+              interface expansion parsed-arguments)])]
          [else #f]))]
-    [(hash-ref prefixes prefix #f)
+    [(and prefix prefixes (hash-ref prefixes prefix #f))
      =>
      (lambda (provider)
        (cond
@@ -1652,7 +1681,8 @@
 
 (define (parse-program stxs*
                        #:source-path [source-path #f]
-                       #:module-resolver [module-resolver #f])
+                       #:module-resolver [module-resolver #f]
+                       #:foreign-module-resolver [foreign-module-resolver #f])
   (parameterize ([lowering-counter (box 0)]
                  ;; Type aliases and parametric declaration names are
                  ;; program-local.  Freshening them here prevents one module
@@ -1663,19 +1693,21 @@
                  [current-candidate-type-bindings (make-hash)]
                  [current-candidate-type-prefixes (make-hasheq)]
                  [current-qualified-type-resolver
-                  resolve-candidate-qualified-type]
+                  resolve-candidate-imported-type]
                  [current-type-surface-error
                   (lambda (kind fmt . args)
                     (apply raise-parse-error kind fmt args))])
     (parse-program* stxs*
                     #:source-path source-path
-                    #:module-resolver module-resolver)))
+                    #:module-resolver module-resolver
+                    #:foreign-module-resolver foreign-module-resolver)))
 
 (define (parse-program/bytes source-bytes
                              #:source-path source-path
                              #:source-id [source-id #f]
                              #:target-override [target-override #f]
-                             #:module-resolver [module-resolver #f])
+                             #:module-resolver [module-resolver #f]
+                             #:foreign-module-resolver [foreign-module-resolver #f])
   (unless (bytes? source-bytes)
     (raise-argument-error 'parse-program/bytes "bytes?" source-bytes))
   (define snapshot (bytes->immutable-bytes source-bytes))
@@ -1689,18 +1721,21 @@
              (retarget-beagle-syntax stxs target-override)
              stxs))
        #:source-path (or source-id source-path)
-       #:module-resolver module-resolver)))
+       #:module-resolver module-resolver
+       #:foreign-module-resolver foreign-module-resolver)))
   (hash-set! PROGRAM->SOURCE-BYTES prog snapshot)
   prog)
 
 (define (parse-program/file path
-                            #:module-resolver [module-resolver #f])
+                            #:module-resolver [module-resolver #f]
+                            #:foreign-module-resolver [foreign-module-resolver #f])
   (define src (canonical-source-path path))
   (require-beagle-source-extension! src 'parse-program/file)
   (parse-program/bytes
    (file->bytes src)
    #:source-path src
-   #:module-resolver module-resolver))
+   #:module-resolver module-resolver
+   #:foreign-module-resolver foreign-module-resolver))
 
 ;; A foreign value may be marked rebindable with the same metadata Clojure
 ;; uses on an owned `def`: `(declare-extern ^:dynamic ns/*value* Type)`.
@@ -1731,7 +1766,8 @@
 
 (define (parse-program* stxs*
                         #:source-path [source-path #f]
-                        #:module-resolver [module-resolver #f])
+                        #:module-resolver [module-resolver #f]
+                        #:foreign-module-resolver [foreign-module-resolver #f])
   (define raw-datums (map syntax->datum stxs*))
 
   ;; A host namespace outside the typed target catalog is authority-bearing
@@ -1892,6 +1928,13 @@
     (cond
       [(type-prim? type) (type-prim (type-prim-name type))]
       [(type-var? type) (type-var (type-var-name type))]
+      [(type-foreign? type)
+       (type-foreign/instantiated
+        (type-foreign-interface-id type)
+        (type-foreign-node-id type)
+        (for/list ([substitution
+                    (in-list (type-foreign-substitutions type))])
+          (cons (car substitution) (copy-type (cdr substitution)))))]
       [(type-app? type)
        (type-app (type-app-ctor type) (map copy-type (type-app-args type)))]
       [(type-union? type)
@@ -1929,7 +1972,8 @@
         (hash-set! bindings
                    (or visible-ref visible-name)
                    (cons interface export))
-        (when (interface-type-export-expansion export)
+        (when (and (zero? (interface-type-export-arity export))
+                   (interface-type-export-expansion export))
           (current-type-aliases
            (hash-set (current-type-aliases)
                      visible-name
@@ -2108,7 +2152,7 @@
              (hash-set! imp-scalar-preds spelling parsed-predicates)))]
         [_ (void)])))
 
-  (define (import-interface! interface prefix refer-syms)
+  (define (import-interface! identity interface prefix refer-syms)
     (register-interface-types! interface prefix refer-syms)
     (define alias-exports
       (sort
@@ -2132,6 +2176,14 @@
            (car (interface-spellings
                  interface prefix refer-syms (car alias))))
          (register-type-alias-display! (copy-type type) visible-name)]
+        [(type-foreign? type)
+         (type-foreign/instantiated
+          (type-foreign-interface-id type)
+          (type-foreign-node-id type)
+          (for/list ([substitution
+                      (in-list (type-foreign-substitutions type))])
+            (cons (car substitution)
+                  (display-imported-aliases (cdr substitution)))))]
         [(type-app? type)
          (type-app (type-app-ctor type)
                    (map display-imported-aliases (type-app-args type)))]
@@ -2188,13 +2240,13 @@
                        interface prefix refer-syms name))])
         (set-add! external-dyn-vars spelling)))
     (set! imp-module-interfaces
-          (cons (module-import interface prefix refer-syms)
+          (cons (module-import identity interface prefix refer-syms)
                 imp-module-interfaces)))
 
   (define (canonical-require-namespace spec)
     ;; Older target consumers still read REQUIRE-ENTRY-NS.  It is deliberately
-    ;; a lossy projection; the exact identity stays on the entry for the
-    ;; module-interface and the native ESM emitter successor.
+    ;; a lossy projection; the exact identity stays on the require entry and
+    ;; imported interface.
     (define value (module-identity-value (canonical-libspec-identity spec)))
     (if (symbol? value) value (string->symbol value)))
 
@@ -2202,33 +2254,72 @@
     (eq? (module-identity-kind (canonical-libspec-identity spec))
          'beagle-namespace))
 
-  (define (candidate-for-require rn source-backed?)
-    (if (not source-backed?)
-        #f
-        (let ()
-          (validate-module-path! rn)
-          (define candidate
-            (and module-resolver (module-resolver rn source-path)))
-          (when (and candidate (not (module-source? candidate)))
-            (error 'beagle
-                   "module resolver returned ~v for ~a; expected module-source or #f"
-                   candidate rn))
-          (when (and candidate
-                     (not (eq? (module-source-namespace candidate) rn)))
-            (error 'beagle
-                   "module resolver returned namespace ~a for required module ~a"
-                   (module-source-namespace candidate)
-                   rn))
-          candidate)))
+  (define (foreign-resolution-error identity reason)
+    (error
+     'beagle
+     "native ESM module ~a could not be resolved to a validated foreign interface by the foreign module resolver (required by ~a): ~a"
+     (module-identity-value identity)
+     (or source-path "<unknown source>")
+     reason))
+
+  (define (candidate-for-require spec)
+    (define identity (canonical-libspec-identity spec))
+    (define identity-kind (module-identity-kind identity))
+    (define rn (canonical-require-namespace spec))
+    (define source-backed? (source-backed-require? spec))
+    (when source-backed? (validate-module-path! rn))
+    (when (and (eq? identity-kind 'native-esm)
+               (not (eq? pre-scan-target 'js)))
+      (error
+       'beagle
+       "native ESM module ~a is only available to the JavaScript target; target ~a cannot import it (required by ~a)"
+       (module-identity-value identity)
+       pre-scan-target
+       (or source-path "<unknown source>")))
+    (define candidate
+      (case identity-kind
+        [(beagle-namespace)
+         (and module-resolver (module-resolver rn source-path))]
+        [(native-esm)
+         (unless foreign-module-resolver
+           (foreign-resolution-error identity
+                                     "no foreign module resolver was supplied"))
+         (or (foreign-module-resolver identity source-path)
+             (foreign-resolution-error
+              identity "the foreign module resolver returned #f"))]
+        ;; A global is selected explicitly by `require-global`; it is neither
+        ;; Beagle source nor a declaration graph and calls no module resolver.
+        [(global) #f]
+        [else
+         (error 'beagle "unsupported module identity: ~v" identity)]))
+    (when (and candidate (not (module-source? candidate)))
+      (error 'beagle
+             "module resolver returned ~v for ~a required by ~a; expected module-source or #f"
+             candidate identity (or source-path "<unknown source>")))
+    (when (and candidate
+               (not (eq? (module-source-namespace candidate) rn)))
+      (error 'beagle
+             "module resolver returned namespace ~a for required module ~a required by ~a"
+             (module-source-namespace candidate)
+             identity
+             (or source-path "<unknown source>")))
+    (when (and (eq? identity-kind 'native-esm)
+               (not
+                (and (module-source-interface candidate)
+                     (module-interface-foreign-interface-v1
+                      (module-source-interface candidate) #f))))
+      (foreign-resolution-error
+       identity
+       "the foreign module resolver returned a source without a validated foreign interface"))
+    candidate)
 
   (define (pre-register-require-types! spec)
     (define rn (canonical-require-namespace spec))
     (define alias (canonical-libspec-alias spec))
     (define refer-syms (canonical-libspec-refer spec))
-    (define source-backed? (source-backed-require? spec))
     (define prefix
       (or alias (string->symbol (last-of (split-ns-segments rn)))))
-    (define candidate (candidate-for-require rn source-backed?))
+    (define candidate (candidate-for-require spec))
     (define interface (and candidate (module-source-interface candidate)))
     (cond
       [interface
@@ -2246,10 +2337,12 @@
     (define alias (canonical-libspec-alias spec))
     (define refer-syms (canonical-libspec-refer spec))
     (define rename (canonical-libspec-rename spec))
+    (define identity-kind
+      (module-identity-kind (canonical-libspec-identity spec)))
     (define source-backed? (source-backed-require? spec))
     (define prefix
       (or alias (string->symbol (last-of (split-ns-segments rn)))))
-    (define candidate (candidate-for-require rn source-backed?))
+    (define candidate (candidate-for-require spec))
     (define interface (and candidate (module-source-interface candidate)))
     (define (declared-extern? name)
       (set-member? declared-extern-names name))
@@ -2269,7 +2362,8 @@
                                 (string-append (symbol->string rn) "/"))))))
     (cond
       [interface
-       (import-interface! interface prefix refer-syms)]
+       (import-interface! (canonical-libspec-identity spec)
+                          interface prefix refer-syms)]
       [candidate
        (define prefixes (current-candidate-type-prefixes))
        (hash-set! prefixes prefix rn)
@@ -2280,19 +2374,22 @@
          (hash-set! externs name (type-prim 'Any))
          (hash-set! externs (qualify-name prefix name) (type-prim 'Any))
          (hash-set! imp-symbol-ns name prefix))]
-      [(or (not source-backed?)
-           (and (eq? target 'js)
-                (let ([module-name (symbol->string rn)])
-                  (or (not (string-contains? module-name "."))
-                      (string-contains? module-name "/"))))
-           (host-namespace? rn target)
-           extern-authorized?)
+      [(or (eq? identity-kind 'global)
+           (and source-backed?
+                (or (host-namespace? rn target)
+                    extern-authorized?)))
        ;; Foreign package / host runtime refers are runtime bindings whose
        ;; types come from the catalog or from `declare-extern`, not from
        ;; beagle source.
        (for ([name (in-list (or refer-syms '()))])
-         (hash-set! externs name (type-prim 'Any))
-         (hash-set! externs (qualify-name prefix name) (type-prim 'Any))
+         (define qualified (qualify-name prefix name))
+         (define binding-type
+           (or (hash-ref externs name #f)
+               (hash-ref externs qualified #f)
+               (hash-ref externs (qualify-name rn name) #f)
+               (type-prim 'Any)))
+         (hash-set! externs name binding-type)
+         (hash-set! externs qualified binding-type)
          (hash-set! imp-symbol-ns name prefix))]
       ;; Nothing provides this namespace: not a candidate in this invocation
       ;; and not a catalog/extern-authorized host namespace. Accepting it would
@@ -2801,6 +2898,7 @@
                        declare-extern
                        defcontract
                        require
+                       require-global
                        import
                        defalias))))   ; G1 — aliases erase at parse-type; no IR/emit
 

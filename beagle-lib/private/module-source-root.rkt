@@ -10,6 +10,7 @@
          racket/path
          racket/string
          "extensions.rkt"
+         "module-interface.rkt"
          "parse.rkt"
          "targets.rkt")
 
@@ -20,7 +21,10 @@
 (struct module-source-snapshot
   (source-id physical-path bytes target-override source target explicit?)
   #:transparent)
-(struct module-source-closure (snapshots explicit-source-ids) #:transparent)
+(struct foreign-module-request (identity importer-physical-path) #:transparent)
+(struct module-source-closure
+  (snapshots explicit-source-ids foreign-module-resolutions)
+  #:transparent)
 
 (define (path-string value)
   (if (path? value) (path->string value) (format "~a" value)))
@@ -277,7 +281,7 @@
   (module-source-snapshot
    source-id physical bytes target-override source target explicit?))
 
-(define (parse-snapshot snapshot resolver)
+(define (parse-snapshot snapshot resolver foreign-module-resolver)
   (define target-override
     (module-source-snapshot-target-override snapshot))
   (parse-program/bytes
@@ -285,9 +289,23 @@
    #:source-path (module-source-snapshot-physical-path snapshot)
    #:source-id (module-source-snapshot-source-id snapshot)
    #:target-override target-override
-   #:module-resolver resolver))
+   #:module-resolver resolver
+   #:foreign-module-resolver foreign-module-resolver))
 
-(define (resolve-module-source-closure explicit-inputs roots)
+(define (make-foreign-module-request identity physical-importer)
+  (unless (and (module-identity? identity)
+               (eq? (module-identity-kind identity) 'native-esm)
+               (string? (module-identity-value identity)))
+    (error
+     'module-source-root
+     "foreign resolver expected an exact native ESM module identity, got ~v"
+     identity))
+  (foreign-module-request identity (path-string physical-importer)))
+
+(define (resolve-module-source-closure
+         explicit-inputs
+         roots
+         #:foreign-module-resolver [resolve-foreign-module #f])
   (unless (and (list? explicit-inputs)
                (andmap module-source-input? explicit-inputs))
     (raise-argument-error
@@ -299,11 +317,19 @@
      'resolve-module-source-closure
      "(listof module-source-root-v0?)"
      roots))
+  (unless (or (not resolve-foreign-module)
+              (and (procedure? resolve-foreign-module)
+                   (procedure-arity-includes? resolve-foreign-module 2)))
+    (raise-argument-error
+     'resolve-module-source-closure
+     "(or/c #f (procedure-arity-includes/c 2))"
+     resolve-foreign-module))
   (when (null? explicit-inputs)
     (error 'module-source-root "expected at least one explicit source"))
 
   (define by-source-id (make-hash))
   (define by-namespace (make-hasheq))
+  (define foreign-module-resolutions (make-hash))
   (define pending '())
 
   (define (register! snapshot)
@@ -408,17 +434,22 @@
          relative-id)
         physical))))
 
-  (define (resolver namespace importer)
+  (define (snapshot-for-importer importer)
     (define importer-id (path-string importer))
-    (define importer-snapshot
-      (hash-ref
-       by-source-id
-       importer-id
-       (lambda ()
-         (error
-          'module-source-root
-          "resolver received unknown importer source ID: ~a"
-          importer-id))))
+    (values
+     importer-id
+     (hash-ref
+      by-source-id
+      importer-id
+      (lambda ()
+        (error
+         'module-source-root
+         "resolver received unknown importer source ID: ~a"
+         importer-id)))))
+
+  (define (resolver namespace importer)
+    (define-values (importer-id importer-snapshot)
+      (snapshot-for-importer importer))
     (define importer-target (module-source-snapshot-target importer-snapshot))
     (define importer-extension (source-extension importer-id))
     (unless importer-extension
@@ -473,6 +504,35 @@
           (register! snapshot)
           (module-source-snapshot-source snapshot)])]))
 
+  ;; The effectful foreign boundary is admitted only during exact source
+  ;; discovery.  Every request is keyed by the canonical module identity and
+  ;; exact physical importer.  The completed closure freezes these results so
+  ;; coherent checking never reruns an adapter as interfaces converge.
+  (define (foreign-resolver identity importer)
+    (define-values (_importer-id importer-snapshot)
+      (snapshot-for-importer importer))
+    (define physical-importer
+      (module-source-snapshot-physical-path importer-snapshot))
+    (define request
+      (make-foreign-module-request identity physical-importer))
+    (hash-ref
+     foreign-module-resolutions
+     request
+     (lambda ()
+       (define source
+         (and resolve-foreign-module
+              (resolve-foreign-module
+               identity
+               physical-importer)))
+       (when (and source (not (module-source? source)))
+         (error
+          'module-source-root
+          "foreign module resolver returned ~v for ~a; expected module-source or #f"
+          source
+          identity))
+       (hash-set! foreign-module-resolutions request source)
+       source)))
+
   ;; Parsing is discovery only. It extracts requires from the exact immutable
   ;; snapshots and may enqueue one exact root provider per unresolved namespace.
   ;; The coherent overlay reparses and checks the completed, sorted closure.
@@ -481,7 +541,7 @@
       (define snapshot (car pending))
       (set! pending (cdr pending))
       (define program
-        (parse-snapshot snapshot resolver))
+        (parse-snapshot snapshot resolver foreign-resolver))
       (unless (eq? (program-target program)
                    (module-source-snapshot-target snapshot))
         (error
@@ -498,7 +558,9 @@
    (sort
     (map (lambda (input) (path-string (module-source-input-source-id input)))
          explicit-inputs)
-    string<?)))
+    string<?)
+   (for/hash ([(request source) (in-hash foreign-module-resolutions)])
+     (values request source))))
 
 (define (module-source-closure-sources closure)
   (map module-source-snapshot-source
@@ -521,16 +583,40 @@
   (module-source-snapshot-physical-path
    (module-source-closure-snapshot-ref closure source-id)))
 
+(define (module-source-closure-resolve-foreign-module
+         closure identity importer)
+  (define snapshot
+    (module-source-closure-snapshot-ref closure importer))
+  (define request
+    (make-foreign-module-request
+     identity
+     (module-source-snapshot-physical-path snapshot)))
+  (define resolutions
+    (module-source-closure-foreign-module-resolutions closure))
+  (unless (hash-has-key? resolutions request)
+    (error
+     'module-source-root
+     "foreign module request is absent from the frozen source closure: ~a required by ~a"
+     identity
+     (path-string importer)))
+  (hash-ref resolutions request))
+
 (define (module-source-closure-parse-source closure source resolver)
   (define source-id (path-string (module-source-source-id source)))
   (define snapshot
     (module-source-closure-snapshot-ref closure source-id))
-  (parse-snapshot snapshot resolver))
+  (parse-snapshot
+   snapshot
+   resolver
+   (lambda (identity importer)
+     (module-source-closure-resolve-foreign-module
+      closure identity importer))))
 
 (provide
  (struct-out module-source-root-v0)
  (struct-out module-source-input)
  (struct-out module-source-snapshot)
+ (struct-out foreign-module-request)
  (struct-out module-source-closure)
  make-module-source-root-v0
  parse-module-source-root
@@ -541,4 +627,5 @@
  module-source-closure-sources
  module-source-closure-snapshot-ref
  module-source-closure-physical-path
+ module-source-closure-resolve-foreign-module
  module-source-closure-parse-source)

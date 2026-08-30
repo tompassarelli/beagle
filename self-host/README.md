@@ -98,10 +98,20 @@ bb -cp self-host/seed -m selfhost.main emit \
 ```
 
 A require that resolves to no source survives only as a host namespace
-(`clojure.*` / `babashka.*` prefixes, or a bare JS module under `--target js`)
-or when the importer `declare-extern`s names under the required namespace or
-its alias. Anything else is a pointed rejection with exit 1 — the same
-fail-closed contract as the Racket compiler's ModuleSourceRoot.
+(`clojure.*` / `babashka.*` prefixes) or when the importer `declare-extern`s
+names under the required namespace or its alias. Native ESM packages use exact
+string identities such as `["react" :as react]`; a bare `[react :as react]`
+always names a Beagle provider. Anything else is a pointed rejection with exit
+1 — the same fail-closed contract as the Racket compiler's ModuleSourceRoot.
+
+The normal native command snapshots each exact source path once, including its
+reader datums and syntax, and freezes each module-root resolution edge. A
+discovery-only fold visits the complete reachable graph before any provider is
+parsed or checked. Native ESM identity or a non-empty `:rename` makes that fold
+return quiet status 200 so `bin/beagle` may use the Racket foreign boundary;
+reader, require-grammar, and resolution errors remain terminal regardless of
+require order. Final parse/check/emit reuses the captured units, and cannot
+authorize fallback.
 
 **Known, deliberate limitation:** the oracle additionally admits host
 namespaces derived from its typed stdlib catalog; the self-host driver admits

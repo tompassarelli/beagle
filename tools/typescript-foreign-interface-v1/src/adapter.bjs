@@ -1,0 +1,688 @@
+#lang beagle/js
+
+(ns beagle.typescript-foreign-interface-v1.adapter)
+
+;; TypeScript compiler values and final JavaScript wire values are the only
+;; dynamic boundaries.  Everything between them is a closed typed graph.
+
+(defalias OpaqueCompilerValueV1 Any)
+(defalias WireValueV1 Any)
+(defalias ForeignLiteralValueV1 (U String Int Float Bool))
+
+(defrecord TypeParameterV1
+  [(name String)
+   (nodeId String)
+   (constraintNode (U String Nil))
+   (defaultNode (U String Nil))])
+
+(defrecord ParameterV1
+  [(name String)
+   (typeNode String)
+   (optional Bool)
+   (rest Bool)])
+
+(defrecord SignatureV1
+  [(typeParameters (Vec TypeParameterV1))
+   (parameters (Vec ParameterV1))
+   (returnNode String)])
+
+(defrecord PropertyV1
+  [(name String)
+   (typeNode String)
+   (optional Bool)
+   (readonly Bool)])
+
+(defrecord IndexV1
+  ;; The id is the index key's node id, so the bridge's canonical id sorter
+  ;; establishes the schema's required index order.
+  [(id String)
+   (valueNode String)
+   (readonly Bool)])
+
+(defrecord TupleElementV1
+  [(name (U String Nil))
+   (typeNode String)
+   (optional Bool)
+   (rest Bool)])
+
+(defrecord ObligationSourceV1
+  [(display String)
+   (kind String)])
+
+(defrecord ObligationV1
+  [(id String)
+   (code String)
+   (message String)
+   (source ObligationSourceV1)])
+
+(defrecord ExportV1
+  [(name String)
+   (space String)
+   (nodeId String)
+   (runtimeName String)])
+
+(defrecord StatsV1
+  [(nodeCount Int)
+   (exportCount Int)
+   (obligationCount Int)
+   (anyCount Int)
+   (generatedSourceCount Int)])
+
+(defunion ForeignNodeV1
+  (PrimitiveNode
+    [id String
+     name String])
+  (LiteralNode
+    [id String
+     valueType String
+     value ForeignLiteralValueV1])
+  (UnionNode
+    [id String
+     members (Vec String)])
+  (IntersectionNode
+    [id String
+     members (Vec String)])
+  (ArrayNode
+    [id String
+     elementNode String
+     readonly Bool])
+  (TupleNode
+    [id String
+     elements (Vec TupleElementV1)
+     readonly Bool])
+  (ObjectNode
+    [id String
+     name (U String Nil)
+     typeParameters (Vec TypeParameterV1)
+     properties (Vec PropertyV1)
+     indexes (Vec IndexV1)
+     callSignatures (Vec SignatureV1)
+     constructSignatures (Vec SignatureV1)])
+  (FunctionNode
+    [id String
+     overloads (Vec SignatureV1)])
+  (ReferenceNode
+    [id String
+     name String
+     targetNode (U String Nil)
+     typeArguments (Vec String)
+     nominal Bool])
+  (TypeParameterNode
+    [id String
+     name String
+     constraintNode (U String Nil)
+     defaultNode (U String Nil)])
+  (BrandNode
+    [id String
+     name String
+     baseNode String])
+  (UnsupportedNode
+    [id String
+     obligationId String
+     display String]))
+
+(defrecord BuildStateV1
+  [(seen OpaqueCompilerValueV1)
+   (nodes (Atom (Vec ForeignNodeV1)))
+   (obligations (Atom (Vec ObligationV1)))
+   (nodeCounter (Atom Int))
+   (obligationCounter (Atom Int))])
+
+(defrecord ForeignInterfaceV1
+  [(moduleSpecifier String)
+   (exports (Vec ExportV1))
+   (nodes (Vec ForeignNodeV1))
+   (obligations (Vec ObligationV1))
+   (provenance WireValueV1)
+   (stats StatsV1)])
+
+(defn sorted-opaque
+  [bridge OpaqueCompilerValueV1
+   values OpaqueCompilerValueV1] OpaqueCompilerValueV1
+  (.sort bridge values))
+
+(defn sorted-strings
+  [bridge OpaqueCompilerValueV1
+   values (Vec String)] (Vec String)
+  (.sort bridge values))
+
+(defn sorted-nodes
+  [bridge OpaqueCompilerValueV1
+   values (Vec ForeignNodeV1)] (Vec ForeignNodeV1)
+  (.sort bridge values))
+
+(defn sorted-obligations
+  [bridge OpaqueCompilerValueV1
+   values (Vec ObligationV1)] (Vec ObligationV1)
+  (.sort bridge values))
+
+(defn sorted-indexes
+  [bridge OpaqueCompilerValueV1
+   values (Vec IndexV1)] (Vec IndexV1)
+  (.sort bridge values))
+
+(defn sorted-exports
+  [bridge OpaqueCompilerValueV1
+   values (Vec ExportV1)] (Vec ExportV1)
+  (.sort bridge values))
+
+(defn empty-build-state
+  [bridge OpaqueCompilerValueV1] BuildStateV1
+  (->BuildStateV1
+    (.weakMap bridge)
+    (atom [])
+    (atom [])
+    (atom 1)
+    (atom 1)))
+
+(defn next-node-id!
+  [bridge OpaqueCompilerValueV1
+   state BuildStateV1] String
+  (let [counter Int (deref (buildstatev1-nodeCounter state))]
+    (do
+      (reset! (buildstatev1-nodeCounter state) (+ counter 1))
+      (str "n" (.pad bridge counter 6)))))
+
+(defn next-obligation-id!
+  [bridge OpaqueCompilerValueV1
+   state BuildStateV1] String
+  (let [counter Int (deref (buildstatev1-obligationCounter state))]
+    (do
+      (reset! (buildstatev1-obligationCounter state) (+ counter 1))
+      (str "o" (.pad bridge counter 6)))))
+
+(defn optional-node-id!
+  [bridge OpaqueCompilerValueV1
+   state BuildStateV1
+   type OpaqueCompilerValueV1] (U String Nil)
+  (if type
+    (node-for! bridge state type)
+    nil))
+
+(defn primitive-node
+  [id String
+   name String] ForeignNodeV1
+  (->PrimitiveNode id name))
+
+(defn type-parameter!
+  [bridge OpaqueCompilerValueV1
+   state BuildStateV1
+   parameter OpaqueCompilerValueV1] TypeParameterV1
+  (->TypeParameterV1
+    (.typeName bridge parameter)
+    (node-for! bridge state parameter)
+    (optional-node-id! bridge state (.typeParameterConstraint bridge parameter))
+    (optional-node-id! bridge state (.typeParameterDefault bridge parameter))))
+
+(defn parameter-node!
+  [bridge OpaqueCompilerValueV1
+   state BuildStateV1
+   signature OpaqueCompilerValueV1
+   parameter OpaqueCompilerValueV1] ParameterV1
+  (->ParameterV1
+    (.symbolName bridge parameter)
+    (node-for! bridge state (.parameterType bridge signature parameter))
+    (.optionalSymbol? bridge parameter)
+    (.restParameter? bridge parameter)))
+
+(defn signature-node!
+  [bridge OpaqueCompilerValueV1
+   state BuildStateV1
+   signature OpaqueCompilerValueV1] SignatureV1
+  (->SignatureV1
+    (mapv
+      (fn [parameter OpaqueCompilerValueV1] TypeParameterV1
+        (type-parameter! bridge state parameter))
+      (.signatureTypeParameters bridge signature))
+    (mapv
+      (fn [parameter OpaqueCompilerValueV1] ParameterV1
+        (parameter-node! bridge state signature parameter))
+      (.signatureParameters bridge signature))
+    (node-for! bridge state (.signatureReturnType bridge signature))))
+
+(defn property-node!
+  [bridge OpaqueCompilerValueV1
+   state BuildStateV1
+   owner-type OpaqueCompilerValueV1
+   property OpaqueCompilerValueV1] PropertyV1
+  (->PropertyV1
+    (.symbolName bridge property)
+    (node-for! bridge state (.propertyType bridge owner-type property))
+    (.optionalSymbol? bridge property)
+    (.readonlyProperty? bridge owner-type property)))
+
+(defn index-node!
+  [bridge OpaqueCompilerValueV1
+   state BuildStateV1
+   index OpaqueCompilerValueV1] IndexV1
+  (->IndexV1
+    (node-for! bridge state (.indexKeyType bridge index))
+    (node-for! bridge state (.indexValueType bridge index))
+    (.readonlyIndex? bridge index)))
+
+(defn tuple-element-node!
+  [bridge OpaqueCompilerValueV1
+   state BuildStateV1
+   element OpaqueCompilerValueV1] TupleElementV1
+  (->TupleElementV1
+    (.tupleElementName bridge element)
+    (node-for! bridge state (.tupleElementType bridge element))
+    (.tupleElementOptional? bridge element)
+    (.tupleElementRest? bridge element)))
+
+(defn unsupported-node!
+  [bridge OpaqueCompilerValueV1
+   state BuildStateV1
+   id String
+   type OpaqueCompilerValueV1
+   code String] ForeignNodeV1
+  (let [obligation-id String (next-obligation-id! bridge state)
+        display String (.typeDisplay bridge type)
+        obligation ObligationV1
+        (->ObligationV1
+          obligation-id
+          code
+          (str "TypeScript type requires a lazy foreign obligation: " display)
+          (->ObligationSourceV1 display (.typeKind bridge type)))]
+    (do
+      (reset!
+        (buildstatev1-obligations state)
+        (conj (deref (buildstatev1-obligations state)) obligation))
+      (->UnsupportedNode id obligation-id display))))
+
+;; Base traversal preserves nominal/reference identity in the shared cache;
+;; getPropertiesOfType supplies only the inherited structural view.
+(defn object-node!
+  [bridge OpaqueCompilerValueV1
+   state BuildStateV1
+   id String
+   type OpaqueCompilerValueV1] ForeignNodeV1
+  (let [properties OpaqueCompilerValueV1
+        (sorted-opaque bridge (.propertiesOfType bridge type))]
+    (->ObjectNode
+      id
+      (.typeName bridge type)
+      (mapv
+        (fn [parameter OpaqueCompilerValueV1] TypeParameterV1
+          (type-parameter! bridge state parameter))
+        (.objectTypeParameters bridge type))
+      (mapv
+        (fn [property OpaqueCompilerValueV1] PropertyV1
+          (property-node! bridge state type property))
+        properties)
+      (sorted-indexes
+        bridge
+        (mapv
+          (fn [index OpaqueCompilerValueV1] IndexV1
+            (index-node! bridge state index))
+          (.indexInfos bridge type)))
+      (mapv
+        (fn [signature OpaqueCompilerValueV1] SignatureV1
+          (signature-node! bridge state signature))
+        (.callSignatures bridge type))
+      (mapv
+        (fn [signature OpaqueCompilerValueV1] SignatureV1
+          (signature-node! bridge state signature))
+        (.constructSignatures bridge type)))))
+
+(defn commutative-member-ids!
+  [bridge OpaqueCompilerValueV1
+   state BuildStateV1
+   type OpaqueCompilerValueV1] (Vec String)
+  (sorted-strings
+    bridge
+    (mapv
+      (fn [member OpaqueCompilerValueV1] String
+        (node-for! bridge state member))
+      (.typeMembers bridge type))))
+
+(defn node-shape!
+  [bridge OpaqueCompilerValueV1
+   state BuildStateV1
+   id String
+   type OpaqueCompilerValueV1] ForeignNodeV1
+  (let [kind String (.typeKind bridge type)]
+    (cond
+      (.equal bridge kind "any") (primitive-node id "foreign-dynamic")
+      (.equal bridge kind "unknown") (primitive-node id "unknown")
+      (.equal bridge kind "string") (primitive-node id "string")
+      (.equal bridge kind "number") (primitive-node id "number")
+      (.equal bridge kind "boolean") (primitive-node id "boolean")
+      (.equal bridge kind "bigint") (primitive-node id "bigint")
+      (.equal bridge kind "symbol") (primitive-node id "symbol")
+      (.equal bridge kind "null") (primitive-node id "null")
+      (.equal bridge kind "undefined") (primitive-node id "undefined")
+      (.equal bridge kind "void") (primitive-node id "void")
+      (.equal bridge kind "never") (primitive-node id "never")
+
+      (.equal bridge kind "literal")
+      (->LiteralNode
+        id
+        (.literalKind bridge type)
+        (.literalValue bridge type))
+
+      (.equal bridge kind "union")
+      (->UnionNode id (commutative-member-ids! bridge state type))
+
+      (.equal bridge kind "brand")
+      (->BrandNode
+        id
+        (.brandName bridge type)
+        (node-for! bridge state (.brandBase bridge type)))
+
+      (.equal bridge kind "intersection")
+      (->IntersectionNode id (commutative-member-ids! bridge state type))
+
+      (.equal bridge kind "array")
+      (->ArrayNode
+        id
+        (node-for! bridge state (.arrayElementType bridge type))
+        (.readonlyArray? bridge type))
+
+      (.equal bridge kind "tuple")
+      (->TupleNode
+        id
+        (mapv
+          (fn [element OpaqueCompilerValueV1] TupleElementV1
+            (tuple-element-node! bridge state element))
+          (.tupleElements bridge type))
+        (.readonlyArray? bridge type))
+
+      (.equal bridge kind "type-parameter")
+      (->TypeParameterNode
+        id
+        (.typeName bridge type)
+        (optional-node-id! bridge state (.typeParameterConstraint bridge type))
+        (optional-node-id! bridge state (.typeParameterDefault bridge type)))
+
+      (.equal bridge kind "reference")
+      (->ReferenceNode
+        id
+        (.typeName bridge type)
+        (optional-node-id! bridge state (.referenceTarget bridge type))
+        (mapv
+          (fn [argument OpaqueCompilerValueV1] String
+            (node-for! bridge state argument))
+          (.typeArguments bridge type))
+        (.nominalReference? bridge type))
+
+      (.equal bridge kind "function")
+      (->FunctionNode
+        id
+        (mapv
+          (fn [signature OpaqueCompilerValueV1] SignatureV1
+            (signature-node! bridge state signature))
+          (.callSignatures bridge type)))
+
+      (.equal bridge kind "object")
+      (object-node! bridge state id type)
+
+      :else
+      (unsupported-node! bridge state id type (.unsupportedCode bridge type)))))
+
+(defn node-for!
+  [bridge OpaqueCompilerValueV1
+   state BuildStateV1
+   type OpaqueCompilerValueV1] String
+  (let [seen OpaqueCompilerValueV1 (buildstatev1-seen state)
+        prior OpaqueCompilerValueV1 (.get seen type)]
+    (if prior
+      prior
+      (let [id String (next-node-id! bridge state)]
+        (do
+          (.set seen type id)
+          (reset!
+            (buildstatev1-nodes state)
+            (conj
+              (deref (buildstatev1-nodes state))
+              (node-shape! bridge state id type)))
+          id)))))
+
+(defn export-node!
+  [bridge OpaqueCompilerValueV1
+   state BuildStateV1
+   exported-symbol OpaqueCompilerValueV1] ExportV1
+  (let [symbol OpaqueCompilerValueV1 (.resolveAlias bridge exported-symbol)
+        name String (.symbolName bridge exported-symbol)]
+    (->ExportV1
+      name
+      (.symbolSpace bridge symbol)
+      (node-for! bridge state (.exportType bridge symbol))
+      name)))
+
+;; Raw JavaScript object construction is intentionally confined to this
+;; explicit projection boundary.  The wire keys stay visible and reviewable.
+
+(defn object
+  [entries (Vec (Vec WireValueV1))] WireValueV1
+  (.fromEntries Object entries))
+
+(defn object-with-optional
+  [entries (Vec (Vec WireValueV1))
+   key String
+   value (U String Nil)] WireValueV1
+  (object
+    (if value
+      (conj entries [key value])
+      entries)))
+
+(defn type-parameter->wire
+  [value TypeParameterV1] WireValueV1
+  (object
+    [["name" (typeparameterv1-name value)]
+     ["node" (typeparameterv1-nodeId value)]
+     ["constraint" (typeparameterv1-constraintNode value)]
+     ["default" (typeparameterv1-defaultNode value)]]))
+
+(defn parameter->wire
+  [value ParameterV1] WireValueV1
+  (object
+    [["name" (parameterv1-name value)]
+     ["type" (parameterv1-typeNode value)]
+     ["optional" (parameterv1-optional value)]
+     ["rest" (parameterv1-rest value)]]))
+
+(defn signature->wire
+  [value SignatureV1] WireValueV1
+  (object
+    [["typeParameters"
+      (mapv type-parameter->wire (signaturev1-typeParameters value))]
+     ["parameters"
+      (mapv parameter->wire (signaturev1-parameters value))]
+     ["return" (signaturev1-returnNode value)]]))
+
+(defn property->wire
+  [value PropertyV1] WireValueV1
+  (object
+    [["name" (propertyv1-name value)]
+     ["type" (propertyv1-typeNode value)]
+     ["optional" (propertyv1-optional value)]
+     ["readonly" (propertyv1-readonly value)]]))
+
+(defn index->wire
+  [value IndexV1] WireValueV1
+  (object
+    [["key" (indexv1-id value)]
+     ["value" (indexv1-valueNode value)]
+     ["readonly" (indexv1-readonly value)]]))
+
+(defn tuple-element->wire
+  [value TupleElementV1] WireValueV1
+  (object-with-optional
+    [["type" (tupleelementv1-typeNode value)]
+     ["optional" (tupleelementv1-optional value)]
+     ["rest" (tupleelementv1-rest value)]]
+    "name"
+    (tupleelementv1-name value)))
+
+(defn obligation-source->wire
+  [value ObligationSourceV1] WireValueV1
+  (object
+    [["display" (obligationsourcev1-display value)]
+     ["kind" (obligationsourcev1-kind value)]]))
+
+(defn obligation->wire
+  [value ObligationV1] WireValueV1
+  (object
+    [["id" (obligationv1-id value)]
+     ["code" (obligationv1-code value)]
+     ["message" (obligationv1-message value)]
+     ["source" (obligation-source->wire (obligationv1-source value))]]))
+
+(defn export->wire
+  [value ExportV1] WireValueV1
+  (object
+    [["name" (exportv1-name value)]
+     ["space" (exportv1-space value)]
+     ["node" (exportv1-nodeId value)]
+     ["runtimeName" (exportv1-runtimeName value)]]))
+
+(defn stats->wire
+  [value StatsV1] WireValueV1
+  (object
+    [["nodeCount" (statsv1-nodeCount value)]
+     ["exportCount" (statsv1-exportCount value)]
+     ["obligationCount" (statsv1-obligationCount value)]
+     ["anyCount" (statsv1-anyCount value)]
+     ["generatedSourceCount" (statsv1-generatedSourceCount value)]]))
+
+(defn node->wire
+  [node ForeignNodeV1] WireValueV1
+  (match node
+    [(PrimitiveNode id name)
+     (object [["id" id]
+              ["kind" "primitive"]
+              ["name" name]])]
+
+    [(LiteralNode id value-type value)
+     (object [["id" id]
+              ["kind" "literal"]
+              ["valueType" value-type]
+              ["value" value]])]
+
+    [(UnionNode id members)
+     (object [["id" id]
+              ["kind" "union"]
+              ["members" members]])]
+
+    [(IntersectionNode id members)
+     (object [["id" id]
+              ["kind" "intersection"]
+              ["members" members]])]
+
+    [(ArrayNode id element-node readonly)
+     (object [["id" id]
+              ["kind" "array"]
+              ["element" element-node]
+              ["readonly" readonly]])]
+
+    [(TupleNode id elements readonly)
+     (object
+       [["id" id]
+        ["kind" "tuple"]
+        ["elements"
+         (mapv tuple-element->wire elements)]
+        ["readonly" readonly]])]
+
+    [(ObjectNode
+       id name type-parameters properties indexes call-signatures
+       construct-signatures)
+     (object-with-optional
+       [["id" id]
+        ["kind" "object"]
+        ["typeParameters"
+         (mapv type-parameter->wire type-parameters)]
+        ["properties"
+         (mapv property->wire properties)]
+        ["indexes"
+         (mapv index->wire indexes)]
+        ["callSignatures"
+         (mapv signature->wire call-signatures)]
+        ["constructSignatures"
+         (mapv signature->wire construct-signatures)]]
+       "name"
+       name)]
+
+    [(FunctionNode id overloads)
+     (object
+       [["id" id]
+        ["kind" "function"]
+        ["overloads"
+         (mapv signature->wire overloads)]])]
+
+    [(ReferenceNode id name target-node type-arguments nominal)
+     (object [["id" id]
+              ["kind" "reference"]
+              ["name" name]
+              ["target" target-node]
+              ["typeArguments" type-arguments]
+              ["nominal" nominal]])]
+
+    [(TypeParameterNode id name constraint-node default-node)
+     (object [["id" id]
+              ["kind" "type-parameter"]
+              ["name" name]
+              ["constraint" constraint-node]
+              ["default" default-node]])]
+
+    [(BrandNode id name base-node)
+     (object [["id" id]
+              ["kind" "brand"]
+              ["name" name]
+              ["base" base-node]])]
+
+    [(UnsupportedNode id obligation-id display)
+     (object [["id" id]
+              ["kind" "unsupported"]
+              ["obligationId" obligation-id]
+              ["display" display]])]))
+
+(defn interface->wire
+  [value ForeignInterfaceV1] WireValueV1
+  (object
+    [["kind" "ForeignInterfaceV1"]
+     ["schemaVersion" 1]
+     ["frontend" "typescript"]
+     ["moduleSpecifier" (foreigninterfacev1-moduleSpecifier value)]
+     ["exports"
+      (mapv export->wire (foreigninterfacev1-exports value))]
+     ["nodes"
+      (mapv node->wire (foreigninterfacev1-nodes value))]
+     ["obligations"
+      (mapv obligation->wire (foreigninterfacev1-obligations value))]
+     ["provenance" (foreigninterfacev1-provenance value)]
+     ["stats" (stats->wire (foreigninterfacev1-stats value))]]))
+
+(js/export
+  (defn build-foreign-interface-v1!
+    [bridge OpaqueCompilerValueV1
+     context OpaqueCompilerValueV1
+     module-specifier String
+     conditions (Vec String)] WireValueV1
+    (let [state BuildStateV1 (empty-build-state bridge)
+          exports (Vec ExportV1)
+          (sorted-exports
+            bridge
+            (mapv
+              (fn [exported-symbol OpaqueCompilerValueV1] ExportV1
+                (export-node! bridge state exported-symbol))
+              (sorted-opaque bridge (.moduleExports bridge context))))
+          nodes (Vec ForeignNodeV1)
+          (sorted-nodes bridge (deref (buildstatev1-nodes state)))
+          obligations (Vec ObligationV1)
+          (sorted-obligations bridge (deref (buildstatev1-obligations state)))
+          stats StatsV1
+          (->StatsV1
+            (count nodes)
+            (count exports)
+            (count obligations)
+            0
+            0)]
+      (interface->wire
+        (->ForeignInterfaceV1
+          module-specifier
+          exports
+          nodes
+          obligations
+          (.provenance bridge context module-specifier conditions)
+          stats)))))

@@ -69,9 +69,12 @@ mkdir -p \
     "$fixture_template/native-core/bin" \
     "$fixture_template/beagle-lib/private" \
     "$fixture_template/beagle-test/tests" \
+    "$fixture_template/share" \
     "$fixture_template/bin/test/racket-scope" \
     "$fixture_template/bin/test/checkout-first" \
     "$fixture_template/bin/test/qualified-ref-scaffold" \
+    "$fixture_template/bin/test/hosted-preflight-routing" \
+    "$fixture_template/bin/test/typescript-foreign-interface-v1-public-route" \
     "$fixture_template/bin/test/byte-stable-emit" \
     "$fixture_template/bin/test/consumer-smoke" \
     "$fixture_template/candidate"
@@ -80,6 +83,12 @@ cp "$ROOT/native-core/bin/run-bounded.rkt" \
     "$fixture_template/native-core/bin/run-bounded.rkt"
 cp "$ROOT/beagle-lib/private/tier-runner.rkt" \
     "$fixture_template/beagle-lib/private/tier-runner.rkt"
+cp "$ROOT/bin/_beagle-canonical-format-check" \
+    "$fixture_template/bin/_beagle-canonical-format-check"
+cp "$ROOT/bin/_beagle-test-selection" \
+    "$fixture_template/bin/_beagle-test-selection"
+cp "$ROOT/share/targets.sh" \
+    "$fixture_template/share/targets.sh"
 
 cat >"$fixture_template/bin/fixture-phase" <<'EOF'
 #!/usr/bin/env bash
@@ -94,7 +103,13 @@ if [[ ! -f "$BEAGLE_GATE_FACT_REPO_ROOT/candidate/selected.txt" ]]; then
 fi
 EOF
 chmod +x "$fixture_template/bin/fixture-phase"
-for phase in racket-scope checkout-first qualified-ref-scaffold consumer-smoke; do
+for phase in \
+    racket-scope \
+    checkout-first \
+    qualified-ref-scaffold \
+    hosted-preflight-routing \
+    typescript-foreign-interface-v1-public-route \
+    consumer-smoke; do
     cp "$fixture_template/bin/fixture-phase" \
         "$fixture_template/bin/test/$phase/run.sh"
 done
@@ -143,10 +158,15 @@ git -C "$fixture_template" add \
     beagle-lib/private/tier-runner.rkt \
     beagle-test/tiers.rktd \
     beagle-test/tests/unit.rkt \
+    share/targets.sh \
+    bin/_beagle-canonical-format-check \
+    bin/_beagle-test-selection \
     bin/fixture-phase \
     bin/test/racket-scope/run.sh \
     bin/test/checkout-first/run.sh \
     bin/test/qualified-ref-scaffold/run.sh \
+    bin/test/hosted-preflight-routing/run.sh \
+    bin/test/typescript-foreign-interface-v1-public-route/run.sh \
     bin/test/byte-stable-emit/run.mjs \
     bin/test/consumer-smoke/run.sh \
     candidate/module.rkt \

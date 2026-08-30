@@ -16,9 +16,9 @@
          "macros.rkt"
          "types.rkt")
 
-(define INTERFACE-SCHEMA-VERSION 11)
-;; V11 adds the exact public ESM name for every published JavaScript binding.
-;; Native ESM imports and their identities remain part of the same digest.
+(define INTERFACE-SCHEMA-VERSION 12)
+;; V12 publishes canonical foreign interface/node type references and retains
+;; the exact module identity on every consumer-side imported interface.
 (define INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE? #t)
 (define ANY (type-prim 'Any))
 
@@ -51,13 +51,49 @@
 (define (module-interface-conformance interface)
   (hash-ref MODULE-INTERFACE->CONFORMANCE interface #f))
 
+;; Foreign declaration graphs are runtime query context, not part of Beagle's
+;; canonical interface datum.  Attach their explicit transitive closure to the
+;; interface object that carries foreign types so a consumer of an intermediate
+;; Beagle module never needs an ambient global registry.
+(define MODULE-INTERFACE->FOREIGN-DEPENDENCIES (make-weak-hasheq))
+
+(define (module-interface-foreign-dependencies interface)
+  (hash-ref MODULE-INTERFACE->FOREIGN-DEPENDENCIES interface (hash)))
+
+(define (register-module-interface-foreign-dependencies! interface dependencies)
+  (unless (and (module-interface? interface) (hash? dependencies))
+    (raise-arguments-error
+     'register-module-interface-foreign-dependencies!
+     "expected a module interface and dependency hash"
+     "interface" interface
+     "dependencies" dependencies))
+  (hash-set! MODULE-INTERFACE->FOREIGN-DEPENDENCIES
+             interface dependencies)
+  interface)
+
+(define (inherited-foreign-dependencies prog)
+  (for/fold ([dependencies (hash)])
+            ([import (in-list (program-imported-module-interfaces prog))])
+    (for/fold ([merged dependencies])
+              ([(identity graph)
+                (in-hash
+                 (module-interface-foreign-dependencies
+                  (module-import-interface import)))])
+      (define prior (hash-ref merged identity #f))
+      (when (and prior (not (eq? prior graph)) (not (equal? prior graph)))
+        (error 'program->module-interface
+               "foreign dependency identity collision for ~a"
+               identity))
+      (hash-set merged identity graph))))
+
 ;; A resolver returns a module-source. INTERFACE is #f during the bootstrap
 ;; parse and a module-interface during authoritative parsing.
 (struct module-source (namespace source-id stxs interface) #:transparent)
 
-;; One consumer-side import of an interface.  PREFIX is the spelling accepted at
-;; qualified use sites; REFER is #f or the explicitly referred symbol list.
-(struct module-import (interface prefix refer) #:transparent)
+;; One consumer-side import of an interface.  IDENTITY is the exact canonical
+;; requirement; PREFIX is the spelling accepted at qualified use sites; REFER
+;; is #f or the explicitly referred symbol list.
+(struct module-import (identity interface prefix refer) #:transparent)
 
 ;; The parser owns surface syntax, but it must pass one normalized import
 ;; contract to every module consumer.  In particular, the string `"react"`
@@ -870,6 +906,14 @@
     [(type-prim? type)
      (type-prim (qualify-local (type-prim-name type)))]
     [(type-var? type) type]
+    [(type-foreign? type)
+     (type-foreign/instantiated
+      (type-foreign-interface-id type)
+      (type-foreign-node-id type)
+      (for/list
+          ([substitution
+            (in-list (type-foreign-substitutions type))])
+        (cons (car substitution) (recur (cdr substitution)))))]
     [(type-app? type)
      (type-app
       (qualify-local (type-app-ctor type))
@@ -985,6 +1029,16 @@
     [(not type) '(unknown)]
     [(type-prim? type) `(prim ,(type-prim-name type))]
     [(type-var? type) `(var ,(type-var-name type))]
+    [(type-foreign? type)
+     `(foreign
+       ,(type-foreign-interface-id type)
+       ,(type-foreign-node-id type)
+       ,@(for/list
+             ([substitution
+               (in-list (type-foreign-substitutions type))])
+           `(substitution
+             ,(car substitution)
+             ,(type->canonical-datum (cdr substitution)))))]
     [(type-meta? type)
      (error
       'program->module-interface
@@ -1137,10 +1191,9 @@
     (target ,target)
     (gen-class ,gen-class?)
     (requires
-     ,@(for/list ([entry (in-list
-                          (sort requires symbol<?
-                                #:key require-entry-ns))])
-         (require-entry->canonical-datum entry)))
+     ,@(sort (map require-entry->canonical-datum requires)
+             string<?
+             #:key canonical-sort-key))
     (public-esm-exports
      ,@(for/list ([name (in-list (sort (hash-keys public-esm-exports)
                                         symbol<?))])
@@ -1214,6 +1267,57 @@
          (write datum)))))
   (string-append "sha256:"
                  (bytes->hex-string (sha256-bytes bytes))))
+
+;; Module-interface owns its consumer-visible semantic identity.  Front ends
+;; supply public facts; this constructor binds those facts to the current
+;; schema and canonical encoding.  Exact source/content identity stays in
+;; source-digest and source-id; the overlay digest binds both layers.
+(define (make-module-interface
+         #:namespace namespace
+         #:target target
+         #:gen-class? gen-class?
+         #:bindings bindings
+         #:public-esm-exports public-esm-exports
+         #:macros macros
+         #:macro-fingerprints macro-fingerprints
+         #:type-declarations type-declarations
+         #:type-exports type-exports
+         #:record-contracts record-contracts
+         #:errors errors
+         #:requires requires
+         #:dynamic-vars dynamic-vars
+         #:source-digest source-digest
+         #:source-id source-id)
+  (module-interface
+   INTERFACE-SCHEMA-VERSION
+   namespace
+   target
+   bindings
+   public-esm-exports
+   macros
+   macro-fingerprints
+   type-declarations
+   type-exports
+   record-contracts
+   errors
+   requires
+   dynamic-vars
+   (sha256-datum
+    (interface-canonical-datum
+     namespace
+     target
+     gen-class?
+     bindings
+     macro-fingerprints
+     type-declarations
+     type-exports
+     record-contracts
+     errors
+     requires
+     dynamic-vars
+     public-esm-exports))
+   source-digest
+   source-id))
 
 (define (type-facts-v1-export name)
   ;; type-facts-v1 also exposes source-facet parsing, which depends on this
@@ -1433,23 +1537,25 @@
            (syntax->datum stx)))
       (imports ,@(program-imports prog))))
   (define interface
-    (module-interface
-     INTERFACE-SCHEMA-VERSION
-     (program-namespace prog)
-     (program-target prog)
-     qualified-bindings
-     public-esm-exports
-     macros
-     macro-fingerprints
-     qualified-type-declarations
-     type-exports
-     record-contracts
-     errors
-     (program-requires prog)
-     dynamic-vars
-     (sha256-datum canonical)
-     (sha256-datum source-canonical)
-     source-id))
+    (make-module-interface
+     #:namespace (program-namespace prog)
+     #:target (program-target prog)
+     #:gen-class? (program-gen-class? prog)
+     #:bindings qualified-bindings
+     #:public-esm-exports public-esm-exports
+     #:macros macros
+     #:macro-fingerprints macro-fingerprints
+     #:type-declarations qualified-type-declarations
+     #:type-exports type-exports
+     #:record-contracts record-contracts
+     #:errors errors
+     #:requires (program-requires prog)
+     #:dynamic-vars dynamic-vars
+     #:source-digest (sha256-datum source-canonical)
+     #:source-id source-id))
+  (register-module-interface-foreign-dependencies!
+   interface
+   (inherited-foreign-dependencies prog))
   (unless provisional?
     (emit-interface-evidence-v1!
      prog
@@ -1703,8 +1809,11 @@
  constraint->canonical-datum
  interface-constraint->canonical-datum
  record-validator-symbol
+ make-module-interface
  program->module-interface
  module-interface-conformance
+ module-interface-foreign-dependencies
+ register-module-interface-foreign-dependencies!
  module-interface-export?
  module-interface-binding-ref
  module-interface-public-esm-name

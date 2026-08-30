@@ -99,6 +99,16 @@
     [(type-union? t) (hasheq 'kind "union"
                              'members (map type->json (type-union-alts t)))]
     [(type-var? t) (hasheq 'kind "var" 'name (symbol->string (type-var-name t)))]
+    [(type-foreign? t)
+     (hasheq 'kind "foreign"
+             'interfaceId (type-foreign-interface-id t)
+             'nodeId (type-foreign-node-id t)
+             'substitutions
+             (for/list
+                 ([substitution
+                   (in-list (type-foreign-substitutions t))])
+               (hasheq 'parameterNodeId (car substitution)
+                       'type (type->json (cdr substitution)))))]
     [(type-poly? t)
      (define bounds (type-poly-bounds t))
      (hasheq 'kind "poly"

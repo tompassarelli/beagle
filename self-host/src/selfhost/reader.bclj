@@ -32,6 +32,20 @@
 (def CHAR-TAG String "#%char")
 (def READING-FN-SHORTHAND (Atom Bool) (atom false))
 
+(def READER-ERRORS Any (atom []))
+
+(defn- reset-errors! [] Nil
+  (reset! READER-ERRORS [])
+  nil)
+
+(defn- reader-errors [] Any
+  (deref READER-ERRORS))
+
+(defn- reader-error! [message String] Nil
+  (swap! READER-ERRORS conj message)
+  (selfhost.rt/eprint message)
+  nil)
+
 ;; --- small string helpers (duplicated per module — PoC pattern) --------------
 
 (defn char-at
@@ -182,7 +196,7 @@
            buf (Vec String) []]
       (cond
         (>= i len)
-          (do (selfhost.rt/eprint "beagle reader: unterminated string\n")
+          (do (reader-error! "beagle reader: unterminated string\n")
               (make-result [STRING-TAG (str/join "" buf)] i))
         (= (char-at src i) "\"")
           (make-result [STRING-TAG (str/join "" buf)] (+ i 1))
@@ -205,7 +219,7 @@
            buf (Vec String) []]
       (cond
         (>= i len)
-          (do (selfhost.rt/eprint "beagle reader: unterminated regex literal\n")
+          (do (reader-error! "beagle reader: unterminated regex literal\n")
               (make-result [REGEX-TAG (str/join "" buf)] i))
         (= (char-at src i) "\"")
           (make-result [REGEX-TAG (str/join "" buf)] (+ i 1))
@@ -237,12 +251,14 @@
         open-pos (+ pos hc)
         len (count src)]
     (if (or (>= open-pos len) (not= (char-at src open-pos) "\""))
-      (do (selfhost.rt/eprint "beagle reader: expected '\"' after #r hashes\n")
+      (do (reader-error! "beagle reader: expected '\"' after #r hashes\n")
           (make-result "" open-pos))
       (loop [i Int (+ open-pos 1)
              buf (Vec String) []]
         (if (>= i len)
-          (make-result [STRING-TAG (str/join "" buf)] i)
+          (do
+            (reader-error! "beagle reader: unterminated raw string\n")
+            (make-result [STRING-TAG (str/join "" buf)] i))
           (if (= (char-at src i) "\"")
             (let [found (count-hashes src (+ i 1))]
               (if (>= found hc)
@@ -334,7 +350,7 @@
            items (Vec Any) []]
       (cond
         (>= p len)
-          (do (selfhost.rt/eprint
+          (do (reader-error!
                 (str "beagle reader: expected " close " before EOF\n"))
               (make-result items p))
         (= (char-at src p) close)
@@ -494,14 +510,20 @@
             (let [inner (read-datum-with-context
                           src (+ p 1) reading-fn-shorthand)]
               (if (nil? inner)
-                (make-result ["quote" nil] (+ p 1))
+                (do
+                  (reader-error!
+                    "beagle reader: unexpected EOF after quote\n")
+                  (make-result ["quote" nil] (+ p 1)))
                 (make-result ["quote" (get inner "value")] (get inner "pos"))))
 
           (= ch "`")
             (let [inner (read-datum-with-context
                           src (+ p 1) reading-fn-shorthand)]
               (if (nil? inner)
-                (make-result ["quasiquote" nil] (+ p 1))
+                (do
+                  (reader-error!
+                    "beagle reader: unexpected EOF after quasiquote\n")
+                  (make-result ["quasiquote" nil] (+ p 1)))
                 (make-result ["quasiquote" (get inner "value")]
                              (get inner "pos"))))
 
@@ -509,7 +531,10 @@
             (let [inner (read-datum-with-context
                           src (+ p 1) reading-fn-shorthand)]
               (if (nil? inner)
-                (make-result ["deref" nil] (+ p 1))
+                (do
+                  (reader-error!
+                    "beagle reader: unexpected EOF after deref\n")
+                  (make-result ["deref" nil] (+ p 1)))
                 (make-result ["deref" (get inner "value")] (get inner "pos"))))
 
           ;; `~X` -> (unquote X); `~@X` -> (unquote-splicing X). Clojure
@@ -519,7 +544,7 @@
               (let [inner (read-datum-with-context
                             src (+ p 2) reading-fn-shorthand)]
                 (if (nil? inner)
-                  (do (selfhost.rt/eprint
+                  (do (reader-error!
                         "beagle reader: unexpected EOF after `~@` (unquote-splicing needs a following datum)\n")
                       (make-result ["unquote-splicing" nil] (+ p 2)))
                   (make-result ["unquote-splicing" (get inner "value")]
@@ -527,7 +552,7 @@
               (let [inner (read-datum-with-context
                             src (+ p 1) reading-fn-shorthand)]
                 (if (nil? inner)
-                  (do (selfhost.rt/eprint
+                  (do (reader-error!
                         "beagle reader: unexpected EOF after `~` (unquote needs a following datum)\n")
                       (make-result ["unquote" nil] (+ p 1)))
                   (make-result ["unquote" (get inner "value")] (get inner "pos")))))
@@ -537,13 +562,13 @@
             (let [meta-r (read-datum-with-context
                            src (+ p 1) reading-fn-shorthand)]
               (if (nil? meta-r)
-                (do (selfhost.rt/eprint
+                (do (reader-error!
                       "beagle reader: unexpected EOF after `^` (metadata needs a value and a target form)\n")
                     nil)
                 (let [form-r (read-datum-with-context
                                src (get meta-r "pos") reading-fn-shorthand)]
                   (if (nil? form-r)
-                    (do (selfhost.rt/eprint
+                    (do (reader-error!
                           "beagle reader: unexpected EOF after `^` metadata (needs a target form to attach to)\n")
                         nil)
                     (make-result ["#%meta" (get meta-r "value") (get form-r "value")]
@@ -556,7 +581,7 @@
             (read-number src p)
 
           (or (= ch ")") (= ch "]") (= ch "}"))
-            (do (selfhost.rt/eprint
+            (do (reader-error!
                   (str "beagle reader: unexpected '" ch "'\n"))
                 nil)
 
@@ -712,7 +737,7 @@
            syntaxes (Vec Any) []]
       (cond
         (>= p len)
-          (do (selfhost.rt/eprint
+          (do (reader-error!
                 (str "beagle reader: expected " close " before EOF\n"))
               (assoc (make-result items p) "syntaxChildren" syntaxes))
         (= (char-at src p) close)
@@ -801,7 +826,10 @@
               (= ch "'")
                 (let [inner (read-syntax-datum! src (+ p 1) source-id)]
                   (if (nil? inner)
-                    (make-result ["quote" nil] (+ p 1))
+                    (do
+                      (reader-error!
+                        "beagle reader: unexpected EOF after quote\n")
+                      (make-result ["quote" nil] (+ p 1)))
                     (assoc
                       (make-result
                         ["quote" (get inner "value")] (get inner "pos"))
@@ -809,7 +837,10 @@
               (= ch "`")
                 (let [inner (read-syntax-datum! src (+ p 1) source-id)]
                   (if (nil? inner)
-                    (make-result ["quasiquote" nil] (+ p 1))
+                    (do
+                      (reader-error!
+                        "beagle reader: unexpected EOF after quasiquote\n")
+                      (make-result ["quasiquote" nil] (+ p 1)))
                     (assoc
                       (make-result
                         ["quasiquote" (get inner "value")]
@@ -818,7 +849,10 @@
               (= ch "@")
                 (let [inner (read-syntax-datum! src (+ p 1) source-id)]
                   (if (nil? inner)
-                    (make-result ["deref" nil] (+ p 1))
+                    (do
+                      (reader-error!
+                        "beagle reader: unexpected EOF after deref\n")
+                      (make-result ["deref" nil] (+ p 1)))
                     (assoc
                       (make-result
                         ["deref" (get inner "value")] (get inner "pos"))
@@ -828,9 +862,14 @@
                       inner (read-syntax-datum!
                         src (+ p (if splicing 2 1)) source-id)]
                   (if (nil? inner)
-                    (make-result
-                      [(if splicing "unquote-splicing" "unquote") nil]
-                      (+ p (if splicing 2 1)))
+                    (do
+                      (reader-error!
+                        (if splicing
+                          "beagle reader: unexpected EOF after `~@` (unquote-splicing needs a following datum)\n"
+                          "beagle reader: unexpected EOF after `~` (unquote needs a following datum)\n"))
+                      (make-result
+                        [(if splicing "unquote-splicing" "unquote") nil]
+                        (+ p (if splicing 2 1))))
                     (assoc
                       (make-result
                         [(if splicing "unquote-splicing" "unquote")
@@ -840,11 +879,17 @@
               (= ch "^")
                 (let [meta-r (read-syntax-datum! src (+ p 1) source-id)]
                   (if (nil? meta-r)
-                    nil
+                    (do
+                      (reader-error!
+                        "beagle reader: unexpected EOF after `^` (metadata needs a value and a target form)\n")
+                      nil)
                     (let [form-r (read-syntax-datum!
                             src (get meta-r "pos") source-id)]
                       (if (nil? form-r)
-                        nil
+                        (do
+                          (reader-error!
+                            "beagle reader: unexpected EOF after `^` metadata (needs a target form to attach to)\n")
+                          nil)
                         (assoc
                           (make-result
                             ["#%meta"
@@ -859,7 +904,11 @@
                        (< (+ p 1) len)
                        (digit? (char-at src (+ p 1)))))
                 (read-number src p)
-              (or (= ch ")") (= ch "]") (= ch "}")) nil
+              (or (= ch ")") (= ch "]") (= ch "}"))
+                (do
+                  (reader-error!
+                    (str "beagle reader: unexpected '" ch "'\n"))
+                  nil)
               (= ch "\\")
                 (read-char-literal src (+ p 1))
               :else
@@ -901,6 +950,7 @@
 
 ;; read-all: whole-file read, keeping the #lang target (used by tests).
 (defn read-all [src String] Any
+  (reset-errors!)
   (let [lang-info (parse-lang-line src)
         target (get lang-info "target")
         start-pos (get lang-info "pos")]
@@ -944,6 +994,7 @@
 (defn read-program-with-syntax!
   [src String
    source-id Any] Any
+  (reset-errors!)
   (reset! SOURCE-LOCATIONS (build-source-locations src))
   (let [lang-info (parse-lang-line src)
         target (get lang-info "target")
@@ -961,18 +1012,20 @@
                   (conj datums (get result "value"))
                   (conj syntaxes (get result "syntax")))))))
         datums (get read-result "datums")
-        syntaxes (get read-result "syntaxes")]
-    (if (and (some? target) (not= target "clj")
-             (not (has-define-target? datums)))
-      {"datums" (into [["define-target" target]] datums)
-       "syntaxes"
-       (into
-         [(ast/datum->beagle-syntax!
-            ["define-target" target]
-            nil ast/EMPTY-SCOPE-SET nil
-            {"reader" (ast/make-reader-metadata "" "synthetic")})]
-         syntaxes)}
-      {"datums" datums "syntaxes" syntaxes})))
+        syntaxes (get read-result "syntaxes")
+        program (if (and (some? target) (not= target "clj")
+                         (not (has-define-target? datums)))
+                  {"datums" (into [["define-target" target]] datums)
+                   "syntaxes"
+                   (into
+                     [(ast/datum->beagle-syntax!
+                        ["define-target" target]
+                        nil ast/EMPTY-SCOPE-SET nil
+                        {"reader"
+                         (ast/make-reader-metadata "" "synthetic")})]
+                     syntaxes)}
+                  {"datums" datums "syntaxes" syntaxes})]
+    (assoc program "errors" (reader-errors))))
 
 ;; === tests ===================================================================
 
