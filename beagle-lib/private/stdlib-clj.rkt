@@ -351,8 +351,6 @@
    (q 'Double 'parseDouble) (fn-of '(String) 'Float)
    (q 'Double 'doubleToRawLongBits) (fn-of '(Float) 'Int)
    (q 'System 'getProperty)       (fn-of '(String) 'String)
-   (q 'System 'getenv)            (type-fn (list (p 'String)) #f
-                                      (type-union (list (p 'String) (p 'Nil))))
    (q 'System 'currentTimeMillis) (fn-of '() 'Int)
    (q 'System 'nanoTime)          (fn-of '() 'Int)
    (q 'System 'exit)              (fn-of '(Int) 'Nil)

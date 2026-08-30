@@ -2112,6 +2112,10 @@ BEAGLE
   '(defn connect [(host String) (port Int)] java.net.Socket
      (java.net.Socket. host port)))
 
+(check-ok "System getenv overloads distinguish environment and named lookup"
+  '(def environment (Map String String) (System/getenv))
+  '(def home String? (System/getenv "HOME")))
+
 (check-ok "java.io.File distinguishes String/String and File/String constructors"
   '(defn child-from-path [(parent String) (name String)] java.io.File
      (java.io.File. parent name))
@@ -2180,6 +2184,11 @@ BEAGLE
   '(defn read-exact [(file RandomAccessFile) (bytes (Arr I8))
                      (offset Int) (length Int)] Nil
      (.readFully file bytes offset length)))
+
+(check-ok "RandomAccessFile readInt carries a precise integer result"
+  `(ns test.jvm-read-int (:import ,(br 'java.io 'RandomAccessFile)))
+  '(defn read-size [(file RandomAccessFile)] Int
+     (.readInt file)))
 
 (check-ok "java.io.File path and canonical accessors carry precise types"
   `(ns test.jvm-file (:import ,(br 'java.io 'File)))

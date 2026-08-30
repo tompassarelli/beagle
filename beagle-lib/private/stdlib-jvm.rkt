@@ -75,6 +75,7 @@
 (define SSLSOCK 'javax.net.ssl.SSLSocket)
 (define THREAD 'java.lang.Thread)
 (define SB   'java.lang.StringBuilder)
+(define SYSTEM 'System)
 
 (define CLASS-TABLE
   (hasheq
@@ -151,6 +152,7 @@
              (M (C RAF) 'setLength (list INT) NIL)
              (M (C RAF) 'seek (list INT) NIL)
              (M (C RAF) 'getFilePointer '() INT)
+             (M (C RAF) 'readInt '() INT)
              (M (C RAF) 'read (list (ARR (C 'I8))) INT)
              (M (C RAF) 'read (list (ARR (C 'I8)) INT INT) INT)
              (M (C RAF) 'readFully (list (ARR (C 'I8))) NIL)
@@ -319,6 +321,10 @@
              (M (C SB) 'charAt   (list INT) ANY)
              (M (C SB) 'toString '() STR)
              (M (C SB) 'length   '() INT))
-       '())))
+       '())
+   SYSTEM
+   (mk SYSTEM '() '()
+       (list (S 'getenv '() (type-app 'Map (list STR STR)))
+             (S 'getenv (list STR) (U STR NIL))))))
 
 (provide (struct-out class-entry) CLASS-TABLE)
