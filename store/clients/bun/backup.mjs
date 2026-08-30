@@ -9,7 +9,7 @@ import {
 import { basename, dirname, isAbsolute, join, resolve } from 'path';
 import { storeNativeCheckpoint } from './store-rpc.mjs';
 
-const LOG_MAGIC = Buffer.from('STORELOG\0', 'ascii');
+const LOG_MAGIC = Buffer.from('STORELOG', 'ascii');
 const SNAPSHOT_MAGIC = Buffer.from('store-snapshot/v1', 'ascii');
 const LOG_FIXED_HEADER_BYTES = 16;
 const MAX_SPACE_BYTES = 4096;
