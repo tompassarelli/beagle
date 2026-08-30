@@ -1613,7 +1613,7 @@
     [(string) (type-prim 'String)]
     [(number) (type-prim 'Float)]
     [(boolean) (type-prim 'Bool)]
-    [(null) (type-prim 'Nil)]
+    [(null undefined void) (type-prim 'Nil)]
     [else #f]))
 
 (define (bindings-overlay bindings parameter-ids values)
@@ -1908,7 +1908,39 @@
          [(reference)
           (or exact?
               (and actual-view (match-reference expected actual-view)))]
-         [(object function)
+         [(function)
+          (or
+           exact?
+           (and
+            (type-fn? actual)
+            (for/and ([signature (in-list (hash-ref expected 'overloads))])
+              (define parameters (hash-ref signature 'parameters))
+              (define rest?
+                (and (pair? parameters) (hash-ref (last parameters) 'rest)))
+              (define required
+                (count
+                 (lambda (parameter) (not (hash-ref parameter 'optional)))
+                 parameters))
+              (and
+               (not rest?)
+               (null? (hash-ref signature 'typeParameters))
+               (for/and
+                   ([arity (in-range required (add1 (length parameters)))])
+                 (type-compatible?
+                  actual
+                  (type-fn
+                   (for/list
+                       ([parameter (in-list (take parameters arity))])
+                     (foreign-result-type
+                      interface
+                      (hash-ref parameter 'type)
+                      expected-bindings))
+                   #f
+                   (foreign-result-type
+                    interface
+                    (hash-ref signature 'return)
+                    expected-bindings))))))))]
+         [(object)
           (or
            exact?
            (and

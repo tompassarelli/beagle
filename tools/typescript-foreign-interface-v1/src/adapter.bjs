@@ -428,12 +428,12 @@
       (let [id String (next-node-id! bridge state)]
         (do
           (.set seen type id)
-          (reset!
-            (buildstatev1-nodes state)
-            (conj
-              (deref (buildstatev1-nodes state))
-              (node-shape! bridge state id type)))
-          id)))))
+          (let [node ForeignNodeV1 (node-shape! bridge state id type)]
+            (do
+              (reset!
+                (buildstatev1-nodes state)
+                (conj (deref (buildstatev1-nodes state)) node))
+              id)))))))
 
 (defn export-node!
   [bridge OpaqueCompilerValueV1

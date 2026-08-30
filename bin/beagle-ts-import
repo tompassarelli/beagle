@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+adapter="$root/tools/typescript-foreign-interface-v1"
+source_file=""
+project_root=""
+namespace=""
+output_mode=source
+module_mappings=()
+
+usage() {
+  printf '%s\n' \
+    'usage: beagle ts-import SOURCE.ts --namespace NAME [--project-root DIR]' \
+    '       [--module-map SPECIFIER=NAMESPACE]... [--json]' >&2
+  exit 2
+}
+
+while (($#)); do
+  case "$1" in
+    --namespace)
+      (($# >= 2)) || usage
+      namespace="$2"
+      shift 2
+      ;;
+    --project-root)
+      (($# >= 2)) || usage
+      project_root="$2"
+      shift 2
+      ;;
+    --module-map)
+      (($# >= 2)) || usage
+      module_mappings+=("$2")
+      shift 2
+      ;;
+    --json)
+      output_mode=json
+      shift
+      ;;
+    --help|-h)
+      usage
+      ;;
+    --*)
+      usage
+      ;;
+    *)
+      [[ -z "$source_file" ]] || usage
+      source_file="$1"
+      shift
+      ;;
+  esac
+done
+
+[[ -n "$source_file" && -n "$namespace" ]] || usage
+source_file="$(realpath "$source_file")"
+if [[ -z "$project_root" ]]; then
+  project_root="$(dirname "$source_file")"
+fi
+project_root="$(realpath "$project_root")"
+
+scratch="$(mktemp -d "${TMPDIR:-/tmp}/beagle-ts-import.XXXXXX")"
+cleanup() {
+  rm -rf -- "${scratch:?}"
+}
+trap cleanup EXIT
+
+compiled="$scratch/importer.mjs"
+build_log="$scratch/build.log"
+if ! BEAGLE_EMIT_SRCLOC=0 "$root/bin/beagle-build" "$adapter/src/importer.bjs" "$compiled" \
+  >"$build_log" 2>&1; then
+  command cat -- "$build_log" >&2
+  exit 1
+fi
+
+if [[ "$output_mode" == json ]]; then
+  exec bun "$adapter/src/import-source.mjs" \
+    "$compiled" "$adapter" "$root/beagle-lib/lib/beagle" \
+    "$project_root" "$source_file" "$namespace" json "${module_mappings[@]}"
+fi
+
+raw="$scratch/imported.bjs"
+bun "$adapter/src/import-source.mjs" \
+  "$compiled" "$adapter" "$root/beagle-lib/lib/beagle" \
+  "$project_root" "$source_file" "$namespace" source "${module_mappings[@]}" \
+  >"$raw"
+"$root/bin/beagle-fmt" --write "$raw" >/dev/null
+"$root/bin/beagle-fmt" --check "$raw" >/dev/null
+command cat -- "$raw"

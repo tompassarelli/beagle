@@ -74,6 +74,7 @@ Query (the compiler is the source of truth):
   callers <fn> <path...>    Call sites
   provides <file>           Exports
   ts-externs ENTRY.d.ts     Typed beagle wrappers from TypeScript declarations
+  ts-import SOURCE.ts       Deterministic typed Beagle/JS from TypeScript source
   impact <fn> <path...>     Change-impact
   expand <file>             Macro-expanded source
   ast <file>                Versioned checked-program JSON (no execution)
@@ -336,6 +337,7 @@ case "$cmd" in
     callers)         exec "$BIN/beagle-callers" "$@" ;;
     provides)        exec "$BIN/beagle-provides" "$@" ;;
     ts-externs)      exec "$BIN/beagle-ts-externs" "$@" ;;
+    ts-import)       exec "$BIN/beagle-ts-import" "$@" ;;
     impact)          exec "$BIN/beagle-impact" "$@" ;;
     explain)         exec "$BIN/beagle-explain" "$@" ;;
     explain-type)    exec "$BIN/beagle-explain-type" "$@" ;;

@@ -254,7 +254,7 @@
     (cond
       [(file-exists? package) directory]
       [else
-       (define parent (path-only (simplify-path directory #f)))
+       (define parent (simplify-path (build-path directory 'up) #f))
        (if (or (not parent) (equal? parent directory))
            (error
             'typescript-foreign-resolver-v1

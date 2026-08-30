@@ -13,6 +13,32 @@ const BRIDGE_ROOT = realpathSync(resolve(dirname(BRIDGE_SOURCE_PATH), ".."));
 const TYPESCRIPT_SOURCE_PATH = realpathSync(resolve(BRIDGE_ROOT, "node_modules/typescript/lib/typescript.js"));
 const PROJECT_LOCKFILES = ["bun.lock", "bun.lockb", "package-lock.json", "pnpm-lock.yaml", "yarn.lock"];
 const BEAGLE_RUNTIME_MODULE = /^beagle\/([A-Za-z0-9._-]+\.js)$/;
+const BUILTIN_AMBIENT_MODULES = new Map([
+  ["bun:test", Object.freeze({
+    logicalPath: "builtins/bun-test.d.ts",
+    source: [
+      'declare module "bun:test" {',
+      "  interface BeagleBoolExpectation {",
+      "    toBe(expected: boolean): void;",
+      "    toEqual(expected: boolean): void;",
+      "  }",
+      "  interface BeagleStringExpectation {",
+      "    toBe(expected: string): void;",
+      "    toEqual(expected: string): void;",
+      "  }",
+      "  interface BeagleStringVectorExpectation {",
+      "    toBe(expected: readonly string[]): void;",
+      "    toEqual(expected: readonly string[]): void;",
+      "  }",
+      "  export function expect(actual: boolean): BeagleBoolExpectation;",
+      "  export function expect(actual: string): BeagleStringExpectation;",
+      "  export function expect(actual: readonly string[]): BeagleStringVectorExpectation;",
+      "  export function test(name: string, body: () => void): void;",
+      "}",
+      "",
+    ].join("\n"),
+  })],
+]);
 
 const sha256Bytes = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const ownedBytes = (bytes) => Buffer.from(bytes);
@@ -91,6 +117,82 @@ const UNSUPPORTED_CODES = new Map([
 const declaration = (symbol) => symbol.valueDeclaration ?? symbol.declarations?.[0];
 const exactFlag = (type, flag) => type.flags === flag;
 const hasFlag = (value, flag) => (value & flag) !== 0;
+const canonicalNodeKind = (node) => {
+  if (!node) return "Missing";
+  const predicates = [
+    [ts.isSourceFile, "SourceFile"],
+    [ts.isImportDeclaration, "ImportDeclaration"],
+    [ts.isImportSpecifier, "ImportSpecifier"],
+    [ts.isTypeAliasDeclaration, "TypeAliasDeclaration"],
+    [ts.isInterfaceDeclaration, "InterfaceDeclaration"],
+    [ts.isPropertySignature, "PropertySignature"],
+    [ts.isMethodSignature, "MethodSignature"],
+    [ts.isFunctionDeclaration, "FunctionDeclaration"],
+    [ts.isVariableStatement, "VariableStatement"],
+    [ts.isVariableDeclaration, "VariableDeclaration"],
+    [ts.isParameter, "Parameter"],
+    [ts.isBlock, "Block"],
+    [ts.isReturnStatement, "ReturnStatement"],
+    [ts.isIfStatement, "IfStatement"],
+    [ts.isExpressionStatement, "ExpressionStatement"],
+    [ts.isForOfStatement, "ForOfStatement"],
+    [ts.isBreakStatement, "BreakStatement"],
+    [ts.isIdentifier, "Identifier"],
+    [ts.isStringLiteral, "StringLiteral"],
+    [ts.isNumericLiteral, "NumericLiteral"],
+    [ts.isRegularExpressionLiteral, "RegularExpressionLiteral"],
+    [ts.isNoSubstitutionTemplateLiteral, "NoSubstitutionTemplateLiteral"],
+    [ts.isTemplateExpression, "TemplateExpression"],
+    [ts.isTemplateSpan, "TemplateSpan"],
+    [ts.isArrowFunction, "ArrowFunction"],
+    [ts.isCallExpression, "CallExpression"],
+    [ts.isPropertyAccessExpression, "PropertyAccessExpression"],
+    [ts.isElementAccessExpression, "ElementAccessExpression"],
+    [ts.isBinaryExpression, "BinaryExpression"],
+    [ts.isPrefixUnaryExpression, "PrefixUnaryExpression"],
+    [ts.isConditionalExpression, "ConditionalExpression"],
+    [ts.isObjectLiteralExpression, "ObjectLiteralExpression"],
+    [ts.isPropertyAssignment, "PropertyAssignment"],
+    [ts.isShorthandPropertyAssignment, "ShorthandPropertyAssignment"],
+    [ts.isArrayLiteralExpression, "ArrayLiteralExpression"],
+    [ts.isSpreadElement, "SpreadElement"],
+    [ts.isAsExpression, "AsExpression"],
+    [ts.isNonNullExpression, "NonNullExpression"],
+    [ts.isParenthesizedExpression, "ParenthesizedExpression"],
+    [ts.isObjectBindingPattern, "ObjectBindingPattern"],
+    [ts.isArrayBindingPattern, "ArrayBindingPattern"],
+    [ts.isBindingElement, "BindingElement"],
+  ];
+  for (const [predicate, name] of predicates) if (predicate(node)) return name;
+  if (node.kind === ts.SyntaxKind.TrueKeyword) return "TrueKeyword";
+  if (node.kind === ts.SyntaxKind.FalseKeyword) return "FalseKeyword";
+  if (node.kind === ts.SyntaxKind.NullKeyword) return "NullKeyword";
+  if (node.kind === ts.SyntaxKind.UndefinedKeyword) return "UndefinedKeyword";
+  return ts.SyntaxKind[node.kind];
+};
+
+const canonicalTokenKind = (node) => {
+  if (!node) return "";
+  const names = new Map([
+    [ts.SyntaxKind.EqualsToken, "EqualsToken"],
+    [ts.SyntaxKind.PlusToken, "PlusToken"],
+    [ts.SyntaxKind.MinusToken, "MinusToken"],
+    [ts.SyntaxKind.AsteriskToken, "AsteriskToken"],
+    [ts.SyntaxKind.SlashToken, "SlashToken"],
+    [ts.SyntaxKind.SlashEqualsToken, "SlashEqualsToken"],
+    [ts.SyntaxKind.LessThanToken, "LessThanToken"],
+    [ts.SyntaxKind.LessThanEqualsToken, "LessThanEqualsToken"],
+    [ts.SyntaxKind.GreaterThanToken, "GreaterThanToken"],
+    [ts.SyntaxKind.GreaterThanEqualsToken, "GreaterThanEqualsToken"],
+    [ts.SyntaxKind.EqualsEqualsEqualsToken, "EqualsEqualsEqualsToken"],
+    [ts.SyntaxKind.ExclamationEqualsEqualsToken, "ExclamationEqualsEqualsToken"],
+    [ts.SyntaxKind.AmpersandAmpersandToken, "AmpersandAmpersandToken"],
+    [ts.SyntaxKind.BarBarToken, "BarBarToken"],
+    [ts.SyntaxKind.QuestionQuestionToken, "QuestionQuestionToken"],
+    [ts.SyntaxKind.ExclamationToken, "ExclamationToken"],
+  ]);
+  return names.get(node.kind) ?? ts.SyntaxKind[node.kind];
+};
 const SUPPORTED_OBJECT_FLAGS = ts.ObjectFlags.Class | ts.ObjectFlags.Interface
   | ts.ObjectFlags.Reference | ts.ObjectFlags.Anonymous | ts.ObjectFlags.Mapped
   | ts.ObjectFlags.Instantiated | ts.ObjectFlags.ObjectLiteral;
@@ -236,12 +338,17 @@ const canonicalDigestFiles = (files) => {
   return [...byPath.values()].sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0);
 };
 
-export function bindProducerInputs({ adapterRoot, runnerBytes = null, bridgeBytes = null }) {
+export function bindProducerInputs({
+  adapterRoot,
+  runnerBytes = null,
+  bridgeBytes = null,
+  runnerName = "src/run.mjs",
+}) {
   const root = canonicalPath(adapterRoot);
   if (root !== BRIDGE_ROOT) {
     throw new Error(`Compiler API bridge authority root mismatch: ${root} (expected ${BRIDGE_ROOT})`);
   }
-  const runner = bindFileBytes(resolve(root, "src/run.mjs"), "TypeScript adapter runner", runnerBytes);
+  const runner = bindFileBytes(resolve(root, runnerName), "TypeScript adapter runner", runnerBytes);
   const bridge = bindFileBytes(resolve(root, "src/typescript-api.mjs"), "TypeScript Compiler API bridge", bridgeBytes);
   runner.assertUnchanged();
   bridge.assertUnchanged();
@@ -257,6 +364,56 @@ export function bindProducerInputs({ adapterRoot, runnerBytes = null, bridgeByte
   });
 }
 
+export function createSourceContext({ projectRoot, sourceFile }) {
+  const canonicalProjectRoot = canonicalPath(projectRoot);
+  const canonicalSourceFile = canonicalPath(sourceFile);
+  logicalCanonical(canonicalProjectRoot, canonicalSourceFile, "TypeScript source file");
+  const compilerOptions = {
+    allowImportingTsExtensions: true,
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    noEmit: true,
+    skipLibCheck: true,
+    strict: true,
+    target: ts.ScriptTarget.ESNext,
+  };
+  const projectLocks = bindProjectLocks(canonicalProjectRoot);
+  const reads = createReadLedger(canonicalProjectRoot);
+  reads.required(canonicalSourceFile, "TypeScript source file");
+  const host = ts.createCompilerHost(compilerOptions, true);
+  host.getCurrentDirectory = () => canonicalProjectRoot;
+  host.readFile = (path) => reads.readText(path);
+  const getSourceFile = host.getSourceFile.bind(host);
+  host.getSourceFile = (fileName, ...arguments_) => {
+    const parsed = getSourceFile(fileName, ...arguments_);
+    if (!parsed) return parsed;
+    const snapshot = reads.record(fileName, "parsed Program source input");
+    if (parsed.text !== snapshot.text) {
+      throw new Error(`Program parsed bytes outside the shared input snapshot: ${snapshot.path}`);
+    }
+    return parsed;
+  };
+  const program = ts.createProgram([canonicalSourceFile], compilerOptions, host);
+  const diagnostics = ts.getPreEmitDiagnostics(program);
+  if (diagnostics.length) {
+    throw new Error(ts.formatDiagnosticsWithColorAndContext(diagnostics, {
+      getCanonicalFileName: (path) => path,
+      getCurrentDirectory: () => canonicalProjectRoot,
+      getNewLine: () => "\n",
+    }));
+  }
+  const source = program.getSourceFile(canonicalSourceFile);
+  if (!source) throw new Error(`TypeScript source is absent from Program: ${canonicalSourceFile}`);
+  const programInputs = program.getSourceFiles().map((programSource) => reads.record(
+    programSource.fileName,
+    "Program source input",
+  ));
+  return {
+    checker: program.getTypeChecker(), compilerOptions, program, programInputs,
+    projectLocks, projectRoot: canonicalProjectRoot, reads, source,
+  };
+}
+
 export function createContext({ projectRoot, containingFile, moduleSpecifier, conditions }) {
   const canonicalProjectRoot = canonicalPath(projectRoot);
   const canonicalContainingFile = canonicalPath(containingFile);
@@ -269,15 +426,37 @@ export function createContext({ projectRoot, containingFile, moduleSpecifier, co
     strict: true,
     target: ts.ScriptTarget.ESNext,
   };
+  if (BUILTIN_AMBIENT_MODULES.has(moduleSpecifier)) compilerOptions.types = [];
   logicalCanonical(canonicalProjectRoot, canonicalContainingFile, "containing file");
   const projectLocks = bindProjectLocks(canonicalProjectRoot);
   const reads = createReadLedger(canonicalProjectRoot);
   reads.required(canonicalContainingFile, "containing file");
+  const builtinAmbient = BUILTIN_AMBIENT_MODULES.get(moduleSpecifier) ?? null;
+  const builtinPath = builtinAmbient
+    ? resolve(canonicalProjectRoot, ".beagle-typescript-builtins", builtinAmbient.logicalPath)
+    : null;
   const host = ts.createCompilerHost(compilerOptions, true);
   host.getCurrentDirectory = () => canonicalProjectRoot;
-  host.readFile = (path) => reads.readText(path);
+  const fileExists = host.fileExists.bind(host);
+  host.fileExists = (path) => (
+    builtinPath && resolve(path) === builtinPath ? true : fileExists(path)
+  );
+  host.readFile = (path) => (
+    builtinPath && resolve(path) === builtinPath
+      ? builtinAmbient.source
+      : reads.readText(path)
+  );
   const getSourceFile = host.getSourceFile.bind(host);
   host.getSourceFile = (fileName, ...arguments_) => {
+    if (builtinPath && resolve(fileName) === builtinPath) {
+      return ts.createSourceFile(
+        builtinPath,
+        builtinAmbient.source,
+        arguments_[0] ?? compilerOptions.target,
+        true,
+        ts.ScriptKind.TS,
+      );
+    }
     const sourceFile = getSourceFile(fileName, ...arguments_);
     if (!sourceFile) return sourceFile;
     const snapshot = reads.record(fileName, "parsed Program source input");
@@ -292,11 +471,47 @@ export function createContext({ projectRoot, containingFile, moduleSpecifier, co
     compilerOptions,
     host,
   ).resolvedModule;
-  if (!resolved) throw new Error(`cannot resolve TypeScript module ${moduleSpecifier} from ${containingFile}`);
-  const packagePath = enclosingPackage(resolved.resolvedFileName);
+  let program;
+  let checker;
+  let source;
+  let moduleSymbol;
+  let packagePath;
+  if (resolved) {
+    packagePath = enclosingPackage(resolved.resolvedFileName);
+    program = ts.createProgram([resolved.resolvedFileName], compilerOptions, host);
+    checker = program.getTypeChecker();
+    source = program.getSourceFile(resolved.resolvedFileName);
+    if (!source) throw new Error(`resolved declaration is absent from Program: ${resolved.resolvedFileName}`);
+    moduleSymbol = checker.getSymbolAtLocation(source);
+    if (!moduleSymbol) throw new Error(`resolved declaration has no module symbol: ${resolved.resolvedFileName}`);
+  } else {
+    const typeDirectiveFiles = builtinPath
+      ? [builtinPath]
+      : ts.getAutomaticTypeDirectiveNames(compilerOptions, host)
+        .sort()
+        .map((name) => ts.resolveTypeReferenceDirective(
+          name,
+          canonicalContainingFile,
+          compilerOptions,
+          host,
+        ).resolvedTypeReferenceDirective?.resolvedFileName)
+        .filter(Boolean);
+    program = ts.createProgram(typeDirectiveFiles, compilerOptions, host);
+    checker = program.getTypeChecker();
+    moduleSymbol = checker.getAmbientModules().find((symbol) => (
+      symbol.getName().replace(/^"|"$/g, "") === moduleSpecifier
+    ));
+    if (!moduleSymbol) {
+      throw new Error(`cannot resolve physical or ambient TypeScript module ${moduleSpecifier} from ${containingFile}`);
+    }
+    source = declaration(moduleSymbol)?.getSourceFile();
+    if (!source) throw new Error(`ambient TypeScript module ${moduleSpecifier} has no declaration source`);
+    packagePath = builtinPath
+      ? enclosingPackage(canonicalContainingFile)
+      : enclosingPackage(source.fileName);
+  }
   logicalCanonical(canonicalProjectRoot, canonicalPath(packagePath), "resolved package");
   const packageSnapshot = reads.required(packagePath, "resolved package");
-  const program = ts.createProgram([resolved.resolvedFileName], compilerOptions, host);
   const diagnostics = ts.getPreEmitDiagnostics(program);
   if (diagnostics.length) {
     throw new Error(ts.formatDiagnosticsWithColorAndContext(diagnostics, {
@@ -305,19 +520,23 @@ export function createContext({ projectRoot, containingFile, moduleSpecifier, co
       getNewLine: () => "\n",
     }));
   }
-  const checker = program.getTypeChecker();
-  const source = program.getSourceFile(resolved.resolvedFileName);
-  if (!source) throw new Error(`resolved declaration is absent from Program: ${resolved.resolvedFileName}`);
-  const moduleSymbol = checker.getSymbolAtLocation(source);
-  if (!moduleSymbol) throw new Error(`resolved declaration has no module symbol: ${resolved.resolvedFileName}`);
-  const programInputs = program.getSourceFiles().map((programSource) => reads.record(
-    programSource.fileName,
-    "Program source input",
-  ));
+  const programInputs = program.getSourceFiles()
+    .filter((programSource) => !builtinPath || resolve(programSource.fileName) !== builtinPath)
+    .map((programSource) => reads.record(
+      programSource.fileName,
+      "Program source input",
+    ));
+  const virtualInputs = builtinPath
+    ? [{
+      path: `adapter/${builtinAmbient.logicalPath}`,
+      physicalPath: builtinPath,
+      sha256: sha256Bytes(Buffer.from(builtinAmbient.source)),
+    }]
+    : [];
   return {
     checker, compilerOptions, conditions: [...conditions].sort(), moduleSymbol,
     packagePath: packageSnapshot.path, program, programInputs, projectLocks,
-    projectRoot: canonicalProjectRoot, reads, resolved,
+    projectRoot: canonicalProjectRoot, reads, resolved, virtualInputs,
   };
 }
 
@@ -396,13 +615,29 @@ export function foreignInterfaceBuilder(module) {
   return candidates[0];
 }
 
-export function createCompilerBridge({ adapterRoot, compiledAdapter, producerInputs = null }) {
+export function sourceImporterBuilder(module) {
+  const candidates = [
+    module["import-typescript-source-v1!"],
+    module.import_typescript_source_v1_bang,
+  ].filter((value) => typeof value === "function");
+  if (candidates.length !== 1) {
+    throw new Error("compiled importer must expose exactly one import-typescript-source-v1! implementation");
+  }
+  return candidates[0];
+}
+
+export function createCompilerBridge({
+  adapterRoot,
+  compiledAdapter,
+  producerInputs = null,
+  adapterSourceName = "src/adapter.bjs",
+}) {
   const root = canonicalPath(adapterRoot);
   if (root !== BRIDGE_ROOT) {
     throw new Error(`Compiler API bridge authority root mismatch: ${root} (expected ${BRIDGE_ROOT})`);
   }
   const own = (name) => resolve(root, name);
-  const adapterSource = bindFileBytes(own("src/adapter.bjs"), "typed adapter source");
+  const adapterSource = bindFileBytes(own(adapterSourceName), "typed adapter source");
   const adapterLock = bindFileBytes(own("bun.lock"), "adapter lockfile");
   const producer = producerInputs ?? bindProducerInputs({ adapterRoot: root });
   const typescriptRoot = canonicalPath(own("node_modules/typescript"));
@@ -447,6 +682,7 @@ export function createCompilerBridge({ adapterRoot, compiledAdapter, producerInp
     if (brand(context, type)) return "brand";
     if (context.checker.isTupleType(type)) return "tuple";
     if (context.checker.isArrayType(type)) return "array";
+    if (hasFlag(type.flags, ts.TypeFlags.Boolean)) return "boolean";
     const primitive = TYPE_KINDS.get(type.flags);
     if (primitive) return primitive;
     if (hasFlag(type.flags, ts.TypeFlags.Enum | ts.TypeFlags.EnumLiteral | ts.TypeFlags.UniqueESSymbol)) return "unsupported";
@@ -484,6 +720,7 @@ export function createCompilerBridge({ adapterRoot, compiledAdapter, producerInp
       ? type.intrinsicName === "true"
       : typeof type.value === "object" ? String(type.value.base10Value) : type.value,
     moduleExports(context) { this.context = context; return context.checker.getExportsOfModule(context.moduleSymbol); },
+    moduleMapping(mappings, specifier) { return mappings.get(specifier) ?? null; },
     "nominalReference?": (type) => Boolean(type.symbol?.valueDeclaration && ts.isClassDeclaration(type.symbol.valueDeclaration)),
     objectTypeParameters: (type) => type.typeParameters ?? [],
     "optionalSymbol?": (symbol) => hasFlag(symbol.flags, ts.SymbolFlags.Optional),
@@ -500,7 +737,11 @@ export function createCompilerBridge({ adapterRoot, compiledAdapter, producerInp
       adapterLock.assertUnchanged();
       typescriptSource.assertUnchanged();
       const programPaths = new Set(context.programInputs.map((snapshot) => snapshot.path));
+      const virtualByPath = new Map(
+        (context.virtualInputs ?? []).map((input) => [input.physicalPath, input]),
+      );
       for (const source of context.program.getSourceFiles()) {
+        if (virtualByPath.has(resolve(source.fileName))) continue;
         const snapshot = context.reads.record(source.fileName, "Program source input");
         if (!programPaths.has(snapshot.path)) {
           throw new Error(`Program source escaped the snapshotted input set: ${snapshot.path}`);
@@ -509,6 +750,7 @@ export function createCompilerBridge({ adapterRoot, compiledAdapter, producerInp
       const files = canonicalDigestFiles([
         ...producer.files,
         ...compiledAdapter.runtimeFiles(),
+        ...(context.virtualInputs ?? []).map(({ path, sha256 }) => ({ path, sha256 })),
         ...context.reads.records().map((snapshot) => compilerInputDigest(context, snapshot)),
         ...context.projectLocks.files.map((snapshot) => ({
           path: `project/${logicalCanonical(context.projectRoot, snapshot.path, "project lockfile")}`,
@@ -553,6 +795,7 @@ export function createCompilerBridge({ adapterRoot, compiledAdapter, producerInp
     resolveAlias(symbol) { return hasFlag(symbol.flags, ts.SymbolFlags.Alias) ? this.context.checker.getAliasedSymbol(symbol) : symbol; },
     "restParameter?": (symbol) => Boolean(declaration(symbol)?.dotDotDotToken),
     signatureParameters: (signature) => signature.getParameters(),
+    signatureMinimumArgumentCount: (signature) => signature.minArgumentCount,
     signatureReturnType(signature) { return this.context.checker.getReturnTypeOfSignature(signature); },
     signatureTypeParameters: (signature) => signature.getTypeParameters?.() ?? [],
     sort(values) {
@@ -579,6 +822,20 @@ export function createCompilerBridge({ adapterRoot, compiledAdapter, producerInp
     tupleElements(type) { return tupleElements(this.context, type); },
     typeArguments(type) { return this.context.checker.getTypeArguments?.(type) ?? type.typeArguments ?? []; },
     typeDisplay(type) { return this.context.checker.typeToString(type, undefined, ts.TypeFormatFlags.NoTruncation); },
+    typeImportSpecifier(context, type) {
+      const symbol = type.aliasSymbol ?? type.symbol;
+      if (!symbol) return null;
+      const typeSource = declaration(symbol)?.getSourceFile();
+      if (!typeSource || typeSource === context.source) return null;
+      for (const statement of context.source.statements) {
+        if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+        const importedModule = context.checker.getSymbolAtLocation(statement.moduleSpecifier);
+        if (importedModule?.declarations?.some((item) => item.getSourceFile() === typeSource)) {
+          return statement.moduleSpecifier.text;
+        }
+      }
+      return null;
+    },
     typeKind(type) { return typeKind(this.context, type); },
     typeMembers: (type) => type.types,
     typeName: (type) => type.aliasSymbol?.getName() ?? type.symbol?.getName() ?? "anonymous",
@@ -586,5 +843,99 @@ export function createCompilerBridge({ adapterRoot, compiledAdapter, producerInp
     typeParameterDefault: (type) => type.getDefault?.() ?? type.default ?? null,
     unsupportedCode,
     weakMap: () => new WeakMap(),
+    sourceFile(context) { this.context = context; return context.source; },
+    nodeKind: canonicalNodeKind,
+    nodeField: (node, field) => node?.[field] ?? null,
+    nodeList: (node, field) => [...(node?.[field] ?? [])],
+    nodeName: (node) => node?.name?.getText?.() ?? node?.getText?.() ?? "",
+    nodeText: (node) => node?.text ?? node?.getText?.() ?? "",
+    numericLiteralNumberSource(node) {
+      const value = Number(node.text);
+      return Number.isInteger(value) ? `${value}.0` : String(value);
+    },
+    nodeTokenKind: canonicalTokenKind,
+    prefixOperatorKind: (node) => canonicalTokenKind({ kind: node.operator }),
+    "nodeExported?": (node) => Boolean(node?.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)),
+    "nodeOptional?": (node) => Boolean(
+      node?.questionToken
+      || node?.questionDotToken
+      || (node?.flags & ts.NodeFlags.OptionalChain),
+    ),
+    "nodeRest?": (node) => Boolean(node?.dotDotDotToken),
+    "nodeMutable?": (node) => Boolean(node?.parent?.flags & ts.NodeFlags.Let),
+    literalJson: (node) => JSON.stringify(node.text),
+    jsonString: (value) => JSON.stringify(value),
+    regexPattern(node) {
+      const text = node.getText();
+      const lastSlash = text.lastIndexOf("/");
+      return text.slice(1, lastSlash);
+    },
+    regexFlags(node) {
+      const text = node.getText();
+      return text.slice(text.lastIndexOf("/") + 1);
+    },
+    location(context, node) {
+      const point = context.source.getLineAndCharacterOfPosition(node.getStart(context.source));
+      return {
+        file: logicalCanonical(context.projectRoot, context.source.fileName, "TypeScript source file"),
+        line: point.line + 1,
+        column: point.character + 1,
+      };
+    },
+    typeAt(node) { return this.context.checker.getTypeAtLocation(node); },
+    contextualType(node) { return this.context.checker.getContextualType(node) ?? null; },
+    returnType(node) {
+      const signature = this.context.checker.getSignatureFromDeclaration(node);
+      return signature ? this.context.checker.getReturnTypeOfSignature(signature) : null;
+    },
+    getSignatureFromDeclaration(node) {
+      return this.context.checker.getSignatureFromDeclaration(node) ?? null;
+    },
+    "typeLocal?"(type) {
+      const symbol = type.aliasSymbol ?? type.symbol;
+      return Boolean(symbol?.declarations?.some((item) => item.getSourceFile() === this.context.source));
+    },
+    typeProperties(type) { return this.context.checker.getPropertiesOfType(type); },
+    sourceProvenance(context) {
+      context.reads.assertStable();
+      context.projectLocks.assertUnchanged();
+      producer.assertUnchanged();
+      adapterSource.assertUnchanged();
+      adapterLock.assertUnchanged();
+      typescriptSource.assertUnchanged();
+      const programPaths = new Set(context.programInputs.map((snapshot) => snapshot.path));
+      for (const source of context.program.getSourceFiles()) {
+        const snapshot = context.reads.record(source.fileName, "Program source input");
+        if (!programPaths.has(snapshot.path)) {
+          throw new Error(`Program source escaped the snapshotted input set: ${snapshot.path}`);
+        }
+      }
+      return {
+        adapter: {
+          source: logicalCanonical(root, adapterSource.path, "adapter source"),
+          sourceSha256: adapterSource.sha256,
+          compiledSha256: compiledAdapter.sha256,
+        },
+        typescript: {
+          version: ts.version,
+          path: logicalCanonical(root, typescriptSource.path, "TypeScript compiler"),
+          sha256: typescriptSource.sha256,
+        },
+        source: compilerInputDigest(context, context.reads.record(context.source.fileName)),
+        consultedFiles: canonicalDigestFiles([
+          ...producer.files,
+          ...compiledAdapter.runtimeFiles(),
+          ...context.reads.records().map((snapshot) => compilerInputDigest(context, snapshot)),
+          ...context.projectLocks.files.map((snapshot) => ({
+            path: `project/${logicalCanonical(context.projectRoot, snapshot.path, "project lockfile")}`,
+            sha256: snapshot.sha256,
+          })),
+        ]),
+      };
+    },
   };
+}
+
+export function createSourceCompilerBridge(options) {
+  return createCompilerBridge({ ...options, adapterSourceName: "src/importer.bjs" });
 }

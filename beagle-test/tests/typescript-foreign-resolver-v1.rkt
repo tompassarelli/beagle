@@ -133,21 +133,29 @@
       "\"default\":\"./index.js\"}}}\n"))
     (write-source!
      (build-path package-root "beagle.d.ts")
-     "export declare const value: string;\n")
+     (string-append
+      "export declare const value: string;\n"
+      "export declare function acceptFlag(flag: boolean): void;\n"
+      "export declare function notify(): void;\n"
+      "export declare function schedule(body: () => void): void;\n"))
     ;; If the production "beagle" condition is lost, this conflicting default
     ;; declaration makes the coherent String check fail instead of passing by
     ;; coincidence.
     (write-source!
      (build-path package-root "index.d.ts")
      "export declare const value: number;\n")
-    (define source-path (build-path project-root "native-success.bjs"))
+    (define source-path
+      (build-path project-root "nested" "native-success.bjs"))
+    (make-directory* (build-path project-root "nested"))
     (write-source!
      source-path
      (string-append
       "#lang beagle/js\n"
       "(ns resolver-test.native-success\n"
-      "  (:require [\"@fixture/native\" :refer [value]]))\n"
-      "(js/export (def answer String value))\n"))
+      "  (:require [\"@fixture/native\" :refer [acceptFlag notify schedule value]]))\n"
+      "(js/export (def answer String value))\n"
+      "(js/export (defn relay [flag Bool] Nil (acceptFlag flag)))\n"
+      "(js/export (defn run [] Nil (schedule (fn [] Nil (notify)))))\n"))
 
     (define closure
       (resolve-production-module-source-closure
