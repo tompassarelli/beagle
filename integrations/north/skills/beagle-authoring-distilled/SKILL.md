@@ -4,10 +4,10 @@ description: >-
   Use whenever writing, editing, or debugging Beagle source in any project:
   files with a current Beagle extension (`beagle langs --view extensions`),
   files beginning with `#lang beagle`, or anything under ~/code/beagle.
-  Establishes proportional authoring-loop health, compiler-first repair,
-  canonical typed syntax, and the pinned Racket route for cold bootstrap or
-  direct `.rkt` maintenance. For primarily relational code analysis, use
-  codegraph instead.
+  Establishes proportional authoring-loop health, typed-Lisp semantic
+  leverage, compiler-first repair, canonical typed syntax, and the pinned
+  Racket route for cold bootstrap or direct `.rkt` maintenance. For primarily
+  relational code analysis, use codegraph instead.
 ---
 
 # Beagle authoring
@@ -27,13 +27,40 @@ Query the live profile registry with `beagle langs --json` and
    then prove layout with `beagle fmt --check`.
 4. Run the nearest existing relevant check once and report the observed result.
 
+## Semantic leverage
+
+Before settling any non-trivial Beagle change, perform a lightweight leverage
+audit. Map repeated semantic cases, parallel authorities, expected next-change
+sites, and target variation; seek the strongest typed-Lisp abstraction that
+materially reduces them versus a direct host-language implementation. In the
+handoff, name the concrete before/after result: semantic cases removed, one
+authority replacing parallel cases, change sites reduced, or one source
+abstraction serving multiple targets. If no candidate improves that baseline
+without violating the safeguards below, keep explicit source and report the
+comparison; never manufacture a macro to satisfy the audit.
+
+Optimize semantic compression, not visible macro count. A hygienic macro,
+explicitly typed combinator, or data-driven form earns its place only when it
+eliminates structural duplication or a class of code while preserving explicit
+types, hygienic binding, source-located diagnostics, inspectable deterministic
+expansion with meaningful names, backend-neutral typed IR, and bounded compiler
+and runtime cost. Reject code golf, phase magic, hidden effects, opaque
+generated names, gratuitous embedded DSLs, and expansions harder to reason
+about than the repeated source.
+
+Count the relevant baseline and result so the evidence can support an honest
+maintainability comparison. Never claim a multiplier, including 10x, without a
+measured, reproducible comparison.
+
 Diagnose concrete infrastructure failure once with `beagle doctor --deep`; use
 `--revive` only for a diagnosed daemon failure. Source rejection is feedback.
 
-Treat emitted host code as generated output, not source authority. Stop on a
-confirmed compiler or tool defect: repair and land it upstream, then regenerate.
-Do not evade a compiler gap with source reshaping, generated patches, target
-glue, raw passthrough, escape hatches, or hypothetical compatibility.
+Treat emitted host code as generated output, not source authority. A required
+typed boundary that Beagle cannot express is upstream compiler work, not a
+blocker: the assigned compiler owner must repair and land support before
+authoring resumes and regenerates. Do not evade a compiler gap with source
+reshaping, generated patches, target glue, raw passthrough, escape hatches, or
+hypothetical compatibility.
 
 Keep semantics in typed Beagle over normalized Store triples. Limit host code to
 cold bootstrap and irreducible OS/foreign edges. When the owner controls
