@@ -166,8 +166,7 @@
 
    A successful epoch assignment is semantic: its currentness is the named
    epoch that the fold proved. A refusal is structural: it records the exact
-   observed site shape without pretending that semantic currentness was proved.
-   Store/epoch.clj consumes this closed shape during cold genesis."
+   observed site shape without pretending that semantic currentness was proved."
   [{:keys [assignment refusal] :as result}]
   (cond
     assignment

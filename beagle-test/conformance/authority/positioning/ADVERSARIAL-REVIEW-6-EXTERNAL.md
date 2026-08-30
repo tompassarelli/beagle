@@ -169,13 +169,10 @@ source ownership language.
 
 The prior allocation thesis said Phase 3 must discover store-generation
 boundaries from control flow and durability, prove no use-after-close, and
-measure reclamation, but specified no developer-facing failure contract. The
-landed Stage 3 slice proves one authored hydration boundary and its generated
-arena/promotion/reclamation behavior
-(`beagle:branch-core/src/fram/revision_generation.bgl:19-31`,
-`beagle:branch-core/tests/revision_generation_asan_test.sh:19-87`); it is not
-general boundary inference. The current Greywrought evidence remains the honest
-manual model: a driver-owned request boundary and fixed 80 MiB scratch policy
+measure reclamation, but specified no developer-facing failure contract. No
+current Store slice proves general boundary inference. The current Greywrought
+evidence remains the honest manual model: a driver-owned request boundary and
+fixed 80 MiB scratch policy
 (`ALLOCATION-THESIS.md:410-428`).
 
 The smallest sound contract is now in `ALLOCATION-THESIS.md:430-459` and

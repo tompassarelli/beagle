@@ -109,7 +109,6 @@ Every path is inside the named repository unless it is explicitly absolute.
 | store/codegraph/src/roundtrip_fram.bclj | store/codegraph/src/roundtrip_store.bclj |
 | store/integrations/north/skills/fram-modeling/ | store/integrations/north/skills/beagle-store-modeling/ |
 | bin/_fram-resolver | bin/_beagle-store-resolver |
-| native-core/bin/fram-native-demo | native-core/bin/beagle-store-native-demo |
 | native-core/validation/fram-checkout.sh | native-core/validation/store-checkout.sh |
 | native-core/validation/fram.ref | native-core/validation/store.ref |
 | store/native/fram.h | store/native/store.h |

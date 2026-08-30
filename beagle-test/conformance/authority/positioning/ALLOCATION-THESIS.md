@@ -429,13 +429,8 @@ This is already better than opaque retention: the ownership boundary is
 visible, bulk reclamation is deterministic, and promotion is visibly a copy.
 It is also not the endpoint. The 80 MiB constant is manual capacity policy; the
 host, not the compiler or store, currently decides which results cross from
-scratch to staged state. The landed Stage 3 slice proves one predeclared
-hydration boundary: it constructs a complete revision-bound candidate and
-promotes it on an exact revision match, while its native driver owns and
-reclaims successive arenas
-(`beagle:branch-core/src/fram/revision_generation.bgl:19-31`,
-`beagle:branch-core/tests/revision_generation_asan_test.sh:19-87`). It does not
-infer arbitrary store-generation boundaries from control flow and durability.
+scratch to staged state. No current Store slice infers arbitrary generation
+boundaries from control flow and durability.
 
 The failure-mode contract for that broader inference is explicit. Successful
 inference produces the same region, close, promotion, and reclamation receipt

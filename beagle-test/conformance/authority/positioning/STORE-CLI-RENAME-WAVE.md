@@ -89,7 +89,6 @@ may execute `beagle-store-server` and MCP clients may execute
 | `fram-ingest-code` | `beagle-store-ingest-code` | graph-authoring ingest helper |
 | `fram-promote` | `beagle-store-promote` | store release promoter |
 | `fram-render-code-native` | `beagle-store-render-code-native` | native renderer helper |
-| `fram-native-demo` | `beagle-store-native-demo` | native demo |
 | `_fram-resolver` | `_beagle-store-resolver` | private resolver helper |
 
 The current filename authorities are
@@ -286,12 +285,8 @@ Other Beagle-owned rename surfaces are:
   `slice-types/pipeline.bclj:193-209`, `:345-366`,
   `slice-types-full/drive.sh:2-51`, `slice-store/drive.sh:2-70`,
   `slice-vec/drive.sh:2-77`, `slice-bodies/drive.sh:2-101`,
-  `slice-rt-core/drive.sh:2-35`, `slice-rt-core/managed_runner.clj:2-40`,
   `slice-kernel-capability/drive.sh:7-9`,
   `slice-kernel-capability/host_capability_slice.bclj:60`,
-  `slice-kernel-classify/drive.sh:2-91`,
-  `slice-kernel-classify/kernel_classify_probe.bgl:5`,
-  `slice-kernel-classify/managed_runner.clj:2`,
   `slice-main-capability/main_fixture.bgl:3-8`, and
   `slice-main-capability/drive.sh:90-157`.
 - Native analysis vocabulary:

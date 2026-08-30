@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Re-materializes each native-core validation slice twice, byte-compares
 # every output, and fails loudly with the differing paths on divergence.
-# Usage: determinism_gate.sh [--module slice-types-full|slice-fold|slice-types|slice-store|slice-vec|slice-kernel-classify] [--quick]
+# Usage: determinism_gate.sh [--module slice-types-full|slice-fold|slice-types|slice-store|slice-vec] [--quick]
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,7 +20,7 @@ platform_supervisor="$repo/native-core/bin/run-bounded"
 # modules cacheable instead of poisoning one whole-gate identity.
 if [[ $# -eq 0 && -z "${BEAGLE_GATE_CACHE_INNER:-}" && -x "$repo/bin/_gate-cache-run" ]]; then
   overall=0
-  for m in slice-fold slice-types-full slice-types slice-store slice-vec slice-kernel-classify; do
+  for m in slice-fold slice-types-full slice-types slice-store slice-vec; do
     "$0" --module "$m" || overall=1
   done
   exit "$overall"
@@ -193,12 +193,6 @@ run_slice_vec() {
     env NATIVE_SLICE_NO_COMPILE=1
 }
 
-run_slice_kernel_classify() {
-  run_env_artifacts_slice slice-kernel-classify \
-    "$validation/slice-kernel-classify/drive.sh" \
-    env NATIVE_SLICE_NO_COMPILE=1
-}
-
 run_slice_types() {
   run_env_artifacts_slice slice-types "$validation/slice-types/run.sh" env
 }
@@ -223,7 +217,6 @@ if [ -n "$module" ]; then
     slice-types) run_slice_types ;;
     slice-store) run_slice_store ;;
     slice-vec) run_slice_vec ;;
-    slice-kernel-classify) run_slice_kernel_classify ;;
     *) echo "determinism_gate.sh: unknown --module: $module" >&2; exit 2 ;;
   esac
 elif [ "$quick" -eq 1 ]; then
@@ -234,7 +227,6 @@ else
   run_slice_types
   run_slice_store
   run_slice_vec
-  run_slice_kernel_classify
 fi
 
 exit "$status"

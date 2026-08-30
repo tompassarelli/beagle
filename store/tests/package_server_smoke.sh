@@ -25,7 +25,7 @@ required=(
   "$runtime/clients/bun/backup.mjs" "$runtime/clients/bun/store-rpc.mjs"
   "$runtime/bin/beagle-store-cli.clj"
   "$runtime/database.clj" "$runtime/server.clj"
-  "$runtime/writer_authority.clj" "$runtime/rotations.clj"
+  "$runtime/writer_authority.clj"
   "$runtime/out/store/rpc.clj" "$runtime/out/store/rt.clj"
   "$runtime/out/store/types.clj" "$runtime/tests/store_mcp.clj"
   "$runtime/server.classpath" "$runtime/runtime.manifest"

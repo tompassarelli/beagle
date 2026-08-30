@@ -155,8 +155,8 @@
             mkdir -p $out/libexec/store/tests $out/libexec/store/codegraph \
               $out/libexec/store/clients/bun \
               $out/libexec/store/node_modules/beagle $out/bin
-            cp -r out bin src database.clj server.clj writer_authority.clj fri.clj \
-              rotations.clj deps.edn \
+            cp -r out bin src database.clj server.clj writer_authority.clj \
+              deps.edn \
               $out/libexec/store/
             printf '%s\n' \
               'format=beagle-store-runtime/v1' \

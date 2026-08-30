@@ -1,7 +1,0 @@
-{:format "beagle.store/FactGcFixtureV1"
- :version 1
- :source-commit "commit-source-v1"
- :producer "gate-fact-producer"
- :cases [{:name :one :scale 1}
-         {:name :ten :scale 10}
-         {:name :hundred :scale 100}]}

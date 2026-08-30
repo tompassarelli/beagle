@@ -42,8 +42,7 @@
 (def wrong-space (fri/source-binding "other-space" fingerprint 4096))
 (def stale-position (fri/source-binding "fri-space" fingerprint 4095))
 (def runtime-source
-  (str/join "\n" (map slurp ["fri.clj" "rotations.clj"
-                              "src/fri.bclj" "src/fri_port.bclj"
+  (str/join "\n" (map slurp ["src/fri.bclj" "src/fri_port.bclj"
                               "out/fri.clj" "out/fri_port.clj"])))
 (def decode-term-v1! (deref (ns-resolve 'fri-port 'decode-term-v1!)))
 (def malformed-length (byte-array [1 5 0 0 0 65]))
