@@ -18,11 +18,11 @@
 (def max-transaction-sequence Int 9223372036854775806)
 (def default-tail-row-limit Int 65536)
 (def default-tail-byte-limit Int 67108864)
-(def tail-base-rows Int 192)
-(def tail-base-bytes Int 12288)
+(def tail-base-rows Int 448)
+(def tail-base-bytes Int 28672)
 (def atom-tail-overhead-bytes Int 64)
 (def slot-entry-tail-bytes Int 24)
-(def triple-tail-bytes Int 72)
+(def triple-tail-bytes Int 168)
 (def transaction-tail-bytes Int 48)
 (def operation-tail-bytes Int 64)
 (def withdrawal-tail-bytes Int 16)
@@ -55,6 +55,10 @@
   [seen Any
    rows Int
    bytes Int])
+
+(defrecord TriplePair
+  [first Int
+   second Int])
 
 ;; A slot table doubles once its indexed vector holds more than this many rows
 ;; per slot. Every lookup still checks the complete physical row for collision.
@@ -91,6 +95,38 @@
       (recur (slots/slot-add! slots (slots/slot-of (nth rows position) width)
                               (+ base position))
              (inc position)))))
+
+(def triple-index-t1 Int 0)
+(def triple-index-t12 Int 1)
+(def triple-index-t2 Int 2)
+(def triple-index-t3 Int 3)
+
+(defn- triple-index-key
+  [row t/TripleRow
+   index-id Int] Any
+  (cond
+    [(= index-id triple-index-t1) (t/triplerow-t1 row)]
+    [(= index-id triple-index-t12)
+     (->TriplePair (t/triplerow-t1 row) (t/triplerow-t2 row))]
+    [(= index-id triple-index-t2) (t/triplerow-t2 row)]
+    [:else (t/triplerow-t3 row)]))
+
+(defn- build-triple-query-slots!
+  [rows (Vec t/TripleRow)
+   width Int
+   base Int
+   index-id Int] slots/TermSlots
+  (loop [index slots/TermSlots (slots/fresh-slots width)
+         position Int 0]
+    (if (>= position (count rows))
+      index
+      (let [row t/TripleRow (nth rows position)]
+        (recur
+         (slots/slot-add!
+          index
+          (slots/slot-of (triple-index-key row index-id) width)
+          (+ base position))
+         (inc position))))))
 
 (defn- build-active-slots!
   [buckets (Vec t/ActiveBucket)
@@ -129,6 +165,14 @@
   (deref (t/termstore-atom-slots store)))
 (defn- store-triple-slots [store t/TermStore] slots/TermSlots
   (deref (t/termstore-triple-slots store)))
+(defn- store-triple-t1-slots [store t/TermStore] slots/TermSlots
+  (deref (t/termstore-triple-t1-slots store)))
+(defn- store-triple-t12-slots [store t/TermStore] slots/TermSlots
+  (deref (t/termstore-triple-t12-slots store)))
+(defn- store-triple-t2-slots [store t/TermStore] slots/TermSlots
+  (deref (t/termstore-triple-t2-slots store)))
+(defn- store-triple-t3-slots [store t/TermStore] slots/TermSlots
+  (deref (t/termstore-triple-t3-slots store)))
 (defn- store-active-slots [store t/TermStore] slots/TermSlots
   (deref (t/termstore-active-slots store)))
 (defn- store-prefix [store t/TermStore] Any
@@ -207,7 +251,7 @@
         cell-count Int (if (store-fold-open store) bucket-count 0)]
     (+ tail-base-rows
        (+ (* 2 atoms)
-          (+ (* 2 triples)
+          (+ (* 6 triples)
              (+ transactions
                 (+ (* 2 operations)
                    (+ (* 2 bucket-count)
@@ -282,6 +326,10 @@
            (atom empty-active-buckets) (atom empty-active-cells) (atom false)
            (atom (slots/fresh-slots (term-slots-width-for expected-atoms)))
            (atom (slots/fresh-slots (term-slots-width-for expected-triples)))
+           (atom (slots/fresh-slots (term-slots-width-for expected-triples)))
+           (atom (slots/fresh-slots (term-slots-width-for expected-triples)))
+           (atom (slots/fresh-slots (term-slots-width-for expected-triples)))
+           (atom (slots/fresh-slots (term-slots-width-for expected-triples)))
            (atom (slots/fresh-slots (term-slots-width-for expected-buckets)))
            nil tail-row-limit tail-byte-limit (atom 0) (atom 0)))]))
 
@@ -319,6 +367,10 @@
       (atom empty-transaction-rows) (atom empty-operation-rows)
       (atom empty-ids) (atom empty-active-buckets)
       (atom empty-active-cells) (atom false)
+      (atom (slots/fresh-slots initial-slots))
+      (atom (slots/fresh-slots initial-slots))
+      (atom (slots/fresh-slots initial-slots))
+      (atom (slots/fresh-slots initial-slots))
       (atom (slots/fresh-slots initial-slots))
       (atom (slots/fresh-slots initial-slots))
       (atom (slots/fresh-slots initial-slots))
@@ -368,9 +420,10 @@
 
 ;; A store is an identity, so a caller that wants the current state as a frozen
 ;; rollback point or as a private scratch takes a fork: fresh cells over the
-;; same persistent values. The slot tables stay shared exactly as they were
-;; when they were plain fields — find-atom-position's range test is what keeps
-;; a fork's extra rows out of the parent's answers.
+;; same persistent values. Slot buckets are cells too. Sharing them lets a
+;; scratch append leak a position into its parent and can duplicate a later
+;; parent position, so every fork owns fresh bucket cells over the same
+;; persistent position vectors.
 (defn fork-state [store t/TermStore] t/TermStore
   (t/->TermStore
    (t/termstore-space-id store)
@@ -383,9 +436,13 @@
    (atom (store-active-buckets store))
    (atom (fork-position-cells (store-active-cells store)))
    (atom (store-fold-open store))
-   (atom (store-atom-slots store))
-   (atom (store-triple-slots store))
-   (atom (store-active-slots store))
+   (atom (fork-position-cells (store-atom-slots store)))
+   (atom (fork-position-cells (store-triple-slots store)))
+   (atom (fork-position-cells (store-triple-t1-slots store)))
+   (atom (fork-position-cells (store-triple-t12-slots store)))
+   (atom (fork-position-cells (store-triple-t2-slots store)))
+   (atom (fork-position-cells (store-triple-t3-slots store)))
+   (atom (fork-position-cells (store-active-slots store)))
    (store-prefix store)
    (t/termstore-tail-row-limit store)
    (t/termstore-tail-byte-limit store)
@@ -482,13 +539,42 @@
    value t/TripleRow
    position Int] t/TermStore
   (let [slots slots/TermSlots (store-triple-slots store)
-        width Int (count slots)
-        indexed slots/TermSlots (slots/slot-add! slots (slots/slot-of value width) position)]
-    (if (> (count (store-triples store)) (* slot-load (count indexed)))
-      (do
+        width Int (count slots)]
+    (slots/slot-add! slots (slots/slot-of value width) position)
+    (slots/slot-add!
+     (store-triple-t1-slots store)
+     (slots/slot-of (triple-index-key value triple-index-t1) width)
+     position)
+    (slots/slot-add!
+     (store-triple-t12-slots store)
+     (slots/slot-of (triple-index-key value triple-index-t12) width)
+     position)
+    (slots/slot-add!
+     (store-triple-t2-slots store)
+     (slots/slot-of (triple-index-key value triple-index-t2) width)
+     position)
+    (slots/slot-add!
+     (store-triple-t3-slots store)
+     (slots/slot-of (triple-index-key value triple-index-t3) width)
+     position)
+    (if (> (count (store-triples store)) (* slot-load width))
+      (let [rows (Vec t/TripleRow) (store-triples store)
+            widened Int (* 2 width)
+            base Int (prefix-triple-count store)]
         (reset! (t/termstore-triple-slots store)
-                (build-triple-term-slots! (store-triples store) (* 2 width)
-                                          (prefix-triple-count store)))
+                (build-triple-term-slots! rows widened base))
+        (reset! (t/termstore-triple-t1-slots store)
+                (build-triple-query-slots!
+                 rows widened base triple-index-t1))
+        (reset! (t/termstore-triple-t12-slots store)
+                (build-triple-query-slots!
+                 rows widened base triple-index-t12))
+        (reset! (t/termstore-triple-t2-slots store)
+                (build-triple-query-slots!
+                 rows widened base triple-index-t2))
+        (reset! (t/termstore-triple-t3-slots store)
+                (build-triple-query-slots!
+                 rows widened base triple-index-t3))
         store)
       store)))
 
@@ -520,7 +606,7 @@
         (if (>= known 0)
           (triple-handle known)
           (let [position (total-triple-count store)]
-            (ensure-tail-room! store 2 triple-tail-bytes)
+            (ensure-tail-room! store 6 triple-tail-bytes)
             (swap! (t/termstore-triples store) conj value)
             (account-tail-bytes! store triple-tail-bytes)
             (index-triple-term! store value position)
@@ -632,7 +718,7 @@
         (triple-handle known)
         (let [position (total-triple-count store)]
           (do
-            (ensure-tail-room! store 2 triple-tail-bytes)
+            (ensure-tail-room! store 6 triple-tail-bytes)
             (swap! (t/termstore-triples store) conj value)
             (account-tail-bytes! store triple-tail-bytes)
             (index-triple-term! store value position)
@@ -703,6 +789,14 @@
 (defn resolve-term-handle [store t/TermStore handle Int] Any
   (resolve-handle store handle))
 
+(defn triple-row-handles-at
+  [store t/TermStore
+   handle Int] t/TripleRow
+  (if (or (not (valid-handle? store handle)) (atom-handle? handle))
+    (throw (ex-info "store: handle does not identify a Triple row"
+                    {:type :invalid-triple-handle}))
+    (triple-row-at store (handle-position handle))))
+
 (defn triple-tuple-at
   [store t/TermStore
    handle Int] (Vec Any)
@@ -727,7 +821,7 @@
                                       (taildemand-seen second-demand))]
         (->TailDemand
          (conj (taildemand-seen third-demand) term)
-         (+ 2 (+ (taildemand-rows first-demand)
+         (+ 6 (+ (taildemand-rows first-demand)
                  (+ (taildemand-rows second-demand)
                     (taildemand-rows third-demand))))
          (+ triple-tail-bytes
@@ -974,20 +1068,77 @@
        (and (or (nil? t2) (= t2 (t/triplerow-t2 row)))
             (or (nil? t3) (= t3 (t/triplerow-t3 row))))))
 
-(defn matching-triple-handles
+(defn- matching-tail-index-positions
   [store t/TermStore
-   t1 Any
-   t2 Any
-   t3 Any] (Vec Int)
-  (let [h1 Int? (when (some? t1) (known-term-handle store t1))
-        h2 Int? (when (some? t2) (known-term-handle store t2))
-        h3 Int? (when (some? t3) (known-term-handle store t3))
-        all-known Bool (and (or (nil? t1) (some? h1))
-                            (and (or (nil? t2) (some? h2))
-                                 (or (nil? t3) (some? h3))))]
-    (if (not all-known)
+   rows (Vec t/TripleRow)
+   index slots/TermSlots
+   key Any
+   t1 Int?
+   t2 Int?
+   t3 Int?] (Vec Int)
+  (let [base Int (prefix-triple-count store)
+        limit Int (+ base (count rows))
+        positions (Vec Int) (slots/slot-positions
+                             index (slots/slot-of key (count index)))]
+    (loop [remaining (Vec Int) positions
+           matches (Vec Int) []]
+      (if (empty? remaining)
+        matches
+        (let [position Int (first remaining)]
+          (if (and (>= position base) (< position limit))
+            (let [row t/TripleRow (nth rows (- position base))]
+              (recur
+               (rest remaining)
+               (if (triple-row-matches? row t1 t2 t3)
+                 (conj matches position)
+                 matches)))
+            (recur (rest remaining) matches)))))))
+
+(defn- matching-tail-triple-positions
+  [store t/TermStore
+   t1 Int?
+   t2 Int?
+   t3 Int?] (Vec Int)
+  (let [rows (Vec t/TripleRow) (store-triples store)]
+    (cond
+      [(and (some? t1) (and (some? t2) (some? t3)))
+       (let [position Int (find-triple-position
+                           rows (store-triple-slots store)
+                           (prefix-triple-count store)
+                           (t/->TripleRow t1 t2 t3))]
+         (if (>= position 0) [position] []))]
+      [(and (some? t1) (some? t2))
+       (matching-tail-index-positions
+        store rows (store-triple-t12-slots store)
+        (->TriplePair t1 t2) t1 t2 t3)]
+      [(and (some? t2) (some? t3))
+       (matching-tail-index-positions
+        store rows (store-triple-t3-slots store) t3 t1 t2 t3)]
+      [(and (some? t1) (some? t3))
+       (matching-tail-index-positions
+        store rows (store-triple-t3-slots store) t3 t1 t2 t3)]
+      [(some? t1)
+       (matching-tail-index-positions
+        store rows (store-triple-t1-slots store) t1 t1 t2 t3)]
+      [(some? t2)
+       (matching-tail-index-positions
+        store rows (store-triple-t2-slots store) t2 t1 t2 t3)]
+      [(some? t3)
+       (matching-tail-index-positions
+        store rows (store-triple-t3-slots store) t3 t1 t2 t3)]
+      [:else []])))
+
+(defn matching-triple-handles-by-handles
+  [store t/TermStore
+   h1 Int?
+   h2 Int?
+   h3 Int?] (Vec Int)
+  (let [all-valid Bool (and (or (nil? h1) (valid-handle? store h1))
+                            (and (or (nil? h2) (valid-handle? store h2))
+                                 (or (nil? h3) (valid-handle? store h3))))]
+    (if (not all-valid)
       []
-      (if (and (nil? t1) (and (nil? t2) (nil? t3)))
+      (if (and (nil? h1) (and (nil? h2) (nil? h3)))
         (active-triple-handles store)
         (let [prefix Any (store-prefix store)
               prefix-positions (Vec Int) (if (nil? prefix)
@@ -1001,20 +1152,33 @@
                             (conj handles handle)
                             handles)))
                       [] prefix-positions)
-              base Int (prefix-triple-count store)
-              rows (Vec t/TripleRow) (store-triples store)]
-          (loop [position Int 0
+              tail-positions (Vec Int) (matching-tail-triple-positions
+                                         store h1 h2 h3)]
+          (loop [remaining (Vec Int) tail-positions
                  handles (Vec Int) prefix-handles]
-            (if (>= position (count rows))
+            (if (empty? remaining)
               handles
-              (let [row t/TripleRow (nth rows position)
-                    handle Int (triple-handle (+ base position))]
+              (let [handle Int (triple-handle (first remaining))]
                 (recur
-                 (inc position)
-                 (if (and (triple-row-matches? row h1 h2 h3)
-                          (active-handle? store handle))
+                 (rest remaining)
+                 (if (active-handle? store handle)
                    (conj handles handle)
                    handles))))))))))
+
+(defn matching-triple-handles
+  [store t/TermStore
+   t1 Any
+   t2 Any
+   t3 Any] (Vec Int)
+  (let [h1 Int? (when (some? t1) (known-term-handle store t1))
+        h2 Int? (when (some? t2) (known-term-handle store t2))
+        h3 Int? (when (some? t3) (known-term-handle store t3))
+        all-known Bool (and (or (nil? t1) (some? h1))
+                            (and (or (nil? t2) (some? h2))
+                                 (or (nil? t3) (some? h3))))]
+    (if all-known
+      (matching-triple-handles-by-handles store h1 h2 h3)
+      [])))
 
 (defn- set-active-state!
   [store t/TermStore
@@ -1959,6 +2123,34 @@
         (recur (inc position))
         false))))
 
+(defn- unique-atom-rows? [rows (Vec t/AtomRow)] Bool
+  (loop [position Int 0
+         seen (Set t/AtomRow) #{}]
+    (if (>= position (count rows))
+      true
+      (let [row t/AtomRow (nth rows position)]
+        (if (contains? seen row)
+          false
+          (recur (inc position) (conj seen row)))))))
+
+(defn- unique-triple-rows? [rows (Vec t/TripleRow)] Bool
+  (loop [position Int 0
+         seen (Set t/TripleRow) #{}]
+    (if (>= position (count rows))
+      true
+      (let [row t/TripleRow (nth rows position)]
+        (if (contains? seen row)
+          false
+          (recur (inc position) (conj seen row)))))))
+
+(defn- canonical-term-rows?
+  [atoms (Vec t/AtomRow)
+   rows (Vec t/TripleRow)] Bool
+  (and (valid-atom-rows? atoms)
+       (and (unique-atom-rows? atoms)
+            (and (valid-triple-rows? (count atoms) rows)
+                 (unique-triple-rows? rows)))))
+
 (defn- history-sequence-error [transactions (Vec t/TransactionRow)] TransactionRecordsResult?
   (loop [position Int 0
          previous-sequence Int 0]
@@ -2130,13 +2322,10 @@
             next-sequence-value Int (t/termstoredump-next-sequence data)]
         (if (not (and (valid-space-id? dump-space)
                       (and (>= next-sequence-value 1)
-                           (and (every? (fn [row t/AtomRow] Bool
-                                         (valid-atom-row? row))
-                                       atoms)
-                                (and (valid-triple-rows? (count atoms) rows)
-                                     (valid-history-rows?
-                                      transactions operations (count rows)
-                                      next-sequence-value))))))
+                           (and (canonical-term-rows? atoms rows)
+                                (valid-history-rows?
+                                 transactions operations (count rows)
+                                 next-sequence-value)))))
           (term-store-load-error
            :invalid-term-store-dump
            "store: invalid TermStore dump")
@@ -2153,6 +2342,18 @@
                           atoms (term-slots-width-for (count atoms)) 0))
                    (atom (build-triple-term-slots!
                           rows (term-slots-width-for (count rows)) 0))
+                   (atom (build-triple-query-slots!
+                          rows (term-slots-width-for (count rows)) 0
+                          triple-index-t1))
+                   (atom (build-triple-query-slots!
+                          rows (term-slots-width-for (count rows)) 0
+                          triple-index-t12))
+                   (atom (build-triple-query-slots!
+                          rows (term-slots-width-for (count rows)) 0
+                          triple-index-t2))
+                   (atom (build-triple-query-slots!
+                          rows (term-slots-width-for (count rows)) 0
+                          triple-index-t3))
                    (atom (slots/fresh-slots initial-slots))
                    nil default-tail-row-limit default-tail-byte-limit
                    (atom 0) (atom 0))]
@@ -2173,13 +2374,10 @@
     (if (or (some? (store-prefix store))
             (and (valid-space-id? (t/termstore-space-id store))
              (and (>= next-sequence-value 1)
-                  (and (every? (fn [row t/AtomRow] Bool
-                                 (valid-atom-row? row))
-                               atoms)
-                       (and (valid-triple-rows? (count atoms) rows)
-                            (valid-history-rows?
-                             transactions operations (count rows)
-                             next-sequence-value))))))
+                  (and (canonical-term-rows? atoms rows)
+                       (valid-history-rows?
+                        transactions operations (count rows)
+                        next-sequence-value)))))
       ctx
       (throw (ex-info "store: invalid TermStore dump"
                       {:type :invalid-term-store-dump})))))

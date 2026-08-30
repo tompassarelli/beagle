@@ -177,6 +177,10 @@
    fold-open (Atom Bool)
    atom-slots (Atom slots/TermSlots)
    triple-slots (Atom slots/TermSlots)
+   triple-t1-slots (Atom slots/TermSlots)
+   triple-t12-slots (Atom slots/TermSlots)
+   triple-t2-slots (Atom slots/TermSlots)
+   triple-t3-slots (Atom slots/TermSlots)
    active-slots (Atom slots/TermSlots)
    packed-prefix Any
    tail-row-limit Int

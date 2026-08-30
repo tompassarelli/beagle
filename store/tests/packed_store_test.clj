@@ -12,6 +12,12 @@
   (println (str (if value "  [PASS] " "  [FAIL] ") label))
   (swap! checks conj [label (boolean value)]))
 
+(defn exception-data [f]
+  (try
+    (f)
+    nil
+    (catch clojure.lang.ExceptionInfo error (ex-data error))))
+
 (defn scratch-directory [prefix]
   (.toFile
    (java.nio.file.Files/createTempDirectory
@@ -53,13 +59,32 @@
 ;; The first unique transaction fits a small configured tail. The second does
 ;; not fit beside it, so database commit must checkpoint, install, and retry it
 ;; against an empty tail without exposing a rollover error to the caller.
+(def undersized-scratch (scratch-directory "store-packed-undersized-tail-"))
+(def undersized-log (java.io.File. undersized-scratch "history.storelog"))
+(database/create-triple-log! (.getPath undersized-log) "undersized-tail-space")
+(def undersized-db
+  (database/open-database!
+   (.getPath undersized-log) "undersized-tail-space"
+   {:tail-row-limit 217 :tail-byte-limit 1048576}))
+(def undersized-error
+  (exception-data
+   #(database/assert!
+     undersized-db
+     (t/triple "undersized-left" :edge "undersized-right")
+     {})))
+(check! "the former 217-row fixture cannot hold the empty seven-table tail"
+        (and (= :packed-tail-capacity-exceeded
+                (or (:store/code undersized-error) (:type undersized-error)))
+             (= 448 (:tail-rows undersized-error))
+             (= 217 (:row-limit undersized-error))))
+
 (def rollover-scratch (scratch-directory "store-packed-rollover-"))
 (def rollover-log (java.io.File. rollover-scratch "history.storelog"))
 (database/create-triple-log! (.getPath rollover-log) "rollover-space")
 (def rollover-db
   (database/open-database!
    (.getPath rollover-log) "rollover-space"
-   {:tail-row-limit 217 :tail-byte-limit 1048576}))
+   {:tail-row-limit 477 :tail-byte-limit 1048576}))
 (def rollover-first (t/triple "rollover-left-a" :edge "rollover-right-a"))
 (def rollover-second (t/triple "rollover-left-b" :edge "rollover-right-b"))
 (def rollover-first-result (database/assert! rollover-db rollover-first {}))
@@ -159,6 +184,162 @@
    indexed-plan))
 (check! "Store-backed Datalog candidates preserve materialized query results"
         (= (result-rows materialized-result) (result-rows store-result)))
+
+;; A two-literal Store join must keep private handles across the join. This
+;; corpus crosses packed-prefix and boxed-tail rows, includes a recursive Term
+;; key, and forces repeated-variable equality before final-row decoding.
+(def join-scratch (scratch-directory "store-packed-handle-join-"))
+(def join-log (java.io.File. join-scratch "history.storelog"))
+(database/create-triple-log! (.getPath join-log) "join-space")
+(def join-db (database/open-database! (.getPath join-log) "join-space"))
+(def nested-subject (t/triple "nested" :id 1))
+(doseq [proposition [(t/triple "@join-prefix" :kind "thread")
+                     (t/triple "@join-prefix" :title "Prefix title")
+                     (t/triple "@join-cross" :kind "thread")
+                     (t/triple nested-subject :kind "thread")
+                     (t/triple "same" :self "same")]]
+  (database/assert! join-db proposition {}))
+(database/checkpoint-packed! join-db)
+(doseq [proposition [(t/triple "@join-cross" :title "Cross title")
+                     (t/triple "@join-tail" :kind "thread")
+                     (t/triple "@join-tail" :title "Tail title")
+                     (t/triple nested-subject :title "Nested title")
+                     (t/triple "same" :label "Same label")]]
+  (database/assert! join-db proposition {}))
+
+(def join-root @(database/database-store! join-db))
+(def join-projection
+  (q/->Projection
+   {}
+   {d/triple-relation (d/triple-candidate-source join-root)}))
+(def binary-join-plan
+  (plan
+   "binary-join"
+   [(rule "binary-join" [(v "subject") (v "title")]
+          [(rel d/triple-relation
+                [(v "subject") (c :kind) (c "thread")])
+           (rel d/triple-relation
+                [(v "subject") (c :title) (v "title")])])]))
+(def binary-join-store-result
+  (q/run-plan-projected! join-projection binary-join-plan))
+(def binary-join-materialized-result
+  (q/run! (database/live-propositions! join-db) binary-join-plan))
+(def expected-binary-join-rows
+  #{["@join-prefix" "Prefix title"]
+    ["@join-cross" "Cross title"]
+    ["@join-tail" "Tail title"]
+    [nested-subject "Nested title"]})
+(check! "handle-domain binary join spans prefix and tail and decodes final rows"
+        (and (= expected-binary-join-rows
+                (result-rows binary-join-store-result))
+             (= (result-rows binary-join-materialized-result)
+                (result-rows binary-join-store-result))))
+
+(def repeated-handle-plan
+  (plan
+   "repeated-handle"
+   [(rule "repeated-handle" [(v "same") (v "label")]
+          [(rel d/triple-relation
+                [(v "same") (c :self) (v "same")])
+           (rel d/triple-relation
+                [(v "same") (c :label) (v "label")])])]))
+(check! "handle-domain join preserves repeated-variable equality"
+        (= #{["same" "Same label"]}
+           (result-rows
+            (q/run-plan-projected! join-projection repeated-handle-plan))))
+
+(def missing-handle-plan
+  (plan
+   "missing-handle"
+   [(rule "missing-handle" [(v "subject") (v "title")]
+          [(rel d/triple-relation
+                [(v "subject") (c :kind) (c "absent-kind")])
+           (rel d/triple-relation
+                [(v "subject") (c :title) (v "title")])])]))
+(check! "missing Store constant is empty rather than an unbound wildcard"
+        (empty?
+         (result-rows
+          (q/run-plan-projected! join-projection missing-handle-plan))))
+
+;; A malformed dump could once preserve two equal Atom values under different
+;; handles. The handle-domain join then disagreed with materialized equality:
+;; its retained index rejected the rewritten row even though both handles
+;; resolved to the same value.
+(def equality-context (store/new-term-store "duplicate-equality-space"))
+(def equality-kind (t/triple "same" :kind "thread"))
+(def equality-title (t/triple "same" :title "Title"))
+(store/commit-transaction!
+ equality-context
+ [(store/assert-operation equality-kind)
+  (store/assert-operation equality-title)])
+(def equality-dump (store/dump-term-store equality-context))
+(def equality-atoms (t/termstoredump-atoms equality-dump))
+(def equality-triples (t/termstoredump-triples equality-dump))
+(def duplicate-same-row (first equality-atoms))
+(def duplicate-same-handle (* 2 (count equality-atoms)))
+(def rewritten-title-row
+  (assoc (second equality-triples) :t1 duplicate-same-handle))
+(def malformed-equality-dump
+  (assoc equality-dump
+         :atoms (conj equality-atoms duplicate-same-row)
+         :triples (assoc equality-triples 1 rewritten-title-row)))
+(def malformed-equality-root
+  (assoc @equality-context
+         :atoms (atom (t/termstoredump-atoms malformed-equality-dump))
+         :triples (atom (t/termstoredump-triples malformed-equality-dump))))
+(def equality-plan
+  (plan
+   "duplicate-equality"
+   [(rule "duplicate-equality" [(v "subject") (v "title")]
+          [(rel d/triple-relation
+                [(v "subject") (c :kind) (c "thread")])
+           (rel d/triple-relation
+                [(v "subject") (c :title) (v "title")])])]))
+(def malformed-equality-projection
+  (q/->Projection
+   {}
+   {d/triple-relation (d/triple-candidate-source malformed-equality-root)}))
+(def malformed-optimized-result
+  (result-rows
+   (q/run-plan-projected! malformed-equality-projection equality-plan)))
+(def malformed-materialized-result
+  (result-rows
+   (q/run! (store/live-propositions (atom malformed-equality-root))
+           equality-plan)))
+(check! "duplicate-equal handles reproduce the historical join differential"
+        (and (empty? malformed-optimized-result)
+             (= #{["same" "Title"]} malformed-materialized-result)))
+
+(def malformed-equality-target
+  (store/new-term-store "duplicate-equality-space"))
+(def malformed-equality-before
+  (store/dump-term-store malformed-equality-target))
+(def malformed-equality-load
+  (store/load-term-store-result!
+   malformed-equality-target malformed-equality-dump))
+(check! "dump load rejects duplicate-equal Atom rows before building indexes"
+        (and (not (store/termstoreloadresult-ok malformed-equality-load))
+             (= :invalid-term-store-dump
+                (store/termstoreloadresult-code malformed-equality-load))
+             (= malformed-equality-before
+                (store/dump-term-store malformed-equality-target))))
+
+(def duplicate-triple-dump
+  (assoc equality-dump :triples (conj equality-triples
+                                      (first equality-triples))))
+(def duplicate-triple-load
+  (store/load-term-store-result!
+   (store/new-term-store "duplicate-equality-space")
+   duplicate-triple-dump))
+(check! "dump load rejects duplicate structural Triple rows"
+        (and (not (store/termstoreloadresult-ok duplicate-triple-load))
+             (= :invalid-term-store-dump
+                (store/termstoreloadresult-code duplicate-triple-load))))
+(check! "validated replay roots enforce the same canonical Term rows as load"
+        (= :invalid-term-store-dump
+           (:type
+            (exception-data
+             #(store/validated-store! (atom malformed-equality-root))))))
 
 ;; Database-level matching must apply supersession liveness after the packed
 ;; index lookup, including before a caller's maximum truncates the result.

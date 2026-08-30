@@ -285,7 +285,7 @@
 (def rollover-cohort-db
   (database/open-database!
    (.getPath rollover-cohort-file) "rollover-cohort-space"
-   {:tail-row-limit 217 :tail-byte-limit 1048576}))
+   {:tail-row-limit 477 :tail-byte-limit 1048576}))
 (def rollover-seed (t/triple "rollover-seed-left" :edge "rollover-seed-right"))
 (def rollover-first (t/triple "rollover-first-left" :edge "rollover-first-right"))
 (def rollover-second (t/triple "rollover-second-left" :edge "rollover-second-right"))
@@ -320,7 +320,7 @@
 (def rollover-reopened
   (database/open-database!
    (.getPath rollover-cohort-file) "rollover-cohort-space"
-   {:tail-row-limit 217 :tail-byte-limit 1048576}))
+   {:tail-row-limit 477 :tail-byte-limit 1048576}))
 (check! "cohort rollover publishes only after its durable record barrier"
         (and (= [:cohort-force-returned :checkpoint-publish]
                 @rollover-events)

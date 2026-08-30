@@ -233,7 +233,7 @@
 
 (defn withdrawal-assertion [r] (:assertion r))
 
-(defrecord TermStore [space-id next-sequence atoms triples transactions operations withdrawal-targets active-buckets active-cells fold-open atom-slots triple-slots active-slots packed-prefix tail-row-limit tail-byte-limit tail-bytes tail-rollovers])
+(defrecord TermStore [space-id next-sequence atoms triples transactions operations withdrawal-targets active-buckets active-cells fold-open atom-slots triple-slots triple-t1-slots triple-t12-slots triple-t2-slots triple-t3-slots active-slots packed-prefix tail-row-limit tail-byte-limit tail-bytes tail-rollovers])
 
 (defn termstore-space-id [r] (:space-id r))
 
@@ -258,6 +258,14 @@
 (defn termstore-atom-slots [r] (:atom-slots r))
 
 (defn termstore-triple-slots [r] (:triple-slots r))
+
+(defn termstore-triple-t1-slots [r] (:triple-t1-slots r))
+
+(defn termstore-triple-t12-slots [r] (:triple-t12-slots r))
+
+(defn termstore-triple-t2-slots [r] (:triple-t2-slots r))
+
+(defn termstore-triple-t3-slots [r] (:triple-t3-slots r))
 
 (defn termstore-active-slots [r] (:active-slots r))
 

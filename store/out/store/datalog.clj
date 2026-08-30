@@ -556,7 +556,7 @@
   (str "i" integer-value ";"))
   (number? value) (let [float-value (double value)]
   (str "f" float-value ";"))
-  (boolean? value) (let [^Boolean bool-value value]
+  (boolean? value) (let [bool-value value]
   (if bool-value "b1;" "b0;"))
   (keyword? value) (let [keyword-value value]
   (length-key "k" (str keyword-value)))
@@ -648,7 +648,7 @@
 (defn- positional-handles [^CandidateSource source arguments subst]
   (loop [position 0
    best []
-   ^Boolean found false]
+   found false]
   (if (>= position (count arguments)) (if found best nil) (let [value (bound-term-value (nth arguments position) subst)]
   (if (nil? value) (recur (inc position) best found) (let [bucket (get (candidatesource-positions source) position {})
    candidate (get bucket value [])]
@@ -742,9 +742,92 @@
   (empty? substitutions) []
   :else (recur (rest remaining) (literal-substitutions-indexed! db sources (first remaining) substitutions context)))))
 
+(def handle-template-variable -1)
+
+(def handle-template-missing -2)
+
+(defn- literal-handle-template [root arguments]
+  (mapv (fn [^QueryTerm term] (if (some? (queryterm-variable term)) handle-template-variable (let [known (store/known-term-handle root (queryterm-value term))]
+  (if (some? known) known handle-template-missing)))) arguments))
+
+(defn- ^Boolean handle-template-valid? [template]
+  (loop [position 0]
+  (if (>= position (count template)) true (if (= handle-template-missing (nth template position)) false (recur (inc position))))))
+
+(defn- triple-row-handle-at [row position]
+  (cond
+  (= position 0) (t/triplerow-t1 row)
+  (= position 1) (t/triplerow-t2 row)
+  :else (t/triplerow-t3 row)))
+
+(defn- bound-template-handle [arguments template subst position]
+  (let [fixed (nth template position)
+   name (queryterm-variable (nth arguments position))]
+  (if (>= fixed 0) fixed (if (and (some? name) (contains? subst name)) (get subst name) nil))))
+
+(defn- store-template-handles [root arguments template subst]
+  (store/matching-triple-handles-by-handles root (bound-template-handle arguments template subst 0) (bound-template-handle arguments template subst 1) (bound-template-handle arguments template subst 2)))
+
+(defn- unify-handle-arguments [arguments template row subst]
+  (loop [position 0
+   current subst]
+  (if (or (nil? current) (>= position 3)) current (let [present current
+   name (queryterm-variable (nth arguments position))
+   value (triple-row-handle-at row position)
+   fixed (nth template position)]
+  (if (some? name) (if (contains? present name) (recur (inc position) (if (= (get present name) value) present nil)) (recur (inc position) (assoc present name value))) (recur (inc position) (if (= fixed value) present nil)))))))
+
+(defn- ground-handle-arguments [root arguments subst]
+  (mapv (fn [^QueryTerm term] (let [name (queryterm-variable term)]
+  (if (some? name) (let [handle (get subst name)]
+  (if (some? handle) (store/resolve-term-handle root handle) (throw (ex-info "store: unbound handle variable reached evaluation" {:type :unbound-query-variable})))) (queryterm-value term)))) arguments))
+
+(defn- variable-names [arguments]
+  (reduce (fn [names ^QueryTerm term] (let [name (queryterm-variable term)]
+  (if (some? name) (conj names name) names))) #{} arguments))
+
+(defn- ^Boolean variables-contained? [required available]
+  (loop [remaining (vec required)]
+  (if (empty? remaining) true (if (contains? available (first remaining)) (recur (rest remaining)) false))))
+
+(defn- ^Boolean binary-store-rule-shape? [^Rule value]
+  (let [body (rule-body value)]
+  (if (not (= 2 (count body))) false (let [^Literal first-literal (nth body 0)
+   ^Literal second-literal (nth body 1)
+   first-arguments (literal-arguments first-literal)
+   second-arguments (literal-arguments second-literal)
+   first-variables (variable-names first-arguments)
+   second-variables (variable-names second-arguments)
+   body-variables (into first-variables second-variables)
+   shared-variables (reduce (fn [shared ^String name] (if (contains? second-variables name) (conj shared name) shared)) #{} (vec first-variables))]
+  (and (not (= triple-relation (rule-head-relation value))) (and (= :relation (literal-kind first-literal)) (and (= :relation (literal-kind second-literal)) (and (not (literal-negated first-literal)) (and (not (literal-negated second-literal)) (and (= triple-relation (literal-relation first-literal)) (and (= triple-relation (literal-relation second-literal)) (and (= 3 (count first-arguments)) (and (= 3 (count second-arguments)) (and (not (empty? shared-variables)) (variables-contained? (variable-names (rule-head-arguments value)) body-variables)))))))))))))))
+
+(defn- derive-store-binary-rule! [^StoreCandidateSource source ^Rule value ^QueryEvaluationContext context]
+  (let [root (storecandidatesource-root source)
+   body (rule-body value)
+   ^Literal first-literal (nth body 0)
+   ^Literal second-literal (nth body 1)
+   first-arguments (literal-arguments first-literal)
+   second-arguments (literal-arguments second-literal)
+   first-template (literal-handle-template root first-arguments)
+   second-template (literal-handle-template root second-arguments)
+   empty-handles {}]
+  (if (not (and (handle-template-valid? first-template) (handle-template-valid? second-template))) #{} (if (not (query-check! context)) #{} (loop [remaining (store-template-handles root first-arguments first-template empty-handles)
+   derived #{}]
+  (if (or (empty? remaining) (not (query-evaluation-context-open? context))) (if (query-evaluation-context-open? context) derived #{}) (if (not (query-check! context)) #{} (let [first-row (store/triple-row-handles-at root (first remaining))
+   first-subst (unify-handle-arguments first-arguments first-template first-row empty-handles)]
+  (if (nil? first-subst) (recur (rest remaining) derived) (if (not (query-check! context)) #{} (let [present-first first-subst
+   next-derived (loop [matches (store-template-handles root second-arguments second-template present-first)
+   current derived]
+  (if (or (empty? matches) (not (query-evaluation-context-open? context))) current (if (not (query-check! context)) current (let [second-row (store/triple-row-handles-at root (first matches))
+   joined (unify-handle-arguments second-arguments second-template second-row present-first)]
+  (recur (rest matches) (if (some? joined) (conj current (ground-handle-arguments root (rule-head-arguments value) joined)) current))))))]
+  (if (query-evaluation-context-open? context) (recur (rest remaining) next-derived) #{}))))))))))))
+
 (defn- derive-rule-indexed! [db sources ^Rule value ^QueryEvaluationContext context]
-  (let [substitutions (body-results-indexed! db sources (rule-body value) {} context)]
-  (if (query-evaluation-context-open? context) (reduce (fn [acc subst] (conj acc (ground (rule-head-arguments value) subst))) #{} substitutions) #{})))
+  (let [source (get sources triple-relation)]
+  (if (and (binary-store-rule-shape? value) (instance? StoreCandidateSource source)) (derive-store-binary-rule! source value context) (let [substitutions (body-results-indexed! db sources (rule-body value) {} context)]
+  (if (query-evaluation-context-open? context) (reduce (fn [acc subst] (conj acc (ground (rule-head-arguments value) subst))) #{} substitutions) #{})))))
 
 (defn- delta-relation-positions [body delta-relations]
   (loop [position 0

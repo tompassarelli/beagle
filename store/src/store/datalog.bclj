@@ -45,6 +45,7 @@
 (defalias Tuple (Vec Any))
 (defalias Db (Map String (Set Tuple)))
 (defalias Substitution (Map String Any))
+(defalias HandleSubstitution (Map String Int))
 (defalias HandleBucket (Map Any (Vec Int)))
 (defalias PositionIndex (Map Int HandleBucket))
 (defalias HandleTrieLeaf (Map Any (Vec Int)))
@@ -1374,19 +1375,233 @@
         (literal-substitutions-indexed!
          db sources (first remaining) substitutions context))])))
 
+;; A Store handle is a content reference inside one TermStore. A binary Store
+;; join can therefore preserve exact Term equality without constructing either
+;; intermediate Terms or intermediate Term substitutions. Constants cross to
+;; handles once; only a successful rule-head row crosses back to Terms.
+(def handle-template-variable Int -1)
+(def handle-template-missing Int -2)
+
+(defn- literal-handle-template
+  [root t/TermStore
+   arguments (Vec QueryTerm)] (Vec Int)
+  (mapv
+   (fn [term QueryTerm] Int
+     (if (some? (queryterm-variable term))
+       handle-template-variable
+       (let [known Int? (store/known-term-handle root (queryterm-value term))]
+         (if (some? known) known handle-template-missing))))
+   arguments))
+
+(defn- handle-template-valid? [template (Vec Int)] Bool
+  (loop [position Int 0]
+    (if (>= position (count template))
+      true
+      (if (= handle-template-missing (nth template position))
+        false
+        (recur (inc position))))))
+
+(defn- triple-row-handle-at
+  [row t/TripleRow
+   position Int] Int
+  (cond
+    [(= position 0) (t/triplerow-t1 row)]
+    [(= position 1) (t/triplerow-t2 row)]
+    [:else (t/triplerow-t3 row)]))
+
+(defn- bound-template-handle
+  [arguments (Vec QueryTerm)
+   template (Vec Int)
+   subst HandleSubstitution
+   position Int] Int?
+  (let [fixed Int (nth template position)
+        name String? (queryterm-variable (nth arguments position))]
+    (if (>= fixed 0)
+      fixed
+      (if (and (some? name) (contains? subst name))
+        (get subst name)
+        nil))))
+
+(defn- store-template-handles
+  [root t/TermStore
+   arguments (Vec QueryTerm)
+   template (Vec Int)
+   subst HandleSubstitution] (Vec Int)
+  (store/matching-triple-handles-by-handles
+   root
+   (bound-template-handle arguments template subst 0)
+   (bound-template-handle arguments template subst 1)
+   (bound-template-handle arguments template subst 2)))
+
+(defn- unify-handle-arguments
+  [arguments (Vec QueryTerm)
+   template (Vec Int)
+   row t/TripleRow
+   subst HandleSubstitution] (U HandleSubstitution Nil)
+  (loop [position Int 0
+         current (U HandleSubstitution Nil) subst]
+    (if (or (nil? current) (>= position 3))
+      current
+      (let [present HandleSubstitution current
+            name String? (queryterm-variable (nth arguments position))
+            value Int (triple-row-handle-at row position)
+            fixed Int (nth template position)]
+        (if (some? name)
+          (if (contains? present name)
+            (recur (inc position)
+                   (if (= (get present name) value) present nil))
+            (recur (inc position) (assoc present name value)))
+          (recur (inc position) (if (= fixed value) present nil)))))))
+
+(defn- ground-handle-arguments
+  [root t/TermStore
+   arguments (Vec QueryTerm)
+   subst HandleSubstitution] Tuple
+  (mapv
+   (fn [term QueryTerm] Any
+     (let [name String? (queryterm-variable term)]
+       (if (some? name)
+         (let [handle Int? (get subst name)]
+           (if (some? handle)
+             (store/resolve-term-handle root handle)
+             (throw
+              (ex-info "store: unbound handle variable reached evaluation"
+                       {:type :unbound-query-variable}))))
+         (queryterm-value term))))
+   arguments))
+
+(defn- variable-names [arguments (Vec QueryTerm)] (Set String)
+  (reduce
+   (fn
+     [names (Set String)
+      term QueryTerm] (Set String)
+     (let [name String? (queryterm-variable term)]
+       (if (some? name) (conj names name) names)))
+   #{} arguments))
+
+(defn- variables-contained?
+  [required (Set String)
+   available (Set String)] Bool
+  (loop [remaining (Vec String) (vec required)]
+    (if (empty? remaining)
+      true
+      (if (contains? available (first remaining))
+        (recur (rest remaining))
+        false))))
+
+(defn- binary-store-rule-shape? [value Rule] Bool
+  (let [body (Vec Literal) (rule-body value)]
+    (if (not (= 2 (count body)))
+      false
+      (let [first-literal Literal (nth body 0)
+            second-literal Literal (nth body 1)
+            first-arguments (Vec QueryTerm) (literal-arguments first-literal)
+            second-arguments (Vec QueryTerm) (literal-arguments second-literal)
+            first-variables (Set String) (variable-names first-arguments)
+            second-variables (Set String) (variable-names second-arguments)
+            body-variables (Set String) (into first-variables second-variables)
+            shared-variables (Set String) (reduce
+              (fn
+                [shared (Set String)
+                 name String] (Set String)
+                (if (contains? second-variables name)
+                  (conj shared name)
+                  shared))
+              #{} (vec first-variables))]
+        (and (not (= triple-relation (rule-head-relation value)))
+             (and (= :relation (literal-kind first-literal))
+                  (and (= :relation (literal-kind second-literal))
+                       (and (not (literal-negated first-literal))
+                            (and (not (literal-negated second-literal))
+                                 (and (= triple-relation
+                                         (literal-relation first-literal))
+                                      (and (= triple-relation
+                                              (literal-relation second-literal))
+                                           (and (= 3 (count first-arguments))
+                                                (and (= 3 (count second-arguments))
+                                                     (and (not (empty? shared-variables))
+                                                          (variables-contained?
+                                                           (variable-names
+                                                            (rule-head-arguments value))
+                                                           body-variables)))))))))))))))
+
+(defn- derive-store-binary-rule!
+  [source StoreCandidateSource
+   value Rule
+   context QueryEvaluationContext] (Set Tuple)
+  (let [root t/TermStore (storecandidatesource-root source)
+        body (Vec Literal) (rule-body value)
+        first-literal Literal (nth body 0)
+        second-literal Literal (nth body 1)
+        first-arguments (Vec QueryTerm) (literal-arguments first-literal)
+        second-arguments (Vec QueryTerm) (literal-arguments second-literal)
+        first-template (Vec Int) (literal-handle-template root first-arguments)
+        second-template (Vec Int) (literal-handle-template root second-arguments)
+        empty-handles HandleSubstitution {}]
+    (if (not (and (handle-template-valid? first-template)
+                  (handle-template-valid? second-template)))
+      #{}
+      (if (not (query-check! context))
+        #{}
+        (loop [remaining (Vec Int) (store-template-handles
+                                    root first-arguments first-template
+                                    empty-handles)
+               derived (Set Tuple) #{}]
+          (if (or (empty? remaining)
+                  (not (query-evaluation-context-open? context)))
+            (if (query-evaluation-context-open? context) derived #{})
+            (if (not (query-check! context))
+              #{}
+              (let [first-row t/TripleRow (store/triple-row-handles-at root (first remaining))
+                    first-subst (U HandleSubstitution Nil) (unify-handle-arguments
+                     first-arguments first-template first-row empty-handles)]
+                (if (nil? first-subst)
+                  (recur (rest remaining) derived)
+                  (if (not (query-check! context))
+                    #{}
+                    (let [present-first HandleSubstitution first-subst
+                          next-derived (Set Tuple) (loop [matches (Vec Int) (store-template-handles
+                                                    root second-arguments
+                                                    second-template present-first)
+                                                          current (Set Tuple) derived]
+                                                     (if (or (empty? matches)
+                                    (not (query-evaluation-context-open? context)))
+                              current
+                              (if (not (query-check! context))
+                                current
+                                (let [second-row t/TripleRow (store/triple-row-handles-at root (first matches))
+                                      joined (U HandleSubstitution Nil) (unify-handle-arguments
+                                       second-arguments second-template
+                                       second-row present-first)]
+                                  (recur
+                                   (rest matches)
+                                   (if (some? joined)
+                                     (conj current
+                                           (ground-handle-arguments
+                                            root (rule-head-arguments value) joined))
+                                     current))))))]
+                      (if (query-evaluation-context-open? context)
+                        (recur (rest remaining) next-derived)
+                        #{}))))))))))))
+
 (defn- derive-rule-indexed!
   [db Db
    sources CandidateSources
    value Rule
    context QueryEvaluationContext] (Set Tuple)
-  (let [substitutions (body-results-indexed! db sources (rule-body value) {} context)]
-    (if (query-evaluation-context-open? context)
-      (reduce (fn
-                [acc (Set Tuple)
-                 subst Substitution] (Set Tuple)
-                (conj acc (ground (rule-head-arguments value) subst)))
-              #{} substitutions)
-      #{})))
+  (let [source (U CandidateSourceValue Nil) (get sources triple-relation)]
+    (if (and (binary-store-rule-shape? value)
+             (instance? StoreCandidateSource source))
+      (derive-store-binary-rule! source value context)
+      (let [substitutions (body-results-indexed!
+                           db sources (rule-body value) {} context)]
+        (if (query-evaluation-context-open? context)
+          (reduce (fn
+                    [acc (Set Tuple)
+                     subst Substitution] (Set Tuple)
+                    (conj acc (ground (rule-head-arguments value) subst)))
+                  #{} substitutions)
+          #{})))))
 
 (defn- delta-relation-positions
   [body (Vec Literal)
