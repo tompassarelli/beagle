@@ -32,6 +32,7 @@
          racket/tcp
          racket/file
          racket/list
+         racket/path
          file/sha1
          "parse.rkt"
          "check.rkt"
@@ -61,6 +62,14 @@
       (hash-remove! datum-cache path)
       (hash-clear! datum-cache)))
 
+(define WATCH-IGNORED-DIRECTORY-NAMES
+  '(".beagle" ".direnv" ".git" "node_modules" "result" "vendor" "vendored"))
+
+(define (watch-traversal-directory? dir)
+  (define name (file-name-from-path dir))
+  (or (not name)
+      (not (member (path->string name) WATCH-IGNORED-DIRECTORY-NAMES))))
+
 (define (find-beagle-in args)
   (apply append
     (for/list ([a (in-list args)])
@@ -80,6 +89,7 @@
 (define check-sema (make-semaphore 1)) ; serialize type checking (global state)
 (define watcher-threads (make-hash)) ; path -> thread
 (define watch-dir-threads '())       ; list of directory watcher threads
+(define watch-initializer-threads '()) ; list of asynchronous initial-check threads
 (define watched-dirs '())            ; list of watched directory paths (simplified)
 (define pending-results (make-hash)) ; path -> hasheq (consumed by latest-results)
 
@@ -262,25 +272,48 @@
               (loop))))))
     (hash-set! watcher-threads path t)))
 
-(define (start-dir-watcher dir)
-  (define (scan-and-watch)
-    (for ([f (in-directory dir)]
-          #:when (regexp-match? BEAGLE-FILE-RX (path->string f)))
-      (define p (path->string f))
-      (start-file-watcher p)
-      (run-check-and-cache! p)))
-  (scan-and-watch)
-  (define t
-    (thread
-      (lambda ()
-        (let loop ()
-          (with-handlers ([exn:fail? void])
-            (sync (filesystem-change-evt dir)))
-          (scan-and-watch)
-          (loop)))))
-  (set! watch-dir-threads (cons t watch-dir-threads))
-  (set! watched-dirs (cons (path->string (simplify-path (string->path dir)))
-                           watched-dirs)))
+(define (find-watchable-beagle-files dir)
+  (for/list ([path (in-directory dir watch-traversal-directory?)]
+             #:when (regexp-match? BEAGLE-FILE-RX (path->string path)))
+    (path->string path)))
+
+(define (check-watched-file! path check-file!)
+  (with-handlers ([exn:fail? (lambda (e)
+                               (eprintf "check error ~a: ~a\n" path (exn-message e)))])
+    (check-file! path)))
+
+(define (start-dir-watcher dir #:check-file! [check-file! run-check-and-cache!])
+  (define watched-dir
+    (path->string (simplify-path dir)))
+  (unless (member watched-dir watched-dirs)
+    (define initial-files (find-watchable-beagle-files dir))
+    ;; Register every owned source before acknowledging the stateful watch.
+    ;; Initial type checking can take minutes on a cold or dependency-heavy
+    ;; checkout and must not hold the request connection open.
+    (for ([path (in-list initial-files)])
+      (start-file-watcher path))
+    (define dir-thread
+      (thread
+        (lambda ()
+          (let loop ()
+            (with-handlers ([exn:fail? void])
+              (sync (filesystem-change-evt dir)))
+            ;; Per-file watchers own changes to existing sources.  A directory
+            ;; event only has to discover and initialize newly created files.
+            (for ([path (in-list (find-watchable-beagle-files dir))])
+              (unless (hash-has-key? watcher-threads path)
+                (start-file-watcher path)
+                (check-watched-file! path check-file!)))
+            (loop)))))
+    (set! watch-dir-threads (cons dir-thread watch-dir-threads))
+    (set! watched-dirs (cons watched-dir watched-dirs))
+    (define initializer-thread
+      (thread
+        (lambda ()
+          (for ([path (in-list initial-files)])
+            (check-watched-file! path check-file!)))))
+    (set! watch-initializer-threads
+          (cons initializer-thread watch-initializer-threads))))
 
 (define (stop-all-watchers)
   (for ([(path t) (in-hash watcher-threads)])
@@ -289,6 +322,9 @@
   (for ([t (in-list watch-dir-threads)])
     (kill-thread t))
   (set! watch-dir-threads '())
+  (for ([t (in-list watch-initializer-threads)])
+    (kill-thread t))
+  (set! watch-initializer-threads '())
   (set! watched-dirs '()))
 
 ;; --- New command handlers ---------------------------------------------------
@@ -850,4 +886,5 @@
     (accept-loop)))
 
 (provide run-daemon run-daemon-tcp invalidate-cache! get-datums
-         run-check-and-cache! start-dir-watcher stop-all-watchers)
+         run-check-and-cache! find-watchable-beagle-files
+         start-dir-watcher stop-all-watchers)

@@ -13,6 +13,7 @@
          racket/string
          racket/system
          racket/tcp
+         beagle/private/daemon
          beagle/private/query)
 
 (define-runtime-path CANONICAL-FIXTURE "fixtures/query/canonical.bjs")
@@ -349,6 +350,52 @@
       (check-equal? err ""))
     (lambda ()
       (delete-directory/files scratch)
+      (delete-directory/files watched-dir))))
+
+(test-case "daemon watch acknowledges before initial checks and skips dependency trees"
+  (define watched-dir (make-temporary-file "beagle-daemon-async-watch-~a" 'directory))
+  (define owned-source (build-path watched-dir "owned.bclj"))
+  (define ignored-sources
+    (for/list ([directory (in-list '(".beagle" ".direnv" "node_modules" "vendor"))])
+      (define ignored-dir (build-path watched-dir directory "nested"))
+      (make-directory* ignored-dir)
+      (build-path ignored-dir "dependency.bclj")))
+  (for ([path (in-list (cons owned-source ignored-sources))])
+    (call-with-output-file path
+      #:exists 'truncate/replace
+      (lambda (out)
+        (display "#lang beagle/clj\n(ns daemon.watch.fixture)\n" out))))
+  (define check-entered (make-semaphore 0))
+  (define release-check (make-semaphore 0))
+  (define start-returned (make-semaphore 0))
+  (define starter #f)
+  (dynamic-wind
+    void
+    (lambda ()
+      (check-equal?
+       (find-watchable-beagle-files watched-dir)
+       (list (path->string owned-source)))
+      (set! starter
+            (thread
+             (lambda ()
+               (start-dir-watcher
+                watched-dir
+                #:check-file!
+                (lambda (_path)
+                  (semaphore-post check-entered)
+                  (semaphore-wait release-check)))
+               (semaphore-post start-returned))))
+      (check-not-false
+       (sync/timeout 1 check-entered)
+       "the asynchronous initial check started")
+      (check-not-false
+       (sync/timeout 1 start-returned)
+       "watch registration returned while its initial check was blocked")
+      (semaphore-post release-check))
+    (lambda ()
+      (semaphore-post release-check)
+      (stop-all-watchers)
+      (when starter (kill-thread starter))
       (delete-directory/files watched-dir))))
 
 ;; The flat pair `[x Float]` is the CANONICAL field surface now, so what the
