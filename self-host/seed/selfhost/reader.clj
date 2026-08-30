@@ -189,6 +189,10 @@
   (cond
   (= nxt "{") (let [result (read-delimited src (+ pos 2) "}")]
   (make-result (into [SET-TAG] (get result "value")) (get result "pos")))
+  (= nxt "'") (let [inner (read-datum src (+ pos 2))]
+  (if (nil? inner) (do
+  (selfhost.rt/eprint "beagle reader: unexpected EOF after `#'` (Var quote needs a following name)\n")
+  (make-result ["syntax" nil] (+ pos 2))) (make-result ["syntax" (get inner "value")] (get inner "pos"))))
   (= nxt "\"") (read-regex-literal src (+ pos 1))
   (= nxt "r") (read-raw-string src (+ pos 2))
   :else (let [sym-result (read-symbol-text src pos)]
@@ -273,6 +277,7 @@
   (= ch "[") "bracket"
   (= ch "{") "brace"
   (and (= ch "#") (= (char-at src (+ start 1)) "{")) "set"
+  (and (= ch "#") (= (char-at src (+ start 1)) "'")) "var-quote"
   (= ch "'") "quote"
   (= ch "`") "quasiquote"
   (and (= ch "~") (= (char-at src (+ start 1)) "@")) "unquote-splicing"
@@ -285,6 +290,7 @@
   (= ch "[") (ast/make-syntax-vector! children span ast/EMPTY-SCOPE-SET nil properties)
   (= ch "{") (ast/make-syntax-list! (into [(syntax-head! MAP-TAG span properties)] children) span ast/EMPTY-SCOPE-SET nil properties)
   (and (= ch "#") (= (char-at src (+ start 1)) "{")) (ast/make-syntax-list! (into [(syntax-head! SET-TAG span properties)] children) span ast/EMPTY-SCOPE-SET nil properties)
+  (and (= ch "#") (= (char-at src (+ start 1)) "'")) (ast/make-syntax-list! (into [(syntax-head! "syntax" span properties)] children) span ast/EMPTY-SCOPE-SET nil properties)
   (= ch "'") (ast/make-syntax-quote! (if (> (count value) 1) (nth value 1) nil) span ast/EMPTY-SCOPE-SET nil properties)
   (or (= ch "~") (and (= ch "~") (= (char-at src (+ start 1)) "@"))) (ast/make-syntax-unquote! (if (> (count children) 0) (nth children 0) (ast/datum->beagle-syntax! nil span ast/EMPTY-SCOPE-SET nil properties)) (= delimiter "unquote-splicing") span ast/EMPTY-SCOPE-SET nil properties)
   (or (= ch "`") (= ch "@") (= ch "^")) (let [head (nth value 0)]
@@ -311,6 +317,8 @@
   (cond
   (= nxt "{") (let [result (read-syntax-delimited! src (+ pos 2) "}" source-id)]
   (assoc (make-result (into [SET-TAG] (get result "value")) (get result "pos")) "syntaxChildren" (get result "syntaxChildren")))
+  (= nxt "'") (let [inner (read-syntax-datum! src (+ pos 2) source-id)]
+  (if (nil? inner) (make-result ["syntax" nil] (+ pos 2)) (assoc (make-result ["syntax" (get inner "value")] (get inner "pos")) "syntaxChildren" [(get inner "syntax")])))
   (= nxt "\"") (read-regex-literal src (+ pos 1))
   (= nxt "r") (read-raw-string src (+ pos 2))
   :else (let [sym-result (read-symbol-text src pos)]
@@ -464,6 +472,7 @@
   (expect! "regex preserves backslash" (= (rd1 "#\"\\d+\"") [REGEX-TAG "\\d+"]))
   (expect! "quote" (= (rd1 "'foo") ["quote" "foo"]))
   (expect! "deref" (= (rd1 "@state") ["deref" "state"]))
+  (expect! "Var quote" (= (rd1 "#'service/run") ["syntax" "service/run"]))
   (expect! "quasiquote" (= (rd1 "`foo") ["quasiquote" "foo"]))
   (expect! "unquote" (= (rd1 "~x") ["unquote" "x"]))
   (expect! "unquote-splicing" (= (rd1 "~@xs") ["unquote-splicing" "xs"]))

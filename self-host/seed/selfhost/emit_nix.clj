@@ -971,6 +971,7 @@
   (= s "false") "false"
   (str/includes? s ".") s
   :else (mangle-name s))))
+  (= node "clj-var-ref") (throw (ex-info "Clojure Var quote is not supported on the Nix target" {}))
   (= node "def") (str "let " (mangle-name (get e "name")) " = " (emit-expr* (get e "value") depth) "; in " (mangle-name (get e "name")))
   (= node "fn") (let [params (get e "params")
    rest-p (get e "rest")

@@ -636,6 +636,7 @@
   (= kind "char") (emit-char-lit (get e "value"))
   :else "nil"))
   (= node "ref") (reference->clj e)
+  (= node "clj-var-ref") (str "#'" (reference->clj e))
   (= node "def") (let [doc (get e "doc")]
   (str "(def " (if (= (get e "dynamic") true) "^:dynamic " "") (clj-tag-prefix (get e "ann")) (get e "name") (if (string? doc) (str " " (write-clj-string doc)) "") " " (emit-expr* (get e "value")) ")"))
   (= node "defonce") (let [doc (get e "doc")]
@@ -892,6 +893,9 @@
   (expect! "binding-target: map-destructure -> {:keys [id b]}" (= (emit-binding-target! {"type" "map-destructure" "keys" ["id" "b"] "as" false}) "{:keys [id b]}"))
   (expect! "param: typed sequential aggregate unwraps to binding form" (= (emit-param {"type" "param" "name" {"type" "seq-destructure" "names" ["x" "y"] "rest" false} "ann" {"kind" "hvec" "members" [{"kind" "prim" "name" "Int"} {"kind" "prim" "name" "String"}]}}) "[x y]"))
   (expect! "param: nested map defaults and as survive aggregate annotation" (= (emit-param {"type" "param" "name" {"type" "seq-destructure" "names" ["x" {"type" "map-destructure" "keys" ["y"] "or" [{"key" "y" "value" {"node" "literal" "kind" "number" "value" 3}}] "as" "row"}] "rest" false} "ann" {"kind" "any"}}) "[x {:keys [y] :or {y 3} :as row}]"))
+  (expect! "typed destructuring rest parameters normalize before projection" (let [output (emit-expr! {"node" "defn" "name" "run" "params" [{"type" "param" "name" "argv" "ann" {"kind" "prim" "name" "Any"} "constraint" false}] "rest" {"type" "param" "name" {"type" "map-destructure" "keys" ["timeout"] "or" [{"key" "timeout" "value" {"node" "literal" "kind" "number" "value" 4000}}] "as" false} "ann" {"kind" "app" "name" "Vec" "args" [{"kind" "prim" "name" "Any"}]} "constraint" false} "ret" {"kind" "prim" "name" "Any"} "body" [{"node" "ref" "name" "timeout"}] "private" false "doc" false})]
+  (and (str/includes? output "& $beagle$rest$host") (str/includes? output "{:keys [timeout] :or {timeout 4000}} (vec $beagle$rest$host)"))))
+  (expect! "Clojure Var reference emits identity-bearing reader surface" (= (emit-expr! {"node" "clj-var-ref" "qualifier" "north.main" "name" "capture-facts"}) "#'north.main/capture-facts"))
   (expect! "let-bindings: seq-destructure binder (no raw JSON leak)" (= (emit-let-bindings! [{"name" {"type" "seq-destructure" "names" ["a" "b"] "rest" false} "value" {"node" "ref" "name" "p"}}]) "[a b] p"))
   (expect! "let-bindings: map-destructure binder (no raw JSON leak)" (= (emit-let-bindings! [{"name" {"type" "map-destructure" "keys" ["id" "b"] "as" false} "value" {"node" "ref" "name" "m"}}]) "{:keys [id b]} m"))
   (expect! "constrained callable captures predicate before authored binder" (let [output (emit-expr! {"node" "defn" "name" "keep" "params" [{"type" "param" "name" "value" "ann" {"kind" "prim" "name" "Int"} "constraint" {"node" "ref" "name" "positive?"}}] "rest" false "ret" {"kind" "prim" "name" "Int"} "body" [{"node" "ref" "name" "value"}] "private" false "doc" false})]

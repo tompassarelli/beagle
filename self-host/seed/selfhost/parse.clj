@@ -1259,9 +1259,7 @@
   (validate-identifier! (nth after 0) "rest parameter")
   (make-param! (nth after 0) nil nil))
   (and (= (count after) 1) (structured-binding? (nth after 0))) (let [binding (parse-structured-binding! (nth after 0) "rest parameter")]
-  (if (string? (get binding "name")) (make-param! (get binding "name") (get binding "ann") (get binding "constraint")) (do
-  (err! "rest parameter must bind one name, not a destructuring pattern")
-  nil)))
+  (make-param! (get binding "name") (get binding "ann") (get binding "constraint")))
   :else (do
   (err! (str "bad rest parameter after &: " (str after)))
   nil)))
@@ -1351,9 +1349,7 @@
   (err! "& must be followed by exactly one binding/type pair")
   nil)
   :else (let [name (parse-binding-form! (nth after 0) "rest parameter")]
-  (if (string? name) (make-param! name (parse-type* (nth after 1)) nil) (do
-  (err! "rest parameter must bind one name, not a destructuring pattern")
-  nil))))))
+  (make-param! name (parse-type* (nth after 1)) nil)))))
    parsed {"params" fixed "rest-param" rest-param}
    all-bound (into (vec (apply concat (mapv binding-target-bound-names (get parsed "params")))) (if (nil? (get parsed "rest-param")) [] (binding-target-bound-names (get parsed "rest-param"))))
    duplicate (loop [remaining all-bound
@@ -2109,6 +2105,11 @@
   (map-tagged? d) (parse-map-literal! (map-body d))
   (set-tagged? d) (make-set-form (mapv parse-expr* (set-body d)))
   (and (vector? d) (= (count d) 2) (= (nth d 0) "quote")) (make-quoted (datum->json (nth d 1)))
+  (and (vector? d) (= (count d) 2) (= (nth d 0) "syntax") (string? (nth d 1))) (do
+  (validate-identifier! (nth d 1) "Clojure Var quote")
+  (let [ref (lower-qualified-reference! (nth d 1))
+   value (if (nil? ref) (make-ref! (nth d 1)) ref)]
+  (assoc value "node" "clj-var-ref")))
   (and (vector? d) (> (count d) 0)) (parse-list-form! d)
   :else NIL-LITERAL))
 
@@ -2898,6 +2899,8 @@
   (and (= (get node "node") "letfn") (= (count (get node "fns")) 2))))
   (expect! "dynamic-var" (let [node (parse-expr* "*state*")]
   (and (= (get node "node") "dynamic-var") (= (get node "name") "*state*"))))
+  (expect! "Clojure Var quote retains qualified identity" (let [node (parse-expr* ["syntax" "north.main/capture-facts"])]
+  (and (= (get node "node") "clj-var-ref") (= (get node "qualifier") "north.main") (= (get node "name") "capture-facts"))))
   (expect! "generic call" (let [node (parse-expr* ["println" ["#%string" "hello"]])]
   (and (= (get node "node") "call") (= (get (get node "fn") "node") "ref") (= (get (get node "fn") "name") "println"))))
   (expect! "defn- private" (let [node (parse-expr* ["defn-" "helper" [BRACKET-TAG "x" "Any"] "Any" "x"])]
@@ -2914,6 +2917,12 @@
   (and (= (get (get result "rest-param") "name") "args") (= (get (get (get result "rest-param") "ann") "kind") "app"))))
   (expect! "parse-params! structural rest owns constraint" (let [result (parse-params! [BRACKET-TAG ["x" "Any"] "&" ["args" ["Vec" "String"] ["seq" "args"]]])]
   (= (get (get (get result "rest-param") "constraint") "node") "call")))
+  (expect! "parse-params! typed rest map destructuring" (let [result (parse-params! [BRACKET-TAG "argv" "Any" "&" [MAP-TAG ":keys" [BRACKET-TAG "timeout" "in" "env"]] ["Vec" "Any"]])
+   target (get (get result "rest-param") "name")]
+  (and (= (get target "type") "map-destructure") (= (get target "keys") ["timeout" "in" "env"]))))
+  (expect! "parse-params! typed rest vector destructuring" (let [result (parse-params! [BRACKET-TAG "port" "Any" "&" [BRACKET-TAG "baseline"] ["Vec" "Any"]])
+   target (get (get result "rest-param") "name")]
+  (and (= (get target "type") "seq-destructure") (= (get target "names") ["baseline"]))))
   (expect! "reserved compiler identifier prefix rejected" (do
   (reset-errors!)
   (parse-expr* "$beagle$param$0")
@@ -2922,6 +2931,9 @@
   (and (= (count bindings) 2) (= (get (nth bindings 0) "name") "x") (= (get (nth bindings 1) "name") "y"))))
   (expect! "parse-local-bindings! flat triples" (let [bindings (parse-local-bindings! [BRACKET-TAG "x" "Int" 1 "y" "Int" 2] "let binding")]
   (and (= (count bindings) 2) (= (get (get (nth bindings 0) "ann") "name") "Int") (= (get (get (nth bindings 1) "ann") "name") "Int"))))
+  (expect! "parse-local-bindings! typed map destructuring triple" (let [bindings (parse-local-bindings! [BRACKET-TAG [MAP-TAG ":keys" [BRACKET-TAG "controls" "managed" "work"]] "Any" ["presence-state" "now"] "rows" "Any" ["query-rows" "work" "managed"]] "let binding")
+   first-binding (nth bindings 0)]
+  (and (= (count bindings) 2) (= (get (get first-binding "name") "type") "map-destructure") (= (get (get first-binding "ann") "name") "Any") (= (get (get first-binding "value") "node") "call"))))
   (expect! "unsafe-js rejected" (do
   (reset-errors!)
   (parse-expr* ["unsafe-js" ["#%string" "1+1"]])

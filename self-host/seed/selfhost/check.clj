@@ -842,17 +842,26 @@
   (if (vec-aggregate-type? authored) (nth (get authored "args") 0) ANY)))
 
 (defn inference-rest-call-element-type! [rest-param]
-  (let [authored (if (nil? rest-param) nil (get rest-param "ann"))]
-  (if (vec-aggregate-type? authored) (nth (get authored "args") 0) (fresh-inference-var!))))
+  (let [authored (if (nil? rest-param) nil (get rest-param "ann"))
+   target (if (nil? rest-param) nil (get rest-param "name"))]
+  (cond
+  (vec-aggregate-type? authored) (nth (get authored "args") 0)
+  (and (= (get target "type") "map-destructure") (any-type? authored)) ANY
+  :else (fresh-inference-var!))))
 
 (defn rest-param-body-type [rest-param]
-  (let [authored (if (nil? rest-param) nil (get rest-param "ann"))]
-  (if (vec-aggregate-type? authored) authored (make-app "Vec" [(rest-param-call-element-type rest-param)]))))
+  (let [authored (if (nil? rest-param) nil (get rest-param "ann"))
+   target (if (nil? rest-param) nil (get rest-param "name"))]
+  (cond
+  (= (get target "type") "map-destructure") ANY
+  (vec-aggregate-type? authored) authored
+  :else (make-app "Vec" [(rest-param-call-element-type rest-param)]))))
 
 (defn check-rest-annotation! [rest-param ^String context]
   (if (not (nil? rest-param)) (do
-  (let [authored (get rest-param "ann")]
-  (if (and (not (nil? authored)) (not (vec-aggregate-type? authored))) (do
+  (let [authored (get rest-param "ann")
+   target (get rest-param "name")]
+  (if (and (not (nil? authored)) (not (vec-aggregate-type? authored)) (not (and (= (get target "type") "map-destructure") (any-type? authored)))) (do
   (emit-diag! (str "beagle: " context " rest parameter annotation must describe its aggregate body binding as " "(Vec Element), got " (type->string authored))))))))
   nil)
 
@@ -1425,6 +1434,11 @@
   (if (nil? t) ANY t))
   (= (get e "node") "ref") (let [found (reference-map-ref env e nil)]
   (if (nil? found) ANY found))
+  (= (get e "node") "clj-var-ref") (do
+  (if (not= (get (deref STATE) "target") "clj") (do
+  (emit-diag! (str "Clojure Var quote is only supported in beagle/clj (current target: " (get (deref STATE) "target") ")"))))
+  (let [found (reference-map-ref env (assoc e "node" "ref") nil)]
+  (if (nil? found) ANY found)))
   (= (get e "node") "def") (let [expected (get e "ann")]
   (if (and (not (nil? expected)) (or (check-hvec-literal! (get e "value") expected env) (check-atom-ctor! (get e "value") expected env))) expected (let [inferred (infer-expr-expected! (get e "value") env expected)]
   (if (and (not (nil? expected)) (not (type-compatible? inferred expected))) (do
@@ -1905,7 +1919,7 @@
 (defn extend-with-effective-params! [env params rest-param signature]
   (let [all-params (if (nil? rest-param) (vec params) (conj (vec params) rest-param))
    fixed-types (get signature "params")
-   effective-types (if (nil? rest-param) fixed-types (conj (vec fixed-types) (make-app "Vec" [(get signature "rest")])))
+   effective-types (if (nil? rest-param) fixed-types (conj (vec fixed-types) (if (= (get (param-binding-target rest-param) "type") "map-destructure") ANY (make-app "Vec" [(get signature "rest")]))))
    indices (vec (range (count all-params)))]
   (reduce (fn [out i] (let [parameter (nth all-params i)
    target (param-binding-target parameter)
@@ -3469,6 +3483,15 @@
    fn-form (assoc (make-defn-node "collect" [] rest-type [(make-ref "xs")]) "rest" rest-param)
    prog (make-prog-with-externs [fn-form] [{"name" "nonempty-ints?" "type" (make-fn [rest-type] nil BOOL-TYPE)}])]
   (= (count (check-program! prog)) 0)))
+  (expect! "typed rest-map and rest-vector destructuring bind their projections" (let [vec-any (make-app "Vec" [ANY])
+   map-rest (make-param (make-map-target ["timeout"] false []) vec-any)
+   seq-rest (make-param (make-seq-target ["baseline"] false) vec-any)
+   map-fn (assoc (make-defn-node "run" [(make-param "argv" ANY)] ANY [(make-ref "timeout")]) "rest" map-rest)
+   seq-fn (assoc (make-defn-node "report" [(make-param "port" ANY)] ANY [(make-ref "baseline")]) "rest" seq-rest)]
+  (= (count (check-program! (make-prog [map-fn seq-fn]))) 0)))
+  (expect! "Clojure Var reference inherits the referenced callable type" (let [callable (make-fn [(make-prim "Int")] nil (make-prim "Int"))
+   inferred (infer-expr! {"node" "clj-var-ref" "name" "capture-facts"} {"capture-facts" callable})]
+  (type-invariant-equal? inferred callable)))
   (expect! "constraint: let and for bindings accepted" (let [predicate {"name" "positive?" "type" (make-fn [(make-prim "Int")] nil BOOL-TYPE)}
    let-expr (make-let-node [(make-constrained-let-binding "seed" (make-prim "Int") (make-ref "positive?") (make-lit "number" 1))] [{"node" "for" "clauses" [{"type" "binding" "name" "x" "ann" (make-prim "Int") "constraint" (make-ref "positive?") "expr" (make-vec-node [(make-ref "seed")])}] "body" [(make-ref "x")]}])
    prog (make-prog-with-externs [(make-def-node "values" (make-app "Vec" [(make-prim "Int")]) let-expr)] [predicate])]

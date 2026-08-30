@@ -1343,6 +1343,7 @@
   (= kind "char") (js-string-lit (str (char (get e "value"))))
   :else "null"))
   (= node "ref") (emit-ref-name e)
+  (= node "clj-var-ref") (throw (ex-info "Clojure Var quote is not supported on the JavaScript target" {}))
   (= node "def") (str "const " (mangle-name (get e "name")) " = " (emit-expr*! (get e "value")) ";")
   (= node "defonce") (str "const " (mangle-name (get e "name")) " = " (emit-expr*! (get e "value")) ";")
   (= node "if") (let [el (get e "else")]
