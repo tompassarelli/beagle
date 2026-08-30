@@ -413,11 +413,11 @@
 
 (def FALSE-LITERAL {"node" "literal" "kind" "bool" "value" false})
 
-(defn make-def [^String name ann value doc ^Boolean dyn]
-  {"node" "def" "name" name "ann" ann "value" value "doc" (if (nil? doc) false doc) "dynamic" dyn})
+(defn make-def [^String name ann value doc ^Boolean dyn ^Boolean private-]
+  {"node" "def" "name" name "ann" ann "value" value "doc" (if (nil? doc) false doc) "dynamic" dyn "private" private-})
 
-(defn make-defonce [^String name ann value doc]
-  {"node" "defonce" "name" name "ann" ann "value" value "doc" (if (nil? doc) false doc)})
+(defn make-defonce [^String name ann value doc ^Boolean private-]
+  {"node" "defonce" "name" name "ann" ann "value" value "doc" (if (nil? doc) false doc) "private" private-})
 
 (defn make-defn [^String name params rest-param ret body ^Boolean priv]
   {"node" "defn" "name" name "params" params "rest" (if (nil? rest-param) false rest-param) "ret" ret "body" body "private" priv})
@@ -1865,24 +1865,24 @@
   (err! (str "declare-extern: each declared name must be a symbol or ^:dynamic symbol, got: " (racket-written-datum raw-name)))
   nil)))
 
-(defn- mk-def-node [^String kw ^String name ann value doc ^Boolean dyn]
-  (if (= kw "defonce") (make-defonce name ann value doc) (make-def name ann value doc dyn)))
+(defn- mk-def-node [^String kw ^String name ann value doc ^Boolean dyn ^Boolean private-]
+  (if (= kw "defonce") (make-defonce name ann value doc private-) (make-def name ann value doc dyn private-)))
 
 (defn- parse-def-form! [^String kw rest-items]
   (let [name-form (nth rest-items 0)
    name (if (meta-name? name-form) (nth name-form 2) name-form)
    dyn (and (= kw "def") (meta-name? name-form) (meta-dynamic? (nth name-form 1)))
+   private- (and (meta-name? name-form) (meta-flag? (nth name-form 1) ":private"))
    items (subvec rest-items 1)]
   (cond
   (not (string? name)) (err! (str "malformed " kw ": " (str rest-items)))
   (str/starts-with? name "$beagle$") (do
   (validate-identifier! name kw)
   NIL-LITERAL)
-  (and (= kw "defonce") (meta-name? name-form)) (err! "malformed defonce — metadata on the name is not supported")
-  (and (= (count items) 3) (string-literal-datum? (nth items 1))) (mk-def-node kw name (parse-type* (nth items 0)) (parse-expr* (nth items 2)) (extract-string (nth items 1)) dyn)
-  (and (= (count items) 2) (string-literal-datum? (nth items 0))) (mk-def-node kw name nil (parse-expr* (nth items 1)) (extract-string (nth items 0)) dyn)
-  (= (count items) 2) (mk-def-node kw name (parse-type* (nth items 0)) (parse-expr* (nth items 1)) nil dyn)
-  (= (count items) 1) (mk-def-node kw name nil (parse-expr* (nth items 0)) nil dyn)
+  (and (= (count items) 3) (string-literal-datum? (nth items 1))) (mk-def-node kw name (parse-type* (nth items 0)) (parse-expr* (nth items 2)) (extract-string (nth items 1)) dyn private-)
+  (and (= (count items) 2) (string-literal-datum? (nth items 0))) (mk-def-node kw name nil (parse-expr* (nth items 1)) (extract-string (nth items 0)) dyn private-)
+  (= (count items) 2) (mk-def-node kw name (parse-type* (nth items 0)) (parse-expr* (nth items 1)) nil dyn private-)
+  (= (count items) 1) (mk-def-node kw name nil (parse-expr* (nth items 0)) nil dyn private-)
   :else (err! (str "malformed " kw " — expected (" kw " NAME VALUE), (" kw " NAME \"doc\" VALUE), (" kw " NAME TYPE VALUE), or (" kw " NAME TYPE \"doc\" VALUE)")))))
 
 (defn- parse-target-case! [items]
@@ -2853,6 +2853,8 @@
   (expect! "target-case: cases sorted by target name; branches parse" (= (parse-expr* ["target-case" ":js" 2 ":clj" 1]) {"node" "target-case" "cases" [{"target" "clj" "body" {"node" "literal" "kind" "number" "value" 1}} {"target" "js" "body" {"node" "literal" "kind" "number" "value" 2}}]}))
   (expect! "^:dynamic def sets the dynamic flag" (= (get (parse-expr* ["def" ["#%meta" ":dynamic" "*x*"] 1]) "dynamic") true))
   (expect! "^{:dynamic true} longhand sets the dynamic flag" (= (get (parse-expr* ["def" ["#%meta" [MAP-TAG ":dynamic" true] "*x*"] 1]) "dynamic") true))
+  (expect! "typed private def preserves binding privacy" (let [node (parse-expr* ["def" ["#%meta" ":private" "value"] "Int" 1])]
+  (and (= (get node "node") "def") (= (get node "name") "value") (= (get node "private") true))))
   (expect! "import: fielded nominal union retains qualified member types" (let [surface (import-module-surface! [["defunion" "Op" ["AddOp" [BRACKET-TAG ["left" "Int"]]] ["SubOp" [BRACKET-TAG ["left" "Int"]]]]] "core" nil)
    union-entry (first (filterv (fn [entry] (= (get entry "name") "core/Op")) surface))
    members (get (get union-entry "type") "members")]
@@ -2862,7 +2864,7 @@
    function-type (get function-entry "type")]
   (and (= "beagle.user/Op" (get (first (get function-type "params")) "name")) (= "beagle.user/NativeId" (get (get function-type "ret") "name")))))
   (expect! "plain def: dynamic false, doc false" (let [node (parse-expr* ["def" "x" 1])]
-  (and (= (get node "dynamic") false) (= (get node "doc") false))))
+  (and (= (get node "dynamic") false) (= (get node "private") false) (= (get node "doc") false))))
   (expect! "def docstring recorded" (= (get (parse-expr* ["def" "x" ["#%string" "d"] 1]) "doc") "d"))
   (expect! "vec literal" (let [node (parse-expr* [BRACKET-TAG 1 2 3])]
   (and (= (get node "node") "vec") (= (count (get node "items")) 3))))
@@ -2901,6 +2903,8 @@
   (and (= (get node "node") "await") (= (get (get node "expr") "node") "call"))))
   (expect! "defonce" (let [node (parse-expr* ["defonce" "db" ["connect"]])]
   (and (= (get node "node") "defonce") (= (get node "name") "db"))))
+  (expect! "typed private defonce preserves binding privacy" (let [node (parse-expr* ["defonce" ["#%meta" ":private" "db"] "Int" 1])]
+  (and (= (get node "node") "defonce") (= (get node "name") "db") (= (get node "private") true))))
   (expect! "letfn" (let [node (parse-expr* ["letfn" [BRACKET-TAG ["even?" [BRACKET-TAG "n" "Any"] "Bool" ["odd?" ["dec" "n"]]] ["odd?" [BRACKET-TAG "n" "Any"] "Bool" ["even?" ["dec" "n"]]]] ["even?" 10]])]
   (and (= (get node "node") "letfn") (= (count (get node "fns")) 2))))
   (expect! "dynamic-var" (let [node (parse-expr* "*state*")]

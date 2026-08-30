@@ -690,15 +690,17 @@ CLJ
 (define (emit-form f)
   (cond
     [(def-form? f)
-     (format "(def ~a~a~a~a ~a)"
+     (format "(def ~a~a~a~a~a ~a)"
              (if (def-form-dynamic? f) "^:dynamic " "")
+             (if (def-form-private? f) "^:private " "")
              (clj-var-tag-prefix (def-form-type f))
              (def-form-name f)
              (if (def-form-doc f) (format " ~v" (def-form-doc f)) "")
              (emit-expr (def-form-value f)))]
 
     [(defonce-form? f)
-     (format "(defonce ~a~a~a ~a)"
+     (format "(defonce ~a~a~a~a ~a)"
+             (if (defonce-form-private? f) "^:private " "")
              (clj-var-tag-prefix (defonce-form-type f))
              (defonce-form-name f)
              (if (defonce-form-doc f) (format " ~v" (defonce-form-doc f)) "")

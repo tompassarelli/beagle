@@ -343,11 +343,11 @@
 (defn make-ns-decl [^String name]
   {"node" "ns" "name" name})
 
-(defn make-def [^String name ann value]
-  {"node" "def" "name" name "ann" ann "value" value})
+(defn make-def [^String name ann value ^Boolean private-]
+  {"node" "def" "name" name "ann" ann "value" value "private" private-})
 
-(defn make-defonce [^String name ann value]
-  {"node" "defonce" "name" name "ann" ann "value" value})
+(defn make-defonce [^String name ann value ^Boolean private-]
+  {"node" "defonce" "name" name "ann" ann "value" value "private" private-})
 
 (defn make-defn [^String name params rest-param ret body ^Boolean private-]
   {"node" "defn" "name" name "params" params "rest-param" rest-param "ret" ret "body" body "private" private-})
@@ -672,7 +672,7 @@
    restored-output (beagle-syntax-flip-scope! output scope restorations false)]
   (expect! "macro scope flip restores exact caller syntax by identity" (identical? (nth (syntax-children restored-output) 0) caller)))
   (expect! "only introduced binding identities alpha-lower" (and (= (binding-id-output-name "introduced-lexical:test:1.2:tmp" "tmp") "tmp__scope_1_2") (= (binding-id-output-name "lexical:test:1.2:tmp" "tmp") "tmp")))
-  (let [node (make-def "x" nil (make-literal "number" 42))]
+  (let [node (make-def "x" nil (make-literal "number" 42) false)]
   (expect! "make-def node type" (= (get node "node") "def"))
   (expect! "make-def name" (= (get node "name") "x"))
   (expect! "make-def value" (= (get (get node "value") "kind") "number")))

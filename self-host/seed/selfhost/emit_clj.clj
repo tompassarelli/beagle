@@ -641,9 +641,9 @@
   (= node "ref") (reference->clj e)
   (= node "clj-var-ref") (str "#'" (reference->clj e))
   (= node "def") (let [doc (get e "doc")]
-  (str "(def " (if (= (get e "dynamic") true) "^:dynamic " "") (clj-tag-prefix (get e "ann")) (get e "name") (if (string? doc) (str " " (write-clj-string doc)) "") " " (emit-expr* (get e "value")) ")"))
+  (str "(def " (if (= (get e "dynamic") true) "^:dynamic " "") (if (= (get e "private") true) "^:private " "") (clj-tag-prefix (get e "ann")) (get e "name") (if (string? doc) (str " " (write-clj-string doc)) "") " " (emit-expr* (get e "value")) ")"))
   (= node "defonce") (let [doc (get e "doc")]
-  (str "(defonce " (clj-tag-prefix (get e "ann")) (get e "name") (if (string? doc) (str " " (write-clj-string doc)) "") " " (emit-expr* (get e "value")) ")"))
+  (str "(defonce " (if (= (get e "private") true) "^:private " "") (clj-tag-prefix (get e "ann")) (get e "name") (if (string? doc) (str " " (write-clj-string doc)) "") " " (emit-expr* (get e "value")) ")"))
   (= node "defn") (let [kw (if (get e "private") "defn-" "defn")
    name (get e "name")
    name-tag (clj-tag-prefix (get e "ret"))
@@ -898,6 +898,8 @@
    bytes-output (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "#%meta"} "args" [{"node" "ref" "name" "bytes"} {"node" "ref" "name" "previous"}]})]
   (and (= path-output "^Path target") (= bytes-output "^bytes previous") (not (str/includes? (str path-output bytes-output) "#%meta")))))
   (expect! "def: dynamic metadata survives emission" (= (emit-expr! {"node" "def" "name" "*arity-check?*" "ann" {"kind" "prim" "name" "Bool"} "doc" false "dynamic" true "value" {"node" "literal" "kind" "bool" "value" true}}) "(def ^:dynamic ^Boolean *arity-check?* true)"))
+  (expect! "typed private def preserves Clojure name metadata" (= (emit-expr! {"node" "def" "name" "value" "ann" {"kind" "prim" "name" "Int"} "doc" false "dynamic" false "private" true "value" {"node" "literal" "kind" "number" "value" 1}}) "(def ^:private value 1)"))
+  (expect! "typed private defonce preserves Clojure name metadata" (= (emit-expr! {"node" "defonce" "name" "db" "ann" {"kind" "prim" "name" "Int"} "doc" false "private" true "value" {"node" "literal" "kind" "number" "value" 1}}) "(defonce ^:private db 1)"))
   (expect! "binding: qualified external target emits as real Clojure binding" (= (emit-expr! {"node" "binding" "bindings" [{"name" "external.state/*value*" "ann" {"kind" "prim" "name" "Int"} "constraint" nil "value" {"node" "literal" "kind" "number" "value" 7}}] "body" [{"node" "ref" "qualifier" "external.state" "name" "*value*" "providerId" nil}]}) "(binding [external.state/*value* 7]\n  external.state/*value*)"))
   (expect! "match temps deterministic" (do
   (reset! match-counter 0)

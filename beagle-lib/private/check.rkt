@@ -1361,8 +1361,8 @@
     (walk-ast! raw-form raw-form)
     (define form (unwrap-definition-form raw-form))
     (match form
-      [(def-form _ t _ _ _) (record! form t)]
-      [(defonce-form _ t _ _) (record! form t)]
+      [(def-form _ t _ _ _ _) (record! form t)]
+      [(defonce-form _ t _ _ _) (record! form t)]
       [(defn-form _ params rest-p ret _ _ raises _)
        (for ([p (in-list params)] #:when (param? p))
          (record! p (param-type p)))
@@ -1496,8 +1496,8 @@
     (walk-ast! raw-form raw-form)
     (define form (unwrap-definition-form raw-form))
     (match form
-      [(def-form _ t _ _ _) (when t (walk-type! t form))]
-      [(defonce-form _ t _ _) (when t (walk-type! t form))]
+      [(def-form _ t _ _ _ _) (when t (walk-type! t form))]
+      [(defonce-form _ t _ _ _) (when t (walk-type! t form))]
       [(defn-form _ params rest-p ret _ _ raises _)
        (for ([p (in-list params)] #:when (param? p))
          (when (param-type p) (walk-type! (param-type p) p)))
@@ -2398,12 +2398,14 @@
   (for ([raw-form (in-list (program-forms prog))])
     (define form (unwrap-definition-form raw-form))
     (match form
-      [(def-form name (? type? t) _ _ dyn?) (hash-set! env name t) (when dyn? (set-add! dyn-vars name))]
-      [(def-form name #f _ _ dyn?)
+      [(def-form name (? type? t) _ _ dyn? _)
+       (hash-set! env name t)
+       (when dyn? (set-add! dyn-vars name))]
+      [(def-form name #f _ _ dyn? _)
        (hash-set! env name (fresh-type-meta))
        (when dyn? (set-add! dyn-vars name))]
-      [(defonce-form name (? type? t) _ _) (hash-set! env name t)]
-      [(defonce-form name #f _ _) (hash-set! env name (fresh-type-meta))]
+      [(defonce-form name (? type? t) _ _ _) (hash-set! env name t)]
+      [(defonce-form name #f _ _ _) (hash-set! env name (fresh-type-meta))]
       [(defn-form name params rest-p ret _ _ _ _)
        (define rtype (and rest-p (param-or-destr-type rest-p)))
        (hash-set! env name
@@ -4669,7 +4671,7 @@
 
 (define (check-form form env)
   (match form
-    [(def-form name expected-type value _ _)
+    [(def-form name expected-type value _ _ _)
      ;; The declared type lives in expected-type; the pre-pass mirrors it into
      ;; env. Either lookup is fine — both point at the same type.
      (define effective-type (or expected-type (hash-ref env name #f)))
@@ -4684,7 +4686,7 @@
                      (hash-set (type-mismatch-details effective-type inferred)
                                'name (symbol->string name))
                      #:src (src-for value))))]
-    [(defonce-form name expected-type value _)
+    [(defonce-form name expected-type value _ _)
      (define effective-type (or expected-type (hash-ref env name #f)))
      (define inferred (infer-expr-with-expected value env effective-type))
      (when effective-type

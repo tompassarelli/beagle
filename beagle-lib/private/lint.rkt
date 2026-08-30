@@ -58,8 +58,8 @@
       (define name
         (match (jst-export-form form0)
           [(defn-form n _ _ _ _ _ _ _) n]
-          [(def-form n _ _ _ _) n]
-          [(defonce-form n _ _ _) n]
+          [(def-form n _ _ _ _ _) n]
+          [(defonce-form n _ _ _ _) n]
           [(defn-multi n _ _ _) n]
           [_ #f]))
       (when (and (symbol? name) (camel-case-name? name))
@@ -290,9 +290,9 @@
        (check-shadow (cdr p) scope ctx))]
     [(set-form items)
      (for ([i (in-list items)]) (check-shadow i scope ctx))]
-    [(def-form _ _ value _ _)
+    [(def-form _ _ value _ _ _)
      (check-shadow value scope ctx)]
-    [(defonce-form _ _ value _)
+    [(defonce-form _ _ value _ _)
      (check-shadow value scope ctx)]
     [(dotimes-form name count-expr body)
      (check-shadow count-expr scope ctx)
@@ -536,8 +536,8 @@
     [(? qualified-ref?)
      (hash-set! used form #t)]
     [(? symbol?) (hash-set! used form #t)]
-    [(def-form _ _ value _ _) (collect-symbols value used)]
-    [(defonce-form _ _ value _) (collect-symbols value used)]
+    [(def-form _ _ value _ _ _) (collect-symbols value used)]
+    [(defonce-form _ _ value _ _) (collect-symbols value used)]
     [(defn-form _ params rest-p _ body _ _ _)
      (collect-param-constraints params used)
      (when (and rest-p (param-constraint rest-p))

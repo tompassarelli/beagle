@@ -428,8 +428,8 @@
 (test-case "every namespace publication form is an ownership barrier"
   (define publications
     (list
-     (def-form 'value #f 'nil #f #f)
-     (defonce-form 'once #f 'nil #f)
+     (def-form 'value #f 'nil #f #f #f)
+     (defonce-form 'once #f 'nil #f #f)
      (defn-form 'f '() #f #f '(nil) #f #f #f)
      (defn-multi 'multi '() #f #f)
      (record-form 'Record '())

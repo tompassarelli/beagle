@@ -230,6 +230,12 @@
   (define out (compile '(def (#%meta :dynamic *arity-check?*) Bool true)))
   (check-true (matches? #rx"\\(def \\^:dynamic \\^Boolean \\*arity-check\\?\\* true\\)" out)))
 
+(test-case "typed private def preserves Clojure name metadata"
+  (define out
+    (compile-source
+     "#lang beagle/clj\n(ns private-def)\n(def ^:private value Int 1)\n"))
+  (check-true (string-contains? out "(def ^:private value 1)")))
+
 (test-case "boolean literals render Clojure-style"
   (define a (compile '(def y true)))
   (define b (compile '(def y false)))
@@ -788,6 +794,12 @@
 (test-case "defonce emits"
   (define out (compile '(defonce db (atom nil))))
   (check-true (matches? #rx"\\(defonce db" out)))
+
+(test-case "typed private defonce preserves Clojure name metadata"
+  (define out
+    (compile-source
+     "#lang beagle/clj\n(ns private-once)\n(defonce ^:private db Int 1)\n"))
+  (check-true (string-contains? out "(defonce ^:private db 1)")))
 
 ;; --- letfn ---
 

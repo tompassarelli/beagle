@@ -686,14 +686,18 @@
 (defn make-def
   [name String
    ann Any
-   value Any] Any
-  {"node" "def" "name" name "ann" ann "value" value})
+   value Any
+   private- Bool] Any
+  {"node" "def" "name" name "ann" ann "value" value
+   "private" private-})
 
 (defn make-defonce
   [name String
    ann Any
-   value Any] Any
-  {"node" "defonce" "name" name "ann" ann "value" value})
+   value Any
+   private- Bool] Any
+  {"node" "defonce" "name" name "ann" ann "value" value
+   "private" private-})
 
 (defn make-defn
   [name String
@@ -1252,7 +1256,7 @@
          (= (binding-id-output-name "lexical:test:1.2:tmp" "tmp")
             "tmp")))
 
-  (let [node (make-def "x" nil (make-literal "number" 42))]
+  (let [node (make-def "x" nil (make-literal "number" 42) false)]
     (expect! "make-def node type" (= (get node "node") "def"))
     (expect! "make-def name" (= (get node "name") "x"))
     (expect! "make-def value" (= (get (get node "value") "kind") "number")))

@@ -3847,22 +3847,38 @@
       [_ (parse-list-form* d subs)])))
 
 ;; `defonce` — once-only top-level binding; an optional type occupies its own
-;; positional slot: `(defonce name Type value)`.
+;; positional slot: `(defonce name Type value)`. Clojure's `^:private`
+;; metadata belongs to the binding name and remains explicit in typed IR.
+(define (parse-defonce-name raw-name)
+  (match raw-name
+    [(? symbol? name) (values name #f)]
+    [(list '#%meta metadata (? symbol? name))
+     (values name (meta-flag? metadata ':private))]
+    [_
+     (raise-parse-error
+      'bad-form
+      "defonce name must be a symbol or metadata-bearing symbol, got: ~v"
+      raw-name)]))
+
 (register-combiner! 'defonce
   (lambda (d subs)
     (match d
-      [(list 'defonce (? symbol? name) type-expr (? string? doc) value)
+      [(list 'defonce raw-name type-expr (? string? doc) value)
+       (define-values (name private?) (parse-defonce-name raw-name))
        (defonce-form name (parse-type type-expr)
                      (parse-expr (or (stx-ref subs 4) value))
-                     doc)]
-      [(list 'defonce (? symbol? name) (and type-expr (not (? string?))) value)
+                     doc private?)]
+      [(list 'defonce raw-name (and type-expr (not (? string?))) value)
+       (define-values (name private?) (parse-defonce-name raw-name))
        (defonce-form name (parse-type type-expr)
                      (parse-expr (or (stx-ref subs 3) value))
-                     #f)]
-      [(list 'defonce (? symbol? name) (? string? doc) value)
-       (defonce-form name #f (parse-expr (or (stx-ref subs 3) value)) doc)]
-      [(list 'defonce (? symbol? name) value)
-       (defonce-form name #f (parse-expr (or (stx-ref subs 2) value)) #f)]
+                     #f private?)]
+      [(list 'defonce raw-name (? string? doc) value)
+       (define-values (name private?) (parse-defonce-name raw-name))
+       (defonce-form name #f (parse-expr (or (stx-ref subs 3) value)) doc private?)]
+      [(list 'defonce raw-name value)
+       (define-values (name private?) (parse-defonce-name raw-name))
+       (defonce-form name #f (parse-expr (or (stx-ref subs 2) value)) #f private?)]
       [(cons 'defonce _)
        (raise-parse-error 'bad-form
                           "malformed defonce — expected (defonce NAME VALUE), (defonce NAME \"doc\" VALUE), or (defonce NAME TYPE VALUE); got: ~v" d)]
@@ -4091,38 +4107,40 @@
     [(defn-multi? form) (struct-copy defn-multi form [doc doc])]
     [else form]))
 
-;; `def` — top-level binding; positional `NAME TYPE VALUE`, optional docstring; optional
-;; `^:dynamic` (and other) metadata on the name; any other def shape guarded
-;; (no silent call-form bypass).
+;; `def` — top-level binding; positional `NAME TYPE VALUE`, optional docstring;
+;; `^:dynamic` and `^:private` metadata on the name remain explicit in typed
+;; IR. Any other def shape is guarded (no silent call-form bypass).
 (register-combiner! 'def
   (lambda (d subs)
     (match d
       [(list 'def (? symbol? name) type-expr (? string? doc) value)
        (def-form name (parse-type type-expr)
                  (parse-expr (or (stx-ref subs 4) value))
-                 doc #f)]
+                 doc #f #f)]
       [(list 'def (? symbol? name) (and type-expr (not (? string?))) value)
        (def-form name (parse-type type-expr)
                  (parse-expr (or (stx-ref subs 3) value))
-                 #f #f)]
+                 #f #f #f)]
       [(list 'def (? symbol? name) (? string? doc) value)
-       (def-form name #f (parse-expr (or (stx-ref subs 3) value)) doc #f)]
+       (def-form name #f (parse-expr (or (stx-ref subs 3) value)) doc #f #f)]
       [(list 'def (? symbol? name) value)
-       (def-form name #f (parse-expr (or (stx-ref subs 2) value)) #f #f)]
+       (def-form name #f (parse-expr (or (stx-ref subs 2) value)) #f #f #f)]
       ;; `^:dynamic` (or any) metadata on the name. The metadata lives entirely
       ;; in slot 1, so later `subs` indices match the bare-name arms exactly.
       [(list 'def (list '#%meta mv (? symbol? name)) type-expr (? string? doc) value)
        (def-form name (parse-type type-expr)
                  (parse-expr (or (stx-ref subs 4) value))
-                 doc (meta-dynamic? mv))]
+                 doc (meta-dynamic? mv) (meta-flag? mv ':private))]
       [(list 'def (list '#%meta mv (? symbol? name)) (and type-expr (not (? string?))) value)
        (def-form name (parse-type type-expr)
                  (parse-expr (or (stx-ref subs 3) value))
-                 #f (meta-dynamic? mv))]
+                 #f (meta-dynamic? mv) (meta-flag? mv ':private))]
       [(list 'def (list '#%meta mv (? symbol? name)) (? string? doc) value)
-       (def-form name #f (parse-expr (or (stx-ref subs 3) value)) doc (meta-dynamic? mv))]
+       (def-form name #f (parse-expr (or (stx-ref subs 3) value)) doc
+                 (meta-dynamic? mv) (meta-flag? mv ':private))]
       [(list 'def (list '#%meta mv (? symbol? name)) value)
-       (def-form name #f (parse-expr (or (stx-ref subs 2) value)) #f (meta-dynamic? mv))]
+       (def-form name #f (parse-expr (or (stx-ref subs 2) value)) #f
+                 (meta-dynamic? mv) (meta-flag? mv ':private))]
       ;; Any other def shape would fall through to the call-form passthrough
       ;; and silently bypass the type layer — guard it (bug class 2026-06-12).
       [(cons 'def _)

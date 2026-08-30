@@ -1251,7 +1251,9 @@
 ;; dynamic?: #t when defined `(def ^:dynamic *x* …)` — a dynamic (rebindable)
 ;; var. Drives the `^:dynamic` metadata in clj emit and gates `binding`
 ;; targets in the checker. #f for ordinary defs.
-(struct def-form    (name type value doc dynamic?)          #:transparent)
+;; private?: #t when declaration-name metadata contains `:private`; it stays
+;; out of the module interface and re-emits on the Clojure binding name.
+(struct def-form    (name type value doc dynamic? private?) #:transparent)
 (struct defn-form   (name params rest-param return-type body private? raises doc) #:transparent)
 (struct defn-multi  (name arities private? doc)               #:transparent)
 (struct arity-clause (params rest-param return-type body)    #:transparent)
@@ -1340,7 +1342,7 @@
 (struct for-let        (bindings)                            #:transparent)
 (struct dotimes-form   (name count-expr body)                #:transparent)
 (struct condp-form     (pred-fn test-expr clauses default)   #:transparent)
-(struct defonce-form   (name type value doc)                 #:transparent)
+(struct defonce-form   (name type value doc private?)        #:transparent)
 (struct await-form    (expr)                                 #:transparent)
 ;; async-callable marks a callable whose asynchronous ownership is authored.
 ;; The parser will lower ^:async metadata to this wrapper; checking the

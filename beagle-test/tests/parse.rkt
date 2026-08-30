@@ -147,9 +147,25 @@
   (check-eq? (def-form-name f) 'x)
   (check-eq? (type-prim-name (def-form-type f)) 'Int))
 
+(test-case "(def ^:private x Int 42) preserves binding privacy"
+  (define f
+    (car (parse-one '(def (#%meta :private x) Int 42))))
+  (check-true (def-form? f))
+  (check-eq? (def-form-name f) 'x)
+  (check-true (def-form-private? f))
+  (check-eq? (type-prim-name (def-form-type f)) 'Int))
+
 (test-case "(defonce x Int 42) parses with type=Int"
   (define f (car (parse-one '(defonce x Int 42))))
   (check-true (defonce-form? f))
+  (check-eq? (type-prim-name (defonce-form-type f)) 'Int))
+
+(test-case "(defonce ^:private x Int 42) preserves binding privacy"
+  (define f
+    (car (parse-one '(defonce (#%meta :private x) Int 42))))
+  (check-true (defonce-form? f))
+  (check-eq? (defonce-form-name f) 'x)
+  (check-true (defonce-form-private? f))
   (check-eq? (type-prim-name (defonce-form-type f)) 'Int))
 
 ;; -- defn: structural typed params and positional return type ---------------

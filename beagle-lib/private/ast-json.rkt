@@ -381,7 +381,8 @@
                ;; emit-relevant flags: emit-clj renders "doc" and ^:dynamic;
                ;; check consults dynamic? for the `binding` target registry
                'doc (or (def-form-doc e) #f)
-               'dynamic (and (def-form-dynamic? e) #t)))
+               'dynamic (and (def-form-dynamic? e) #t)
+               'private (and (def-form-private? e) #t)))
      (if (current-checked-projection?)
          (hash-set
           wire
@@ -795,7 +796,8 @@
                'name (symbol->string (defonce-form-name e))
                'ann (type->json (defonce-form-type e))
                'value (expr->json (defonce-form-value e))
-               'doc (or (defonce-form-doc e) #f)))
+               'doc (or (defonce-form-doc e) #f)
+               'private (and (defonce-form-private? e) #t)))
      (if (current-checked-projection?)
          (hash-set
           wire

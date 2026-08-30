@@ -524,28 +524,30 @@
         #:unless (and (eq? target 'js) (not (js-published? raw-form))))
     (define form (unwrap-public-form raw-form))
     (match form
-      [(def-form name type _ _ _)
-       (add!
-        (interface-binding
-         name
-         'def
-         (published-definition-type effective name (or type ANY))
-         #f
-         '()
-         #f
-         #f
-         (open-interface-effects prog)))]
-      [(defonce-form name type _ _)
-       (add!
-        (interface-binding
-         name
-         'defonce
-         (published-definition-type effective name (or type ANY))
-         #f
-         '()
-         #f
-         #f
-         (open-interface-effects prog)))]
+      [(def-form name type _ _ _ private?)
+       (unless private?
+         (add!
+          (interface-binding
+           name
+           'def
+           (published-definition-type effective name (or type ANY))
+           #f
+           '()
+           #f
+           #f
+           (open-interface-effects prog))))]
+      [(defonce-form name type _ _ private?)
+       (unless private?
+         (add!
+          (interface-binding
+           name
+           'defonce
+           (published-definition-type effective name (or type ANY))
+           #f
+           '()
+           #f
+           #f
+           (open-interface-effects prog))))]
       [(defn-form name params rest-param return-type _ private? raises _)
        (unless private?
          (define authored
