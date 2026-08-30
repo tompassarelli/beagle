@@ -21,7 +21,7 @@
             "writer_authority.clj")))
 
 (def ^:private ^"[B" triple-log-magic
-  (.getBytes "__Store transaction log_MAGIC__" java.nio.charset.StandardCharsets/UTF_8))
+  (.getBytes "STORELOG" java.nio.charset.StandardCharsets/UTF_8))
 (def ^:private triple-log-version 1)
 (def ^:private triple-log-flags 0)
 ;; Header flag bit 0: every record payload in this generation is

@@ -24,7 +24,7 @@
 (def ^:private add-tool-name "add-def")
 (def ^:private replace-tool-name "replace-def")
 (def ^:private store-log-magic
-  (.getBytes "__Store transaction log_MAGIC__" StandardCharsets/UTF_8))
+  (.getBytes "STORELOG" StandardCharsets/UTF_8))
 
 (defn- fail! [type message data]
   (throw (ex-info message (assoc data :type type))))
@@ -64,13 +64,15 @@
     (.getCanonicalPath command)))
 
 (defn- space-id! [code-log]
-  (let [bytes (Files/readAllBytes (.toPath (io/file code-log)))]
-    (when (< (alength bytes) 16)
+  (let [bytes (Files/readAllBytes (.toPath (io/file code-log)))
+        magic-bytes (alength store-log-magic)]
+    (when (< (alength bytes) (+ magic-bytes 8))
       (fail! :invalid-code-log "Store transaction log header is truncated" {}))
-    (when-not (Arrays/equals store-log-magic (Arrays/copyOfRange bytes 0 8))
+    (when-not (Arrays/equals store-log-magic
+                            (Arrays/copyOfRange bytes 0 magic-bytes))
       (fail! :invalid-code-log "code log is not native Store transaction log" {}))
     (let [buffer (doto (ByteBuffer/wrap bytes) (.order ByteOrder/LITTLE_ENDIAN))
-          _ (.position buffer 8)
+          _ (.position buffer magic-bytes)
           version (bit-and 65535 (int (.getShort buffer)))
           flags (bit-and 65535 (int (.getShort buffer)))
           length (Integer/toUnsignedLong (.getInt buffer))]

@@ -1,7 +1,8 @@
 ;; Authoritative database gate: occurrence identity, OCC, durable STORELOG,
 ;; recursive terms, views, supersession, withdrawal, and lease fencing.
 (require '[store.store :as store]
-         '[store.types :as t])
+         '[store.types :as t]
+         '[store.graph-control-mcp])
 
 (load-file "database.clj")
 
@@ -24,7 +25,24 @@
     (make-array java.nio.file.attribute.FileAttribute 0))))
 (def log-file (java.io.File. scratch "history.storelog"))
 (database/create-triple-log! (.getPath log-file) "database-space")
+(def store-log-magic
+  (.getBytes "STORELOG" java.nio.charset.StandardCharsets/UTF_8))
+(def fresh-log-bytes
+  (java.nio.file.Files/readAllBytes (.toPath log-file)))
+(check! "fresh database writes the exact eight-byte STORELOG magic"
+        (and (= 8 (alength store-log-magic))
+             (java.util.Arrays/equals
+              store-log-magic
+              (java.util.Arrays/copyOfRange fresh-log-bytes 0 8))))
 (def db (database/open-database! (.getPath log-file) "database-space"))
+(def reopened-empty
+  (database/open-database! (.getPath log-file) "database-space"))
+(check! "fresh STORELOG opens and reopens under the same SpaceId"
+        (= "database-space" (:space-id db) (:space-id reopened-empty)))
+(def graph-control-space-id!
+  (ns-resolve 'store.graph-control-mcp 'space-id!))
+(check! "graph control parses the database STORELOG at the shared magic offset"
+        (= "database-space" (graph-control-space-id! (.getPath log-file))))
 
 (def email (t/triple "Alice" :email "alice@example.com"))
 (def nested
