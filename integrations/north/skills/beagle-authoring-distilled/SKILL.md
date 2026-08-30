@@ -94,6 +94,15 @@ preserving representable unions, optionals, nullability, enums, records, and
 generics. Regenerate when the pinned input changes; never maintain a host shape
 and its Beagle mirror by hand.
 
+Use the released deterministic importers at the boundary: TypeScript via
+`bin/beagle ts-import SOURCE.ts --namespace NAME [--project-root DIR]`
+(`[--module-map SPECIFIER=NAMESPACE]...` and `--json` are available; see
+`bin/beagle ts-import --help`), and Clojure by building the checked-in converter
+(`bin/beagle-build examples/clojure-to-beagle-vslice/converter.bclj converter.clj`)
+then running `clojure -M converter.clj SOURCE.clj > OUTPUT.bclj`. Generated
+`.js`, `.d.ts`, and `.clj` files are projections only; edit `.bjs`/`.bclj`
+sources and regenerate.
+
 Use pinned Racket only for bootstrap verification or `.rkt` maintenance after
 reading its procedure completely.
 
