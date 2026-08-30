@@ -689,7 +689,7 @@ test('Bun STORERPC client matches the live server', async () => {
     const port = await freePort();
     const space = `bun-client-${process.pid}`;
     server = await startServer(port, resolve(tmp, 'history.storelog'), space);
-    const store = storeClient({ host: '127.0.0.1', port, space, requestTimeoutMs: 30000 });
+    const store = storeClient({ host: '127.0.0.1', port, space });
     await exerciseClient(store);
   } catch (error) {
     throw new Error(

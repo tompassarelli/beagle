@@ -116,6 +116,7 @@ package_version="$(bun -e '
     "LICENSE-APACHE",
     "store-rpc.mjs",
     "store-rpc-core.mjs",
+    "transport-deadline.js",
     "store-rpc-core.d.ts",
     "store-rpc.d.ts",
     "backup.mjs",
@@ -170,6 +171,7 @@ package_files=(
   LICENSE-APACHE
   store-rpc.mjs
   store-rpc-core.mjs
+  transport-deadline.js
   store-rpc-core.d.ts
   store-rpc.d.ts
   backup.mjs
@@ -208,7 +210,7 @@ trap 'exit 143' TERM
 [[ -f "$temporary_archive" && ! -L "$temporary_archive" ]] ||
   die "Bun did not produce the package archive"
 
-expected_entries=$'package/package.json\npackage/LICENSE\npackage/LICENSE-APACHE\npackage/LICENSE-MIT\npackage/README.md\npackage/backup.mjs\npackage/schema.d.ts\npackage/schema.mjs\npackage/store-rpc-core.d.ts\npackage/store-rpc-core.mjs\npackage/store-rpc.d.ts\npackage/store-rpc.mjs'
+expected_entries=$'package/package.json\npackage/LICENSE\npackage/LICENSE-APACHE\npackage/LICENSE-MIT\npackage/README.md\npackage/backup.mjs\npackage/schema.d.ts\npackage/schema.mjs\npackage/store-rpc-core.d.ts\npackage/store-rpc-core.mjs\npackage/store-rpc.d.ts\npackage/store-rpc.mjs\npackage/transport-deadline.js'
 archive_entries="$(tar -tzf "$temporary_archive")"
 [[ "$archive_entries" == "$expected_entries" ]] ||
   die "package archive member set or order is not canonical"

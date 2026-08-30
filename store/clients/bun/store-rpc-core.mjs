@@ -1,3 +1,8 @@
+import {
+  default_transport_deadline_ms,
+  transport_deadline_ms,
+} from './transport-deadline.js';
+
 const MAGIC = Uint8Array.of(0x53, 0x54, 0x4f, 0x52, 0x45, 0x52, 0x50, 0x43);
 const HEADER_BYTES = 26;
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -84,6 +89,16 @@ export class StoreRpcError extends Error {
 
 function fail(message, code) {
   throw new StoreProtocolError(message, code);
+}
+
+function configuredTransportDeadline(requestTimeoutMs) {
+  const deadline = requestTimeoutMs === undefined
+    ? default_transport_deadline_ms
+    : requestTimeoutMs;
+  if (!Number.isSafeInteger(deadline) || deadline < 1) {
+    fail('requestTimeoutMs must be a positive safe integer', 'client/invalid-timeout');
+  }
+  return deadline;
 }
 
 function own(value, key) {
@@ -1195,16 +1210,14 @@ async function exchangeWithTransport({
 // cannot select another operation, and leaves the thirteen-operation data
 // surface closed. A host may use the returned watermark as a backup cutoff.
 export async function storeTransportCheckpoint({
-  transport, space, requestTimeoutMs = 15000,
+  transport, space, requestTimeoutMs,
 } = {}) {
   if (typeof transport !== 'function') {
     fail('transport must be a function', 'client/invalid-transport');
   }
   if (typeof space !== 'string' || !space) fail('space must be a nonempty string', 'client/invalid-space');
   strictUtf8(space, MAX_SPACE_BYTES, 'SpaceId');
-  if (!Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs < 1) {
-    fail('requestTimeoutMs must be a positive safe integer', 'client/invalid-timeout');
-  }
+  const transportDeadlineMs = configuredTransportDeadline(requestTimeoutMs);
   const operation = 'rpc/checkpoint';
   const requestId = 1n;
   const encoded = encodeRequest(
@@ -1220,7 +1233,7 @@ export async function storeTransportCheckpoint({
     packet: encoded.packet,
     expected: { requestId, space, operation },
     entry: 'transact',
-    timeoutMs: requestTimeoutMs,
+    timeoutMs: transportDeadlineMs,
   });
   return checkpointResult(response);
 }
@@ -1259,16 +1272,14 @@ function prepareBatch(actions, options, allowPreflight) {
 
 export function storeClient({
   transport, space,
-  requestTimeoutMs = 15000,
+  requestTimeoutMs,
 } = {}) {
   if (typeof transport !== 'function') {
     fail('transport must be a function', 'client/invalid-transport');
   }
   if (typeof space !== 'string' || !space) fail('space must be a nonempty string', 'client/invalid-space');
   strictUtf8(space, MAX_SPACE_BYTES, 'SpaceId');
-  if (!Number.isSafeInteger(requestTimeoutMs) || requestTimeoutMs < 1) {
-    fail('requestTimeoutMs must be a positive safe integer', 'client/invalid-timeout');
-  }
+  const transportDeadlineMs = configuredTransportDeadline(requestTimeoutMs);
   let nextRequestId = 1n;
 
   async function call(
@@ -1284,13 +1295,18 @@ export function storeClient({
     if (preflight !== null) {
       requireMatchingPreflight(preflight, batchPreflight(encoded, actionCount));
     }
-    const queryTimeout = own(options, 'timeoutMs') ? Number(options.timeoutMs) + 1000 : 0;
+    const queryDeadline = own(options, 'timeoutMs');
+    const queryExecutionMs = queryDeadline ? Number(options.timeoutMs) : 0;
     const response = await exchangeWithTransport({
       transport,
       packet: encoded.packet,
       expected: { requestId, space, operation },
       entry: operationEntry(operation, options),
-      timeoutMs: Math.max(requestTimeoutMs, queryTimeout),
+      timeoutMs: transport_deadline_ms(
+        transportDeadlineMs,
+        queryExecutionMs,
+        queryDeadline,
+      ),
       signal: options.signal,
     });
     return publicResponse(response);

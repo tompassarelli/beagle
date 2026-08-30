@@ -29,6 +29,7 @@ package_files=(
   LICENSE-APACHE
   store-rpc.mjs
   store-rpc-core.mjs
+  transport-deadline.js
   store-rpc-core.d.ts
   store-rpc.d.ts
   backup.mjs
@@ -47,6 +48,7 @@ git -C "$source_seed" add \
   store/clients/bun/LICENSE-APACHE \
   store/clients/bun/store-rpc.mjs \
   store/clients/bun/store-rpc-core.mjs \
+  store/clients/bun/transport-deadline.js \
   store/clients/bun/store-rpc-core.d.ts \
   store/clients/bun/store-rpc.d.ts \
   store/clients/bun/backup.mjs \
@@ -109,7 +111,7 @@ expected_receipt_keys=$'store-bun-release-receipt/v2\nsource-commit\nsource-date
   "$expected_receipt_keys" ]] ||
   fail "receipt schema is not closed and ordered"
 
-expected_entries=$'package/package.json\npackage/LICENSE\npackage/LICENSE-APACHE\npackage/LICENSE-MIT\npackage/README.md\npackage/backup.mjs\npackage/schema.d.ts\npackage/schema.mjs\npackage/store-rpc-core.d.ts\npackage/store-rpc-core.mjs\npackage/store-rpc.d.ts\npackage/store-rpc.mjs'
+expected_entries=$'package/package.json\npackage/LICENSE\npackage/LICENSE-APACHE\npackage/LICENSE-MIT\npackage/README.md\npackage/backup.mjs\npackage/schema.d.ts\npackage/schema.mjs\npackage/store-rpc-core.d.ts\npackage/store-rpc-core.mjs\npackage/store-rpc.d.ts\npackage/store-rpc.mjs\npackage/transport-deadline.js'
 [[ "$(tar -tzf "${files_a[0]}")" == "$expected_entries" ]] ||
   fail "archive member set or order is not canonical"
 
@@ -258,7 +260,13 @@ assert.equal(typeof schemaClient, 'function');
 assert.equal(typeof storeTransportClient, 'function');
 assert.deepEqual(keywordTerm('draft'), ['keyword', 'draft']);
 
-for (const privateSubpath of ['backup', 'store-rpc.mjs', 'store-rpc-core.mjs', 'schema.mjs']) {
+for (const privateSubpath of [
+  'backup',
+  'store-rpc.mjs',
+  'store-rpc-core.mjs',
+  'schema.mjs',
+  'transport-deadline.js',
+]) {
   try {
     await import(`@tompassarelli/beagle-store-rpc/${privateSubpath}`);
     assert.fail(`private package subpath unexpectedly imported: ${privateSubpath}`);

@@ -90,6 +90,11 @@ await store.batch(actions, {
 });
 ```
 
+`requestTimeoutMs` is the bounded outer transport/response deadline and defaults
+to 60,000 ms. It is separate from `query(..., { timeoutMs })`, which is encoded
+as the server's query-execution deadline; an explicit query deadline receives
+one additional second for the response to reach the client.
+
 Every response includes the exact `servedVersion`, optional page metadata, the
 decoded operation result, and the original typed payload:
 

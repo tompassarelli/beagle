@@ -1,0 +1,23 @@
+#lang beagle/js
+
+(ns store.transport-deadline)
+
+;; This outer transport budget is independent of rpc/query's encoded execution
+;; deadline. It is bounded at the server's maximum query budget; explicit query
+;; budgets receive separate response-delivery grace below.
+(js/export
+  (def default-transport-deadline-ms Int 60000))
+
+(def query-response-grace-ms Int 1000)
+
+(js/export
+  (defn transport-deadline-ms
+    [configured-ms Int
+     query-execution-ms Int
+     query-deadline? Bool] Int
+    (let [query-response-ms Int (if query-deadline?
+            (+ query-execution-ms query-response-grace-ms)
+            0)]
+      (if (> query-response-ms configured-ms)
+        query-response-ms
+        configured-ms))))

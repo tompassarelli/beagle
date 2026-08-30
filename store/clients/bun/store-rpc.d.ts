@@ -247,6 +247,7 @@ export interface StoreClientOptions {
   host?: string;
   port?: number;
   space: string;
+  /** Outer transport/response deadline in milliseconds; defaults to 60,000. */
   requestTimeoutMs?: number;
   transport?: StoreTransport;
 }
@@ -270,6 +271,7 @@ export type StoreTransport = (
 export interface StoreTransportClientOptions {
   transport: StoreTransport;
   space: string;
+  /** Outer transport/response deadline in milliseconds; defaults to 60,000. */
   requestTimeoutMs?: number;
 }
 

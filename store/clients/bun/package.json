@@ -24,6 +24,7 @@
     "LICENSE-APACHE",
     "store-rpc.mjs",
     "store-rpc-core.mjs",
+    "transport-deadline.js",
     "store-rpc-core.d.ts",
     "store-rpc.d.ts",
     "backup.mjs",

@@ -16,7 +16,7 @@ import {
 } from '../clients/bun/store-rpc-core.mjs';
 
 const encoder = new TextEncoder();
-const MAGIC = Uint8Array.of(0x46, 0x52, 0x41, 0x4d, 0x52, 0x50, 0x43, 0);
+const MAGIC = Uint8Array.of(0x53, 0x54, 0x4f, 0x52, 0x45, 0x52, 0x50, 0x43);
 
 function concat(parts) {
   const bytes = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
@@ -69,7 +69,7 @@ function rpcList(values) {
 }
 
 function rpcPacket(tag, fields) {
-  return tripleTerm(keywordTerm(tag), rpcList(fields), keywordTerm('rpc/packet'));
+  return tripleTerm(keywordTerm(tag), rpcList(fields), keywordTerm('rpc/record'));
 }
 
 function successResponse(request, payload, { major = 2, minor = 0 } = {}) {
@@ -270,6 +270,35 @@ test('occurrence decoding rejects malformed coordinates, actions, and propositio
         && error.code === 'client/invalid-occurrence',
     );
   }
+});
+
+test('transport deadline stays bounded and distinct from query execution', async () => {
+  const observed = [];
+  const store = storeClient({
+    space: 'worker-space',
+    transport: request => {
+      observed.push(request);
+      return rejectedResponse(request);
+    },
+  });
+
+  await expectRemoteRejection(store.version());
+  await expectRemoteRejection(store.query(tripleQuery(), { timeoutMs: 5000 }));
+  await expectRemoteRejection(store.query(tripleQuery(), { timeoutMs: 60000 }));
+  const tightStore = storeClient({
+    space: 'worker-space',
+    requestTimeoutMs: 5,
+    transport: request => {
+      observed.push(request);
+      return rejectedResponse(request);
+    },
+  });
+  await expectRemoteRejection(tightStore.query(tripleQuery(), { timeoutMs: 0 }));
+
+  assert.deepEqual(
+    observed.map(request => request.timeoutMs),
+    [60000, 60000, 61000, 1000],
+  );
 });
 
 test('transport timeout and caller abort are bounded', async () => {
