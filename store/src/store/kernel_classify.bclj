@@ -111,29 +111,25 @@
 
 (defn lease-decode [v String] LeaseParts
   (let [cut1 Int? (str/index-of v "|")]
-    (if (nil? cut1)
-      (lease-invalid)
-      (let [cut1-position Int cut1
-            holder String (subs v 0 cut1-position)
+    (if-some [cut1-position Int cut1]
+      (let [holder String (subs v 0 cut1-position)
             tail String (subs v (+ cut1-position 1))
             cut2 Int? (str/index-of tail "|")]
-        (if (nil? cut2)
-          (lease-invalid)
-          (let [cut2-position Int cut2
-                exp-s String (subs tail 0 cut2-position)
+        (if-some [cut2-position Int cut2]
+          (let [exp-s String (subs tail 0 cut2-position)
                 epoch-s String (subs tail (+ cut2-position 1))
                 extra Int? (str/index-of epoch-s "|")]
             (if (some? extra)
               (lease-invalid)
               (let [exp Int? (parse-long exp-s)
                     epoch Int? (parse-long epoch-s)]
-                (if (nil? exp)
-                  (lease-invalid)
-                  (if (nil? epoch)
-                    (lease-invalid)
-                    (let [present-exp Int exp
-                          present-epoch Int epoch]
-                      (->LeaseParts holder present-exp present-epoch true))))))))))))
+                (if-some [present-exp Int exp]
+                  (if-some [present-epoch Int epoch]
+                    (->LeaseParts holder present-exp present-epoch true)
+                    (lease-invalid))
+                  (lease-invalid)))))
+          (lease-invalid)))
+      (lease-invalid))))
 
 (def lease-schema-lines (Vec String)
   ["@lease cardinality single" "@lease value_kind literal"])
