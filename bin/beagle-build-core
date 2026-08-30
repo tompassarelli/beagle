@@ -851,6 +851,17 @@ if [[ "${BEAGLE_NATIVE_COMPILER_BIN+x}" == x ]]; then
     native_compiler_digest="$(sha256sum "$native_compiler_bin" | awk '{print $1}')"
 fi
 compiler_source_digest="$(cache_key_material | sha256sum | awk '{print $1}')"
+semantic_read_store_cohort="$(
+    find "$semantic_read_classpath_root" -type f -print0 |
+        LC_ALL=C sort -z |
+        xargs -0 sha256sum |
+        awk -v prefix="${#semantic_read_classpath_root}" \
+            '{ print substr($0, 67 + prefix), substr($0, 1, 64) }' |
+        sha256sum |
+        awk '{print $1}'
+)"
+[[ "$semantic_read_store_cohort" =~ ^[0-9a-f]{64}$ ]] ||
+    die "semantic-read Store cohort identity is malformed"
 compiler_commit="$(beagle_resolve_compiler_commit "$BEAGLE_DIR")" || exit $?
 if [[ -n "$compiled_override" ]]; then
     [[ -d "$compiled_override" ]] ||
@@ -2138,7 +2149,8 @@ if [[ "$dev_fact_reuse" == 1 ]]; then
 fi
 export BEAGLE_CORE_COMPILER_PROJECTION_ID="sha256:$projection_cache_key"
 export BEAGLE_CORE_SEMANTIC_READ_RULES_ID="sha256:$compiler_source_digest"
-export BEAGLE_CORE_SEMANTIC_READ_STORE="$cache_root/semantic-read.storelog"
+export BEAGLE_CORE_SEMANTIC_READ_STORE=\
+"$cache_root/semantic-read-$semantic_read_store_cohort.storelog"
 if [[ "$core_checkpoint_cache_hit" == 1 ]]; then
     export BEAGLE_CORE_CHECKPOINT_WIRE=\
 "$work/core-checkpoint-hit/frozen-native-stage.wire-v1"

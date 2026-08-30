@@ -35,6 +35,14 @@ native_builder="$(find_store_native_build)" ||
   die "could not discover the consumer native builder"
 
 mkdir -p "$cache_root"
+core_cache_root="$cache_root/core-build"
+mkdir -p "$core_cache_root"
+legacy_semantic_read_store="$core_cache_root/semantic-read.storelog"
+printf '%s' '__Store transaction log_MAGIC__' >"$legacy_semantic_read_store"
+legacy_semantic_read_store_digest="$(
+  sha256sum "$legacy_semantic_read_store" | awk '{print $1}'
+)"
+export BEAGLE_CORE_BUILD_CACHE="$core_cache_root"
 
 # The Atom cell is intentionally outside QBE's current frontier. Keep that
 # expected, diagnostic refusal local to this smoke fixture; the C17 report is
@@ -65,6 +73,16 @@ grep -Fq $'\tname\tt\tbrick-edge' "$qualified_artifacts/source.facts" ||
   die "qualified terrain fixture lost brick-edge"
 grep -Fq 'brick-index' "$qualified_artifacts/report.txt" ||
   die "qualified terrain fixture did not lower its consumer entry"
+[[ "$(sha256sum "$legacy_semantic_read_store" | awk '{print $1}')" == \
+  "$legacy_semantic_read_store_digest" ]] ||
+  die "qualified terrain build mutated the incompatible unkeyed semantic cache"
+mapfile -t semantic_read_stores < <(
+  find "$core_cache_root" -maxdepth 1 -type f \
+    -name 'semantic-read-????????????????????????????????????????????????????????????????.storelog' \
+    -print | LC_ALL=C sort
+)
+(( ${#semantic_read_stores[@]} >= 1 )) ||
+  die "qualified terrain build did not select a keyed semantic cache cohort"
 printf 'consumer smoke: qualified terrain native symbol table ok\n'
 
 store_artifact="$(BEAGLE_STORE_BEAGLE="$beagle_cli" \
