@@ -308,10 +308,20 @@ for entry in "${classpath_entries[@]}"; do
 done
 classpath_sha256="$(printf '%s' "$classpath" | sha256sum | cut -d' ' -f1)"
 classpath_identity_sha256="$(sha256sum "$classpath_identity" | cut -d' ' -f1)"
-source_revision="$(git -C "$repo" rev-parse HEAD 2>/dev/null || true)"
-git -C "$repo" status --porcelain=v1 --untracked-files=all >"$scratch/source.status"
-source_status_sha256="$(sha256sum "$scratch/source.status" | cut -d' ' -f1)"
-source_dirty=0; [[ ! -s "$scratch/source.status" ]] || source_dirty=1
+source_revision="unknown"
+source_dirty="unknown"
+source_status_sha256=""
+: >"$scratch/source.status"
+source_root="$(git -C "$store_home" rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -n "$source_root" && "$(git -C "$store_home" rev-parse --is-inside-work-tree 2>/dev/null || true)" == true ]]; then
+  source_revision="$(git -C "$source_root" rev-parse HEAD)"
+  git -C "$source_root" status --porcelain=v1 --untracked-files=all >"$scratch/source.status"
+  source_status_sha256="$(sha256sum "$scratch/source.status" | cut -d' ' -f1)"
+  source_dirty=0; [[ ! -s "$scratch/source.status" ]] || source_dirty=1
+else
+  printf 'source Git checkout unknown for store home: %s\n' "$store_home" \
+    >"$scratch/source.status"
+fi
 "$java_path" -XshowSettings:properties -version >"$scratch/java.settings" 2>&1
 java_version="$(sed -n '1p' "$scratch/java.settings")"
 

@@ -45,6 +45,10 @@ bytes, cold replay without a checkpoint, warm restart with a checkpoint, GC
 pause/share/full-GC facts, exact logical count/digest, and the 32-connected / at
 most eight-active client shape. Raw GC, server, workload, JVM, and identity
 inputs are copied beside the receipt under `*.evidence/`.
+Source revision and dirty status come from the Git checkout containing the
+supplied Store home. For an unpacked artifact outside a Git checkout, those
+fields are explicitly `null` and `source.status` records that provenance is
+unknown; artifact and classpath content digests remain authoritative.
 
 The harness fails on request errors, a count/digest/validation mismatch,
 unexpected process exit, OOM kill, swap use, or a client-shape violation. It

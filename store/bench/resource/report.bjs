@@ -131,8 +131,12 @@ const receipt = {
   startedUtc: facts.started_utc,
   endedUtc: facts.ended_utc,
   input: {
-    sourceRevision: facts.source_revision || null,
-    sourceDirty: facts.source_dirty === "1",
+    sourceRevision: facts.source_revision === "unknown"
+      ? null
+      : facts.source_revision,
+    sourceDirty: facts.source_dirty === "unknown"
+      ? null
+      : facts.source_dirty === "1",
     sourceStatusSha256: facts.source_status_sha256 || null,
     artifactSha256: facts.artifact_sha256,
     artifactManifestSha256: facts.artifact_manifest_sha256,
