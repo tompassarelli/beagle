@@ -53,6 +53,25 @@
 (test-case "reader leaves qualified symbols intact for semantic parse lowering"
   (check-eq? (rd "odd.ns/->thing?!") 'odd.ns/->thing?!))
 
+(test-case "@ deref reads the complete following datum"
+  (check-equal? (rd "@state") '(deref state))
+  (check-equal? (rd "@(:epoch generation)")
+                '(deref (:epoch generation)))
+  (check-equal? (rd "{:epoch @(:epoch generation)}")
+                '(#%map :epoch (deref (:epoch generation)))))
+
+(test-case "@ deref requires a following datum"
+  (check-exn #rx"deref needs a following datum"
+             (lambda () (rd "@"))))
+
+(test-case "#' Var quote keeps a qualified binding as one reader form"
+  (check-equal? (rd "#'north.main/capture-facts")
+                '(syntax north.main/capture-facts)))
+
+(test-case "#' Var quote requires a following name"
+  (check-exn #rx"Var quote needs a following name"
+             (lambda () (rd "#'"))))
+
 (test-case "well-known map and set tags remain phase-stable symbols"
   (check-eq? (car (rd "{}")) MAP-TAG)
   (check-eq? (car (rd "#{}")) SET-TAG)

@@ -283,6 +283,7 @@
 
 (define TARGET-ONLY-FORMS
   (hash
+   clj-var-ref?            'clj
    await-form?              'js
    async-callable?          'js
    jst-selector?            'js
@@ -314,6 +315,7 @@
 ;; Map predicate → display name for error messages.
 (define TARGET-FORM-NAMES
   (hash
+   clj-var-ref?            "Clojure Var quote"
    await-form?              "await"
    async-callable?          "^:async"
    jst-selector?            "JavaScript member selector"
@@ -2718,9 +2720,14 @@
 
 (define (rest-param-call-element-type rest-param [inference? #f])
   (define authored (and (param? rest-param) (param-type rest-param)))
+  (define target (and (param? rest-param) (param-name rest-param)))
   (cond
     [(and authored (rest-binding-aggregate-type? authored))
      (car (type-app-args authored))]
+    ;; A Clojure keyword-rest map is destructured from the heterogeneous rest
+    ;; sequence. `Any` is the intentional dynamic boundary for that sequence:
+    ;; each call argument and every projected keyword binding remain Any.
+    [(and authored (map-destructure? target) (any-type? authored)) ANY]
     [authored
      (raise-diag
       'rest-annotation
@@ -2737,9 +2744,15 @@
 
 (define (rest-param-body-type rest-param callable-element-type)
   (define authored (and (param? rest-param) (param-type rest-param)))
-  (if (and authored (rest-binding-aggregate-type? authored))
-      authored
-      (rest-binding-aggregate-type callable-element-type)))
+  (define target (and (param? rest-param) (param-name rest-param)))
+  (cond
+    ;; Clojure turns an alternating keyword/value rest sequence into the map
+    ;; view consumed by a map destructuring binder. A `(Vec Any)` annotation
+    ;; still describes the call boundary, but cannot prove map key presence or
+    ;; value types, so projections correctly stay dynamic.
+    [(map-destructure? target) ANY]
+    [(and authored (rest-binding-aggregate-type? authored)) authored]
+    [else (rest-binding-aggregate-type callable-element-type)]))
 
 (struct inference-clause (params rest-param return-type body owner) #:transparent)
 
@@ -3236,6 +3249,8 @@
         [else inner])))
   (define (walk value scope)
     (cond
+      [(clj-var-ref? value)
+       (walk (clj-var-ref-reference value) scope)]
       [(call-form? value)
        (define callee (call-form-fn value))
        (cond
@@ -5910,6 +5925,8 @@
      (reference-hash-ref env e ANY)]
     [(resolved-ref? e)
      (reference-hash-ref env e ANY)]
+    [(clj-var-ref? e)
+     (reference-hash-ref env (clj-var-ref-reference e) ANY)]
     [(quoted? e) ANY]
     [(ascription? e)
      (define expected (ascription-type e))
@@ -9200,6 +9217,8 @@
   (define (analyze value state)
     (cond
       [(quoted? value) (values state (seteq))]
+      [(clj-var-ref? value)
+       (analyze (clj-var-ref-reference value) state)]
       [(symbol? value)
        (define binding (hash-ref (purity-state-scope state) value #f))
        (cond
@@ -9759,6 +9778,7 @@
   (define (go e [loc #f])
     (define l (loc-of e loc))
     (cond
+      [(clj-var-ref? e) (go (clj-var-ref-reference e) l)]
       [(qualified-ref? e) (visit! e l)]
       [(symbol? e) (visit! e l)]
       [(call-form? e)

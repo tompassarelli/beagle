@@ -531,6 +531,8 @@
 
 (define (collect-symbols form used)
   (match form
+    [(clj-var-ref reference)
+     (collect-symbols reference used)]
     [(? qualified-ref?)
      (hash-set! used form #t)]
     [(? symbol?) (hash-set! used form #t)]

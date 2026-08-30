@@ -189,6 +189,20 @@
      (if src
        (datum->syntax #f result (vector src line col pos #f))
        result)]
+    ;; Clojure Var quote: #'name -> (syntax name). Keep the established datum
+    ;; marker used by facts-roundtrip, but read the operand through Beagle's
+    ;; own table so qualification and nested reader forms remain coherent.
+    [(and (char? next) (char=? next #\'))
+     (read-char port)
+     (define form
+       (parameterize ([current-readtable beagle-readtable])
+         (if src (read-syntax src port) (read port))))
+     (when (eof-object? form)
+       (error 'beagle "unexpected EOF after `#'` (Var quote needs a following name)"))
+     (define result (list 'syntax form))
+     (if src
+       (datum->syntax #f result (vector src line col pos #f))
+       result)]
     ;; #js tagged literal (ClojureScript JS object/array). Kept as (#%js form),
     ;; inverted to `#js form` on render. Guard the token so `#j…`/`#justfoo` fall
     ;; through to the default reader — fire only on `#js` + delimiter/open/EOF.
@@ -350,6 +364,21 @@
     (parameterize ([current-readtable beagle-readtable])
       (if src (read-syntax src port) (read port))))
   (define result (list 'quote inner))
+  (if src
+    (datum->syntax #f result (vector src line col pos #f))
+    result))
+
+;; Deref-prefix reader. `@X` reads as `(deref X)` for any following datum,
+;; matching Clojure's reader instead of relying on the parser's former
+;; symbol-only `@name` workaround. In particular, `@(:epoch generation)` must
+;; stay one map value rather than two adjacent reader datums.
+(define (deref-reader ch port src line col pos)
+  (define inner
+    (parameterize ([current-readtable beagle-readtable])
+      (if src (read-syntax src port) (read port))))
+  (when (eof-object? inner)
+    (error 'beagle "unexpected EOF after `@` (deref needs a following datum)"))
+  (define result (list 'deref inner))
   (if src
     (datum->syntax #f result (vector src line col pos #f))
     result))
@@ -546,6 +575,7 @@
     ;; self-hosted reader already agrees: reader.bclj's `delimiter?` excludes `'`.
     #\' 'non-terminating-macro quote-reader
     #\` 'terminating-macro quasiquote-reader
+    #\@ 'terminating-macro deref-reader
     ;; `,` is WHITESPACE in Clojure (ignored), NOT unquote. Unquote is `~` /
     ;; `~@` (Clojure's syntax-quote unquote). Beagle had the CL-style `,`=unquote
     ;; — a SILENT surface divergence from Clojure that taxes every AI keystroke.
@@ -581,4 +611,4 @@
       (read-syntax src in))))
 
 (provide beagle-read beagle-read-syntax beagle-readtable
-         fn-shorthand->fn reading-fn-shorthand? unquote-reader)
+         fn-shorthand->fn reading-fn-shorthand? unquote-reader deref-reader)

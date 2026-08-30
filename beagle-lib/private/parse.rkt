@@ -2936,14 +2936,6 @@
     [(and (symbol? d) (dynamic-var-sym? d))
      (validate-identifier! d "dynamic var")
      (dynamic-var d)]
-    [(and (symbol? d)
-          (let ([s (symbol->string d)])
-            (and (> (string-length s) 1) (char=? (string-ref s 0) #\@))))
-     ;; `@x` reader-deref sugar → (deref x). Racket's `read` has no `@`
-     ;; readtable entry, so it leaves `@x` as a single symbol; desugar it
-     ;; here. Only fires on symbols literally starting with `@`, which never
-     ;; emit valid code otherwise, so this can't change any existing program.
-     (parse-expr (list 'deref (string->symbol (substring (symbol->string d) 1))))]
     [(symbol? d)
      (validate-identifier! d)
      (lower-reference d x)]
@@ -2981,6 +2973,16 @@
                          (or (and inner-children (stx-tail inner-children 1))
                              (set-body inner))))]
          [else (quoted inner)]))]
+    [(and (pair? d) (eq? (car d) 'syntax) (= (length d) 2))
+     (define reference-datum (cadr d))
+     (unless (symbol? reference-datum)
+       (raise-parse-error
+        'bad-form
+        "Clojure Var quote expects one binding name, got: ~v"
+        reference-datum))
+     (validate-identifier! reference-datum "Clojure Var quote")
+     (clj-var-ref
+      (lower-reference reference-datum (and subs (stx-ref subs 1))))]
     [(and (pair? d) (eq? (car d) '#%meta) (= (length d) 3))
      (with-meta (parse-expr (or (and subs (stx-ref subs 1)) (cadr d)))
                 (parse-expr (or (and subs (stx-ref subs 2)) (caddr d))))]
@@ -5782,10 +5784,6 @@
                (car after-amp)
                "rest parameter"
                (and after-amp-stxs (car after-amp-stxs))))
-            (unless (symbol? name)
-              (raise-parse-error
-               'inline-type-annotation
-               "rest parameter must bind one name, not a destructuring pattern"))
             (define source-stx (and after-amp-stxs (car after-amp-stxs)))
             (register-syntax-binder!
              (store-src!
@@ -5803,10 +5801,6 @@
                "& must be followed by exactly one binding/type pair"))
             (define name
               (parse-binding-form (car after-amp) "rest parameter"))
-            (unless (symbol? name)
-              (raise-parse-error
-               'inline-type-annotation
-               "rest parameter must bind one name, not a destructuring pattern"))
             (define source-stx (and after-amp-stxs (car after-amp-stxs)))
             (register-syntax-binder!
              (store-src!

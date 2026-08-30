@@ -9,6 +9,7 @@
          beagle/private/check
          beagle/private/types
          beagle/private/ast
+         beagle/private/emit
          beagle/private/emit-dispatch
          beagle/private/emit-clj
          beagle/private/emit-js
@@ -91,6 +92,14 @@
     "(defn f [({:keys [x] :or {x 0}} (Map Keyword Int))] Int x)")
 (ok "typed rest param"        "(defn r [(x Int) & (more (Vec Int))] Int x)")
 (ok "flat rest param"         "(defn r [x Int & more (Vec Int)] Int x)")
+(ok "typed rest map destructuring"
+    (string-append
+     "(defn run [argv Any & {:keys [timeout in env], :or {timeout 4000}} (Vec Any)] Any "
+     "timeout)"))
+(ok "typed rest map destructuring with an explicit dynamic boundary"
+    "(defn run [argv Any & {:keys [role], :or {role \"worker\"}} Any] Any role)")
+(ok "typed rest vector destructuring"
+    "(defn report [port Any run Any reporter Any referent Any capability-digest Any & [baseline] (Vec Any)] Any baseline)")
 (ok "function type param"     "(defn hof [(cb (Fn [Int] String))] String (cb 1))")
 (ok "zero-argument function type"
     "(declare-extern host/now (Fn [] Int))")
@@ -104,6 +113,13 @@
     "(defn f [(x Int)] Int (let [(y Int) x z y] (loop [(n Int) z] n)))")
 (ok "flat let and loop binding triples"
     "(defn f [(x Int)] Int (let [y Int x] (loop [n Int y] n)))")
+(ok "flat typed map destructuring local binding"
+    (string-append
+     "(defn f [] Any "
+     "(let [{:keys [controls managed work]} Any "
+     "      {:controls 1 :managed 2 :work 3} "
+     "      rows Any work] "
+     "  rows))"))
 (ok "conditional binding"     "(defn f [(x Int)] Int (if-let [(y Int) x] y 0))")
 (ok "for and nested :let"
     "(defn f [(xs (Vec Int))] (Vec Int) (for [(x Int) xs :let [(y Int) x]] y))")
@@ -169,9 +185,39 @@
 (err/rx "record fields cannot destructure"
         #rx"field name must be a symbol"
         "(defrecord Bad [([x y] (HVec Int Int))])")
-(err/rx "rest parameter cannot destructure"
-        #rx"rest parameter must bind one name"
-        "(defn f [x Int & [y z] (HVec Int Int)] Int x)")
+(test-case "rest destructuring keeps typed patterns and emits host-valid bindings"
+  (define program
+    (parse-src
+     (string-append
+      "(defn run [argv Any & {:keys [timeout in env], :or {timeout 4000}} (Vec Any)] Any timeout)\n"
+      "(defn report [port Any & [baseline] (Vec Any)] Any baseline)")))
+  (define run-rest (defn-form-rest-param (car (program-forms program))))
+  (define report-rest (defn-form-rest-param (cadr (program-forms program))))
+  (check-true (map-destructure? (param-name run-rest)))
+  (check-true (seq-destructure? (param-name report-rest)))
+  (define emitted (emit-program program))
+  (check-regexp-match
+   #rx"\\{:keys \\[timeout in env\\] :or \\{timeout 4000\\}\\} \\(vec \\$beagle\\$rest\\$host\\)"
+   emitted)
+  (check-regexp-match
+   #rx"\\[baseline\\] \\(vec \\$beagle\\$rest\\$host\\)"
+   emitted))
+
+(test-case "Clojure Var quote retains qualified identity and callable type"
+  (define program
+    (parse-src
+     (string-append
+      "(declare-extern north.main/capture-facts (Fn [Int] Int))\n"
+      "(defn invoke [] Int (#'north.main/capture-facts 1))")))
+  (check-not-exn
+   (lambda ()
+     (parameterize ([current-check-profile 2])
+       (type-check! program))))
+  (define invoke (car (program-forms program)))
+  (define call (car (defn-form-body invoke)))
+  (check-true (clj-var-ref? (call-form-fn call)))
+  (check-true (string-contains? (emit-program program)
+                                "#'north.main/capture-facts")))
 (err/rx "catch cannot destructure"
         #rx"catch name must be a symbol"
         "(defn f [] Int (try 1 (catch Exception [e more] 0)))")

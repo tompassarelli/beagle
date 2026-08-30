@@ -463,6 +463,11 @@
              'fn (expr->json (call-form-fn e))
              'args (map expr->json (call-form-args e)))]
 
+    [(clj-var-ref? e)
+     (hash-set
+      (reference-fields (clj-var-ref-reference e))
+      'node "clj-var-ref")]
+
     [(vec-form? e)
      (hasheq 'node "vec" 'items (map expr->json (vec-form-items e)))]
 

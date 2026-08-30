@@ -92,6 +92,10 @@
    "'(a b c)"
    "'[a b]"
    "'{:k v}"
+   "@state"
+   "@(:epoch generation)"
+   "{:epoch @(:epoch generation)}"
+   "#'north.main/capture-facts"
    ;; quasiquote / unquote / splice (uniform across targets)
    "`(a ~b ~@cs)"
    "`[~x ~@ys z]"

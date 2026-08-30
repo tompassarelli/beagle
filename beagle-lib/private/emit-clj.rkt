@@ -842,6 +842,8 @@ CLJ
   (cond
     [(resolved-ref? e) (symbol->string (resolved-ref-output-symbol e))]
     [(qualified-ref? e) (qualified-ref->clj e)]
+    [(clj-var-ref? e)
+     (string-append "#'" (reference->clj (clj-var-ref-reference e)))]
     [(string? e)        (emit-clj-string e)]
     [(boolean? e)       (if e "true" "false")]
     [(exact-integer? e) (number->string e)]

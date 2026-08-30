@@ -1064,6 +1064,8 @@
   (cond
     [(resolved-ref? e) (mangle-name (resolved-ref-output-symbol e))]
     [(qualified-ref? e) (mangle-qualified-name e)]
+    [(clj-var-ref? e)
+     (error 'emit-nix "Clojure Var quote is not supported on the Nix target")]
     [(number? e) (emit-nix-number e)]
     [(string? e) (format "\"~a\"" (escape-nix e))]
     [(boolean? e) (if e "true" "false")]

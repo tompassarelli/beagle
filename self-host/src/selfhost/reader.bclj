@@ -14,6 +14,7 @@
 ;;   vector [a b] -> ["#%brackets" a b]    regex   #"x" -> ["#%regex" "x"]
 ;;   map {:a 1}   -> ["#%map" ":a" 1]      quote   'x -> ["quote" x]
 ;;   set #{1}     -> ["#%set" 1]           deref   @x -> ["deref" x]
+;;   Var #'f      -> ["syntax" "f"]
 ;;   symbol -> plain string ("nil" -> "nil"); keyword -> ":name" string;
 ;;   true/false -> booleans; number -> int unless TEXT has "."/exponent.
 
@@ -340,6 +341,14 @@
             (let [result (read-delimited src (+ pos 2) "}")]
               (make-result (into [SET-TAG] (get result "value"))
                            (get result "pos")))
+          (= nxt "'")
+            (let [inner (read-datum src (+ pos 2))]
+              (if (nil? inner)
+                (do (selfhost.rt/eprint
+                      "beagle reader: unexpected EOF after `#'` (Var quote needs a following name)\n")
+                    (make-result ["syntax" nil] (+ pos 2)))
+                (make-result
+                  ["syntax" (get inner "value")] (get inner "pos"))))
           (= nxt "\"")
             (read-regex-literal src (+ pos 1))
           (= nxt "r")
@@ -524,6 +533,7 @@
             (= ch "[") "bracket"
             (= ch "{") "brace"
             (and (= ch "#") (= (char-at src (+ start 1)) "{")) "set"
+            (and (= ch "#") (= (char-at src (+ start 1)) "'")) "var-quote"
             (= ch "'") "quote"
             (= ch "`") "quasiquote"
             (and (= ch "~") (= (char-at src (+ start 1)) "@"))
@@ -546,6 +556,10 @@
             (and (= ch "#") (= (char-at src (+ start 1)) "{"))
               (ast/make-syntax-list!
                 (into [(syntax-head! SET-TAG span properties)] children)
+                span ast/EMPTY-SCOPE-SET nil properties)
+            (and (= ch "#") (= (char-at src (+ start 1)) "'"))
+              (ast/make-syntax-list!
+                (into [(syntax-head! "syntax" span properties)] children)
                 span ast/EMPTY-SCOPE-SET nil properties)
             (= ch "'")
               (ast/make-syntax-quote!
@@ -611,6 +625,14 @@
                   (into [SET-TAG] (get result "value"))
                   (get result "pos"))
                 "syntaxChildren" (get result "syntaxChildren")))
+          (= nxt "'")
+            (let [inner (read-syntax-datum! src (+ pos 2) source-id)]
+              (if (nil? inner)
+                (make-result ["syntax" nil] (+ pos 2))
+                (assoc
+                  (make-result
+                    ["syntax" (get inner "value")] (get inner "pos"))
+                  "syntaxChildren" [(get inner "syntax")])))
           (= nxt "\"") (read-regex-literal src (+ pos 1))
           (= nxt "r") (read-raw-string src (+ pos 2))
           :else
@@ -904,6 +926,7 @@
   ;; --- reader macros ---
   (expect! "quote" (= (rd1 "'foo") ["quote" "foo"]))
   (expect! "deref" (= (rd1 "@state") ["deref" "state"]))
+  (expect! "Var quote" (= (rd1 "#'service/run") ["syntax" "service/run"]))
   (expect! "quasiquote" (= (rd1 "`foo") ["quasiquote" "foo"]))
   (expect! "unquote" (= (rd1 "~x") ["unquote" "x"]))
   (expect! "unquote-splicing" (= (rd1 "~@xs") ["unquote-splicing" "xs"]))

@@ -2675,6 +2675,8 @@
   (cond
     [(resolved-ref? e) (resolved-name e)]
     [(qualified-ref? e) (emit-qualified-reference e)]
+    [(clj-var-ref? e)
+     (error 'beagle-js "Clojure Var quote is not supported on the JavaScript target")]
     [(block-string? e)  (emit-js-block-string (block-string-text e))]
     [(string? e)        (js-string-lit e)]
     [(boolean? e)       (if e "true" "false")]

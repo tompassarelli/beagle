@@ -1317,6 +1317,9 @@
       (= node "ref")
         (reference->clj e)
 
+      (= node "clj-var-ref")
+        (str "#'" (reference->clj e))
+
       (= node "def")
         (let [doc (get e "doc")]
           (str "(def " (if (= (get e "dynamic") true) "^:dynamic " "")
@@ -2001,6 +2004,36 @@
                   "rest" false}
           "ann" {"kind" "any"}})
        "[x {:keys [y] :or {y 3} :as row}]"))
+  (expect! "typed destructuring rest parameters normalize before projection"
+    (let [output (emit-expr!
+                   {"node" "defn"
+                    "name" "run"
+                    "params" [{"type" "param" "name" "argv"
+                               "ann" {"kind" "prim" "name" "Any"}
+                               "constraint" false}]
+                    "rest" {"type" "param"
+                            "name" {"type" "map-destructure"
+                                    "keys" ["timeout"]
+                                    "or" [{"key" "timeout"
+                                           "value" {"node" "literal"
+                                                    "kind" "number"
+                                                    "value" 4000}}]
+                                    "as" false}
+                            "ann" {"kind" "app" "name" "Vec"
+                                   "args" [{"kind" "prim" "name" "Any"}]}
+                            "constraint" false}
+                    "ret" {"kind" "prim" "name" "Any"}
+                    "body" [{"node" "ref" "name" "timeout"}]
+                    "private" false
+                    "doc" false})]
+      (and (str/includes? output "& $beagle$rest$host")
+        (str/includes? output
+          "{:keys [timeout] :or {timeout 4000}} (vec $beagle$rest$host)"))))
+  (expect! "Clojure Var reference emits identity-bearing reader surface"
+    (= (emit-expr!
+         {"node" "clj-var-ref" "qualifier" "north.main"
+          "name" "capture-facts"})
+       "#'north.main/capture-facts"))
   (expect! "let-bindings: seq-destructure binder (no raw JSON leak)"
     (= (emit-let-bindings!
          [{"name" {"type" "seq-destructure" "names" ["a" "b"] "rest" false}

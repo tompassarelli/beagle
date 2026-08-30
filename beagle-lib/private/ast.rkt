@@ -1139,6 +1139,13 @@
 ;; authored StructuralName; BindingId, never a rendered suffix, is identity.
 (struct resolved-ref (name binding-id) #:transparent)
 
+;; Clojure Var quote (`#'name`) is an evaluated reference to the Var object,
+;; not inert quoted data and not a plain symbol. REFERENCE retains the same
+;; qualified/resolved identity as an ordinary value reference; checking can
+;; therefore inherit the binding's callable type while Clojure emission keeps
+;; the `#'` identity-bearing surface.
+(struct clj-var-ref (reference) #:transparent)
+
 ;; Binder AST nodes retain their authored shapes.  This identity side table is
 ;; safe because those nodes are fresh transparent structs, unlike interned
 ;; symbol occurrences.  A destructuring binder maps each projected name to its
@@ -1605,6 +1612,7 @@
  DEFAULT-TARGET DEFAULT-NAMESPACE
  ;; Core AST
  (struct-out qualified-ref)
+ (struct-out clj-var-ref)
  (struct-out ns-decl)
  (struct-out def-form) (struct-out defn-form) (struct-out fn-form) (struct-out fn-multi)
  (struct-out let-form) (struct-out binding-form) (struct-out if-form) (struct-out cond-form) (struct-out cond-clause)
