@@ -24,6 +24,8 @@ META="${BENCH_META_OUTPUT:-${OUTPUT%.jsonl}.meta}"
   printf 'mem_total=%s\n' "$(sed -n 's/^MemTotal:[[:space:]]*//p' /proc/meminfo)"
   printf 'python=%s\n' "$(python3 --version 2>&1)"
   printf 'sqlite=%s\n' "$(sqlite3 --version)"
+  printf 'rdf4j_nativestore=%s\n' \
+    'org.eclipse.rdf4j/rdf4j-sail-nativerdf:4.3.11 forceSync=true'
   printf 'start_load=%s\n' "$(cat /proc/loadavg)"
   printf 'sizes=%s\n' "$SIZES"
   printf 'runs=%s\n' "$RUNS"
@@ -39,6 +41,10 @@ run_adapter() {
       ;;
     sqlite)
       raw="$(python3 "$HERE/adapters/sqlite.py" "$size" "$run")"
+      ;;
+    rdf4j-nativestore)
+      raw="$(cd "$ROOT" && clojure -M:bench-rdf4j \
+        "$HERE/adapters/rdf4j.clj" "$size" "$run")"
       ;;
     *)
       echo "unknown adapter: $adapter" >&2

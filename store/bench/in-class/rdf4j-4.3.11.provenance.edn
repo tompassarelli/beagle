@@ -1,0 +1,42 @@
+{:checked-utc "2026-08-30"
+ :source
+ {:repository "https://github.com/eclipse-rdf4j/rdf4j"
+  :tag "4.3.11"
+  :tag-kind :lightweight
+  :revision "b85c3840821ea56ffad6217dba96a193b292f018"
+  :archive-sha256 "cbf36f64aa2b0b38883a4752c980a5ad90764b342bf5f5b2dfe3da3651136ef3"}
+ :maven-central
+ [{:coordinate org.eclipse.rdf4j/rdf4j-queryparser-sparql
+   :version "4.3.11"
+   :jar-sha256 "6dfbab78a40f242c2d75f7753ad6580c4dd3de57fb7377e363d3a248823f192d"
+   :sources-sha256 "e23db573dc8034281eedafd493ee2343acdbe33a717e7c60b8f7eeca1aaa6b12"
+   :pom-sha256 "b50338928cd931f8d5c21a71d34a23f4fb30895e443f66168b1301cdfc46695d"}
+  {:coordinate org.eclipse.rdf4j/rdf4j-repository-sail
+   :version "4.3.11"
+   :jar-sha256 "da5bda4522acc8def579fadfc676f13c9db8ecb6e0bc3a865b8eab0132b3eee7"
+   :sources-sha256 "9b77a0a1d8db20b744b6f305ba68c08930103f4390a69bb22306aa09e7849421"
+   :pom-sha256 "81f02cbab7b46946cc3549fb83657dfdd6b6e254ce46074083a8f9ce026af183"}
+  {:coordinate org.eclipse.rdf4j/rdf4j-sail-nativerdf
+   :version "4.3.11"
+   :jar-sha256 "dcea41876435333ef97d1672cc250e59a5a7d9e376178a090a385a2ceaaece6d"
+   :sources-sha256 "5ad3784564459f259b33da13350db781f9c8163d594c955e01515e4ba20db399"
+   :pom-sha256 "489d725e795a947f5b2a29670c8a8d5e101794fa00675dce01f0c54e08036820"}]
+ :license
+ {:project-name "Eclipse Distribution License v1.0"
+  :spdx "BSD-3-Clause"
+  :license-sha256 "ddbc15d6df4f36620507eebb4575f91888d234490f89eca8757e89abacfd3319"
+  :about-sha256 "14c7588d923cc59d925201ad3b522bb719f4961e61a5e9068d4964c31b4933ca"
+  :notice-sha256 "deb9cc12726079079c791b5d5badab19a4856af686327bdb67dd86a69310f363"
+  :direct-jars-package-license-or-notice false}
+ :boundary
+ {:scope :benchmark-only-runtime-dependency
+  :public-api-only true
+  :source-copied-or-derived false
+  :vendored false
+  :redistributed false
+  :future-redistribution "Retain the release LICENSE and re-check about.md and notice.md."}
+ :durability
+ {:configuration "NativeStore.setForceSync(true) before every init"
+  :default false
+  :observed-source-path "NativeSailStore.flush -> value/index sync -> TripleStore.commit -> BTree.sync -> FileChannel.force(false)"
+  :evidence-boundary "File-content force on the local btrfs scratch filesystem; no crash-injection claim."}}

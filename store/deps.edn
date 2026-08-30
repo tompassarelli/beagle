@@ -3,4 +3,10 @@
 ;; Cheshire remains available to development checks that load the engine source.
 {:paths ["out"]
  :deps {org.clojure/clojure {:mvn/version "1.12.4"}
-        cheshire/cheshire {:mvn/version "5.13.0"}}}
+        cheshire/cheshire {:mvn/version "5.13.0"}}
+ :aliases
+ {:bench-rdf4j
+  {:extra-deps
+   {org.eclipse.rdf4j/rdf4j-queryparser-sparql {:mvn/version "4.3.11"}
+    org.eclipse.rdf4j/rdf4j-repository-sail {:mvn/version "4.3.11"}
+    org.eclipse.rdf4j/rdf4j-sail-nativerdf {:mvn/version "4.3.11"}}}}}

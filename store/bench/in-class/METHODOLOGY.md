@@ -16,7 +16,7 @@ The deterministic corpus has three Triples per subject:
 2. `title = title-N`
 3. `owner = @owner-(N mod 32)`
 
-Both adapters execute the same two-relation join: subjects with `kind=thread`
+Every adapter executes the same two-relation join: subjects with `kind=thread`
 joined to their `title`. A correct result contains one row per three input
 Triples. A missing result field or nonzero `errors` stops the run.
 
@@ -35,6 +35,16 @@ STORERPC v2 socket. JVM startup and TCP bind stay outside
 Python's `sqlite3` binding with WAL, `synchronous=FULL`, one writer connection,
 and independent reader connections. Its seed transaction is complete and
 checkpointed before the boot timer begins.
+
+The optional RDF4J adapter uses NativeStore 4.3.11 through its public
+SailRepository API. It maps subjects and predicates to deterministic `urn:`
+IRIs, keeps objects as literals, closes the untimed seed repository, and times
+the full reopen plus a known-fact probe. Every query result is fully consumed
+and checked for the exact subject/title relation, including duplicates and
+missing rows. Every repository instance calls `setForceSync(true)` before
+initialization; in this release that commit path reaches `FileChannel.force`.
+The exact source, Maven hashes, license, notice, and no-derivation boundary are
+recorded in `store:bench/in-class/rdf4j-4.3.11.provenance.edn`.
 
 Every measured write is an individually acknowledged durable commit. Corpus
 generation and initial SQLite seeding stay outside the timers. Scratch state
@@ -65,3 +75,10 @@ BENCH_RUNS=2 BENCH_SIZES=3000,30000 \
 
 The runner writes raw JSONL and environment metadata below `/tmp` unless the
 output variables override those paths, then prints a report for that run.
+
+Run the non-gating RDF4J comparator explicitly:
+
+```sh
+BENCH_ADAPTERS=rdf4j-nativestore BENCH_RUNS=1 BENCH_SIZES=3000 \
+  store/bench/in-class/run.sh
+```
