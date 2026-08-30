@@ -2104,6 +2104,20 @@ BEAGLE
   #rx"expected String|got Int"
   '(defn f [] Nil (do (java.io.FileOutputStream. 42) nil)))
 
+(check-ok "ServerSocket port constructor and local-port accessor carry precise types"
+  '(defn open-server [(port Int)] Int
+     (.getLocalPort (java.net.ServerSocket. port))))
+
+(check-ok "Socket accepts a host and port"
+  '(defn connect [(host String) (port Int)] java.net.Socket
+     (java.net.Socket. host port)))
+
+(check-ok "java.io.File distinguishes String/String and File/String constructors"
+  '(defn child-from-path [(parent String) (name String)] java.io.File
+     (java.io.File. parent name))
+  '(defn child-from-file [(parent java.io.File) (name String)] java.io.File
+     (java.io.File. parent name)))
+
 (check-err/rx "JVM method arg-type mismatch is rejected"
   #rx"expected Int|got String"
   '(defn f [] Nil (.setSoTimeout (java.net.Socket.) "nope")))

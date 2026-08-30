@@ -118,6 +118,7 @@
    FILE
    (mk FILE
        (list (FN (list STR) (C FILE))
+             (FN (list STR STR) (C FILE))
              (FN (list (C FILE) STR) (C FILE)))
        (list (M (C FILE) 'exists       '() BOOL)
              (M (C FILE) 'length       '() INT)
@@ -225,7 +226,8 @@
    ;; --- sockets -----------------------------------------------------------
    SOCK
    (mk SOCK
-       (list (FN '() (C SOCK)))
+       (list (FN '() (C SOCK))
+             (FN (list STR INT) (C SOCK)))
        (list (M (C SOCK) 'getOutputStream '() (C OS))
              (M (C SOCK) 'getInputStream  '() (C IS))
              (M (C SOCK) 'setSoTimeout    (list INT) NIL)
@@ -235,8 +237,10 @@
        '())
    SSOCK
    (mk SSOCK
-       (list (FN '() (C SSOCK)))
+       (list (FN '() (C SSOCK))
+             (FN (list INT) (C SSOCK)))
        (list (M (C SSOCK) 'bind            (list (C ISA)) NIL)
+             (M (C SSOCK) 'getLocalPort    '() INT)
              (M (C SSOCK) 'setReuseAddress (list BOOL) NIL)
              (M (C SSOCK) 'setSoTimeout    (list INT) NIL)
              (M (C SSOCK) 'accept          '() (C SOCK))
