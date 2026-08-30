@@ -160,11 +160,11 @@
 ;;   unknown      — 65533 (replacement character U+FFFD)
 (defn decode-char-lit [suffix String] Int
   (cond
-    (= suffix "space")     32
-    (= suffix "tab")       9
-    (= suffix "newline")   10
-    (= suffix "return")    13
-    (= suffix "formfeed")  12
+    (= suffix "space") 32
+    (= suffix "tab") 9
+    (= suffix "newline") 10
+    (= suffix "return") 13
+    (= suffix "formfeed") 12
     (= suffix "backspace") 8
     (and (= (count suffix) 5) (= (char-at suffix 0) "u"))
       (decode-u4 suffix 1)
@@ -188,7 +188,7 @@
             [CHAR-TAG (decode-char-lit (get suffix-result "value"))]
             (get suffix-result "pos")))))))
 
-(defn read-string-literal
+(defn read-string-literal!
   [src String
    pos Int] Any
   (let [len (count src)]
@@ -211,7 +211,7 @@
 ;; --- regex reader (#"...") — preserves backslash escapes ---------------------
 ;; Unlike a string, a regex keeps `\d` as `\d` (matches Racket's
 ;; read-regex-pattern). pos points at the opening ".
-(defn read-regex-literal
+(defn read-regex-literal!
   [src String
    pos Int] Any
   (let [len (count src)]
@@ -244,7 +244,7 @@
          acc ""]
     (if (<= k 0) acc (recur (- k 1) (str acc "#")))))
 
-(defn read-raw-string
+(defn read-raw-string!
   [src String
    pos Int] Any
   (let [hc (count-hashes src pos)
@@ -338,9 +338,9 @@
 ;; Clojure/SCI target (which resolves top-to-bottom) can compile it. Thread the
 ;; anonymous-function nesting bit as data so ordinary datum reads stay pure and
 ;; reentrant.
-(declare read-datum-with-context)
+(declare read-datum-with-context!)
 
-(defn read-delimited-with-context
+(defn read-delimited-with-context!
   [src String
    pos Int
    close String
@@ -356,7 +356,8 @@
         (= (char-at src p) close)
           (make-result items (+ p 1))
         :else
-          (let [result (read-datum-with-context src p reading-fn-shorthand)]
+          (let [result (read-datum-with-context!
+                         src p reading-fn-shorthand)]
             (if (nil? result)
               (make-result items p)
               (recur (skip-ws src (get result "pos"))
@@ -430,7 +431,7 @@
 
 ;; --- hash dispatch (#{ #" #r etc.) -------------------------------------------
 
-(defn read-hash-dispatch-with-context
+(defn read-hash-dispatch-with-context!
   [src String
    pos Int
    reading-fn-shorthand Bool] Any
@@ -440,7 +441,7 @@
       (let [nxt (char-at src (+ pos 1))]
         (cond
           (= nxt "{")
-            (let [result (read-delimited-with-context
+            (let [result (read-delimited-with-context!
                            src (+ pos 2) "}" reading-fn-shorthand)]
               (make-result (into [SET-TAG] (get result "value"))
                            (get result "pos")))
@@ -451,31 +452,31 @@
                   (ex-info
                     "beagle reader: nested #(...) is not supported; use an explicit fn for the inner function"
                     {})))
-              (let [result (read-delimited-with-context
+              (let [result (read-delimited-with-context!
                              src (+ pos 2) ")" true)]
                 (make-result
                   (fn-shorthand->fn (get result "value"))
                   (get result "pos"))))
           (= nxt "'")
-            (let [inner (read-datum-with-context
+            (let [inner (read-datum-with-context!
                           src (+ pos 2) reading-fn-shorthand)]
               (if (nil? inner)
-                (do (selfhost.rt/eprint
+                (do (reader-error!
                       "beagle reader: unexpected EOF after `#'` (Var quote needs a following name)\n")
                     (make-result ["syntax" nil] (+ pos 2)))
                 (make-result
                   ["syntax" (get inner "value")] (get inner "pos"))))
           (= nxt "\"")
-            (read-regex-literal src (+ pos 1))
+            (read-regex-literal! src (+ pos 1))
           (= nxt "r")
-            (read-raw-string src (+ pos 2))
+            (read-raw-string! src (+ pos 2))
           :else
             (let [sym-result (read-symbol-text src pos)]
               (make-result (get sym-result "value") (get sym-result "pos"))))))))
 
 ;; --- main datum reader -------------------------------------------------------
 
-(defn read-datum-with-context
+(defn read-datum-with-context!
   [src String
    pos Int
    reading-fn-shorthand Bool] Any
@@ -485,29 +486,29 @@
       (let [ch (char-at src p)]
         (cond
           (= ch "(")
-            (read-delimited-with-context
+            (read-delimited-with-context!
               src (+ p 1) ")" reading-fn-shorthand)
 
           (= ch "[")
-            (let [result (read-delimited-with-context
+            (let [result (read-delimited-with-context!
                            src (+ p 1) "]" reading-fn-shorthand)]
               (make-result (into [BRACKET-TAG] (get result "value"))
                            (get result "pos")))
 
           (= ch "{")
-            (let [result (read-delimited-with-context
+            (let [result (read-delimited-with-context!
                            src (+ p 1) "}" reading-fn-shorthand)]
               (make-result (into [MAP-TAG] (get result "value"))
                            (get result "pos")))
 
           (= ch "\"")
-            (read-string-literal src p)
+            (read-string-literal! src p)
 
           (= ch "#")
-            (read-hash-dispatch-with-context src p reading-fn-shorthand)
+            (read-hash-dispatch-with-context! src p reading-fn-shorthand)
 
           (= ch "'")
-            (let [inner (read-datum-with-context
+            (let [inner (read-datum-with-context!
                           src (+ p 1) reading-fn-shorthand)]
               (if (nil? inner)
                 (do
@@ -517,7 +518,7 @@
                 (make-result ["quote" (get inner "value")] (get inner "pos"))))
 
           (= ch "`")
-            (let [inner (read-datum-with-context
+            (let [inner (read-datum-with-context!
                           src (+ p 1) reading-fn-shorthand)]
               (if (nil? inner)
                 (do
@@ -528,7 +529,7 @@
                              (get inner "pos"))))
 
           (= ch "@")
-            (let [inner (read-datum-with-context
+            (let [inner (read-datum-with-context!
                           src (+ p 1) reading-fn-shorthand)]
               (if (nil? inner)
                 (do
@@ -541,7 +542,7 @@
           ;; syntax-quote unquote (reader-impl.rkt unquote-reader).
           (= ch "~")
             (if (= (char-at src (+ p 1)) "@")
-              (let [inner (read-datum-with-context
+              (let [inner (read-datum-with-context!
                             src (+ p 2) reading-fn-shorthand)]
                 (if (nil? inner)
                   (do (reader-error!
@@ -549,7 +550,7 @@
                       (make-result ["unquote-splicing" nil] (+ p 2)))
                   (make-result ["unquote-splicing" (get inner "value")]
                                (get inner "pos"))))
-              (let [inner (read-datum-with-context
+              (let [inner (read-datum-with-context!
                             src (+ p 1) reading-fn-shorthand)]
                 (if (nil? inner)
                   (do (reader-error!
@@ -559,14 +560,15 @@
 
           ;; `^META FORM` -> (#%meta META FORM) (reader-impl.rkt meta-reader).
           (= ch "^")
-            (let [meta-r (read-datum-with-context
+            (let [meta-r (read-datum-with-context!
                            src (+ p 1) reading-fn-shorthand)]
               (if (nil? meta-r)
                 (do (reader-error!
                       "beagle reader: unexpected EOF after `^` (metadata needs a value and a target form)\n")
                     nil)
-                (let [form-r (read-datum-with-context
-                               src (get meta-r "pos") reading-fn-shorthand)]
+                (let [form-r (read-datum-with-context!
+                               src (get meta-r "pos")
+                               reading-fn-shorthand)]
                   (if (nil? form-r)
                     (do (reader-error!
                           "beagle reader: unexpected EOF after `^` metadata (needs a target form to attach to)\n")
@@ -597,10 +599,10 @@
               (make-result (classify-atom text)
                            (get sym-result "pos"))))))))
 
-(defn read-datum
+(defn read-datum!
   [src String
    pos Int] Any
-  (read-datum-with-context src pos false))
+  (read-datum-with-context! src pos false))
 
 ;; --- syntax reader ----------------------------------------------------------
 ;; The datum reader above remains the compatibility surface for dependency
@@ -783,13 +785,16 @@
           (= nxt "'")
             (let [inner (read-syntax-datum! src (+ pos 2) source-id)]
               (if (nil? inner)
-                (make-result ["syntax" nil] (+ pos 2))
+                (do
+                  (reader-error!
+                    "beagle reader: unexpected EOF after `#'` (Var quote needs a following name)\n")
+                  (make-result ["syntax" nil] (+ pos 2)))
                 (assoc
                   (make-result
                     ["syntax" (get inner "value")] (get inner "pos"))
                   "syntaxChildren" [(get inner "syntax")])))
-          (= nxt "\"") (read-regex-literal src (+ pos 1))
-          (= nxt "r") (read-raw-string src (+ pos 2))
+          (= nxt "\"") (read-regex-literal! src (+ pos 1))
+          (= nxt "r") (read-raw-string! src (+ pos 2))
           :else
             (let [sym-result (read-symbol-text src pos)]
               (make-result
@@ -821,7 +826,7 @@
                       (into [MAP-TAG] (get inner "value"))
                       (get inner "pos"))
                     "syntaxChildren" (get inner "syntaxChildren")))
-              (= ch "\"") (read-string-literal src p)
+              (= ch "\"") (read-string-literal! src p)
               (= ch "#") (read-syntax-hash-dispatch! src p source-id)
               (= ch "'")
                 (let [inner (read-syntax-datum! src (+ p 1) source-id)]
@@ -948,8 +953,8 @@
 
 ;; --- top-level entry points --------------------------------------------------
 
-;; read-all: whole-file read, keeping the #lang target (used by tests).
-(defn read-all [src String] Any
+;; read-all!: whole-file read, keeping the #lang target (used by tests).
+(defn read-all! [src String] Any
   (reset-errors!)
   (let [lang-info (parse-lang-line src)
         target (get lang-info "target")
@@ -958,7 +963,7 @@
            datums (Vec Any) []]
       (if (>= p (count src))
         {"target" target "datums" datums}
-        (let [result (read-datum src p)]
+        (let [result (read-datum! src p)]
           (if (nil? result)
             {"target" target "datums" datums}
             (recur (skip-ws src (get result "pos"))
@@ -973,14 +978,14 @@
           true
           (recur (+ i 1)))))))
 
-;; read-program: public contract — vector of top-level datums (#lang handled).
+;; read-program!: public contract — vector of top-level datums (#lang handled).
 ;; The #lang line is the target declaration; parse-program only reads target
 ;; from a `(define-target ...)` datum (defaulting "clj"), so surface the #lang
 ;; target by prepending a synthetic define-target for non-clj languages that
 ;; lack an explicit one. clj is the parser default (and the reader tests pin no
 ;; injection for it); an explicit define-target already present wins.
-(defn read-program [src String] Any
-  (let [all (read-all src)
+(defn read-program! [src String] Any
+  (let [all (read-all! src)
         target (get all "target")
         datums (get all "datums")]
     (if (and (some? target) (not= target "clj")
@@ -1039,96 +1044,96 @@
     (do (swap! passes conj true) nil)
     (do (swap! failures conj label) nil)))
 
-(defn- rd [src String] Any
-  (get (read-all src) "datums"))
+(defn- rd! [src String] Any
+  (get (read-all! src) "datums"))
 
-(defn- rd1 [src String] Any
-  (nth (rd src) 0))
+(defn- rd1! [src String] Any
+  (nth (rd! src) 0))
 
 (defn run-tests! [] Int
   (reset! passes [])
   (reset! failures [])
 
   ;; --- basic atoms ---
-  (expect! "number: integer" (= (rd1 "42") 42))
-  (expect! "number: float" (= (rd1 "3.14") 3.14))
-  (expect! "number: negative" (= (rd1 "-7") -7))
-  (expect! "number: negative float" (= (rd1 "-3.14") -3.14))
-  (expect! "boolean: true" (= (rd1 "true") true))
-  (expect! "boolean: false" (= (rd1 "false") false))
-  (expect! "symbol" (= (rd1 "foo") "foo"))
-  (expect! "nil symbol" (= (rd1 "nil") "nil"))
-  (expect! "keyword" (= (rd1 ":name") ":name"))
-  (expect! "auto-resolved keyword ::kw stays one keyword" (= (rd1 "::kw") "::kw"))
-  (expect! "keyword" (= (rd1 ":foo") ":foo"))
-  (expect! "<: stays one symbol" (= (rd1 "<:") "<:"))
+  (expect! "number: integer" (= (rd1! "42") 42))
+  (expect! "number: float" (= (rd1! "3.14") 3.14))
+  (expect! "number: negative" (= (rd1! "-7") -7))
+  (expect! "number: negative float" (= (rd1! "-3.14") -3.14))
+  (expect! "boolean: true" (= (rd1! "true") true))
+  (expect! "boolean: false" (= (rd1! "false") false))
+  (expect! "symbol" (= (rd1! "foo") "foo"))
+  (expect! "nil symbol" (= (rd1! "nil") "nil"))
+  (expect! "keyword" (= (rd1! ":name") ":name"))
+  (expect! "auto-resolved keyword ::kw stays one keyword" (= (rd1! "::kw") "::kw"))
+  (expect! "keyword" (= (rd1! ":foo") ":foo"))
+  (expect! "<: stays one symbol" (= (rd1! "<:") "<:"))
   (expect! "<: inside a forall bound"
-    (= (rd1 "(forall [T <: Num] T)") ["forall" [BRACKET-TAG "T" "<:" "Num"] "T"]))
-  (expect! "< unchanged" (= (rd1 "(< a b)") ["<" "a" "b"]))
-  (expect! "<= unchanged" (= (rd1 "(<= a b)") ["<=" "a" "b"]))
-  (expect! "<- unchanged" (= (rd1 "<-") "<-"))
-  (expect! "<:foo is one symbol" (= (rd1 "<:foo") "<:foo"))
-  (expect! "char literal \\: unaffected" (= (rd1 "\\:") [CHAR-TAG 58]))
-  (expect! "string literal" (= (rd1 "\"hello\"") [STRING-TAG "hello"]))
-  (expect! "string with escapes" (= (rd1 "\"a\\nb\"") [STRING-TAG "a\nb"]))
-  (expect! "string with tab" (= (rd1 "\"a\\tb\"") [STRING-TAG "a\tb"]))
+    (= (rd1! "(forall [T <: Num] T)") ["forall" [BRACKET-TAG "T" "<:" "Num"] "T"]))
+  (expect! "< unchanged" (= (rd1! "(< a b)") ["<" "a" "b"]))
+  (expect! "<= unchanged" (= (rd1! "(<= a b)") ["<=" "a" "b"]))
+  (expect! "<- unchanged" (= (rd1! "<-") "<-"))
+  (expect! "<:foo is one symbol" (= (rd1! "<:foo") "<:foo"))
+  (expect! "char literal \\: unaffected" (= (rd1! "\\:") [CHAR-TAG 58]))
+  (expect! "string literal" (= (rd1! "\"hello\"") [STRING-TAG "hello"]))
+  (expect! "string with escapes" (= (rd1! "\"a\\nb\"") [STRING-TAG "a\nb"]))
+  (expect! "string with tab" (= (rd1! "\"a\\tb\"") [STRING-TAG "a\tb"]))
   (expect! "string with escaped quote"
-    (= (rd1 "\"say \\\"hi\\\"\"") [STRING-TAG "say \"hi\""]))
+    (= (rd1! "\"say \\\"hi\\\"\"") [STRING-TAG "say \"hi\""]))
 
   ;; --- \uXXXX escapes (today-surface upgrade) ---
   (expect! "string with \\u0001 escape"
-    (= (rd1 "\"\\u0001\"") [STRING-TAG ""]))
+    (= (rd1! "\"\\u0001\"") [STRING-TAG ""]))
   (expect! "\\uXXXX in context"
-    (= (rd1 "\"a\\u0041b\"") [STRING-TAG "aAb"]))
+    (= (rd1! "\"a\\u0041b\"") [STRING-TAG "aAb"]))
   (expect! "\\uXXXX yields real control char (len 1)"
-    (= (count (nth (rd1 "\"\\u0001\"") 1)) 1))
+    (= (count (nth (rd1! "\"\\u0001\"") 1)) 1))
 
   ;; --- float-by-text classification (today-surface upgrade) ---
-  (expect! "1.0 stays float (not int)" (not (= (rd1 "1.0") 1)))
-  (expect! "1.0 equals 1.0 float" (= (rd1 "1.0") 1.0))
-  (expect! "1 stays int" (= (rd1 "1") 1))
-  (expect! "exponent 1e5" (= (rd1 "1e5") 100000.0))
-  (expect! "exponent 1E5 upper" (= (rd1 "1E5") 100000.0))
-  (expect! "float exponent 1.5e-3" (= (rd1 "1.5e-3") 0.0015))
-  (expect! "negative exponent -2e3" (= (rd1 "-2e3") -2000.0))
+  (expect! "1.0 stays float (not int)" (not (= (rd1! "1.0") 1)))
+  (expect! "1.0 equals 1.0 float" (= (rd1! "1.0") 1.0))
+  (expect! "1 stays int" (= (rd1! "1") 1))
+  (expect! "exponent 1e5" (= (rd1! "1e5") 100000.0))
+  (expect! "exponent 1E5 upper" (= (rd1! "1E5") 100000.0))
+  (expect! "float exponent 1.5e-3" (= (rd1! "1.5e-3") 0.0015))
+  (expect! "negative exponent -2e3" (= (rd1! "-2e3") -2000.0))
   (expect! "exponent classifies as float"
-    (not (= (rd1 "1e2") 100)))
+    (not (= (rd1! "1e2") 100)))
 
   ;; --- compound forms ---
-  (expect! "simple list" (= (rd1 "(+ 1 2)") ["+" 1 2]))
-  (expect! "nested list" (= (rd1 "(+ (* 2 3) 4)") ["+" ["*" 2 3] 4]))
-  (expect! "bracket vector" (= (rd1 "[1 2 3]") [BRACKET-TAG 1 2 3]))
-  (expect! "map literal" (= (rd1 "{:a 1 :b 2}") [MAP-TAG ":a" 1 ":b" 2]))
-  (expect! "set literal" (= (rd1 "#{1 2 3}") [SET-TAG 1 2 3]))
-  (expect! "regex literal" (= (rd1 "#\"[a-z]+\"") [REGEX-TAG "[a-z]+"]))
+  (expect! "simple list" (= (rd1! "(+ 1 2)") ["+" 1 2]))
+  (expect! "nested list" (= (rd1! "(+ (* 2 3) 4)") ["+" ["*" 2 3] 4]))
+  (expect! "bracket vector" (= (rd1! "[1 2 3]") [BRACKET-TAG 1 2 3]))
+  (expect! "map literal" (= (rd1! "{:a 1 :b 2}") [MAP-TAG ":a" 1 ":b" 2]))
+  (expect! "set literal" (= (rd1! "#{1 2 3}") [SET-TAG 1 2 3]))
+  (expect! "regex literal" (= (rd1! "#\"[a-z]+\"") [REGEX-TAG "[a-z]+"]))
   (expect! "regex preserves backslash"
-    (= (rd1 "#\"\\d+\"") [REGEX-TAG "\\d+"]))
+    (= (rd1! "#\"\\d+\"") [REGEX-TAG "\\d+"]))
 
   (expect! "fn shorthand: bare percent"
-    (= (rd1 "#(inc %)")
+    (= (rd1! "#(inc %)")
        ["fn" [BRACKET-TAG "%1" "Any"] "Any" ["inc" "%1"]]))
   (expect! "fn shorthand: max positional index defines arity"
-    (= (rd1 "#(str %2)")
+    (= (rd1! "#(str %2)")
        ["fn" [BRACKET-TAG "%1" "Any" "%2" "Any"]
         "Any" ["str" "%2"]]))
   (expect! "fn shorthand: rest placeholder"
-    (= (rd1 "#(apply + %1 %&)")
+    (= (rd1! "#(apply + %1 %&)")
        ["fn" [BRACKET-TAG "%1" "Any" "&" "%&" "Any"]
         "Any" ["apply" "+" "%1" "%&"]]))
   (expect! "fn shorthand: no placeholders is a thunk"
-    (= (rd1 "#(rand)")
+    (= (rd1! "#(rand)")
        ["fn" [BRACKET-TAG] "Any" ["rand"]]))
   (expect! "fn shorthand: enclosing call retains following arguments"
-    (= (rd1 "(map #(inc %) xs ys)")
+    (= (rd1! "(map #(inc %) xs ys)")
        ["map"
         ["fn" [BRACKET-TAG "%1" "Any"] "Any" ["inc" "%1"]]
         "xs" "ys"]))
   (expect! "fn shorthand: string contents are not placeholders"
-    (= (rd1 "#(str \"%\")")
+    (= (rd1! "#(str \"%\")")
        ["fn" [BRACKET-TAG] "Any" ["str" [STRING-TAG "%"]]]))
   (expect! "fn shorthand: nested form is rejected"
     (try
-      (do (rd1 "#(map #(inc %) xs)") false)
+      (do (rd1! "#(map #(inc %) xs)") false)
       (catch Exception _ true)))
   (expect! "fn shorthand: syntax path is a rewritten tree with source span"
     (let [source "#(inc %)"
@@ -1142,60 +1147,75 @@
            (= (get span "end") (count source)))))
 
   ;; --- reader macros ---
-  (expect! "quote" (= (rd1 "'foo") ["quote" "foo"]))
-  (expect! "deref" (= (rd1 "@state") ["deref" "state"]))
-  (expect! "Var quote" (= (rd1 "#'service/run") ["syntax" "service/run"]))
-  (expect! "quasiquote" (= (rd1 "`foo") ["quasiquote" "foo"]))
-  (expect! "unquote" (= (rd1 "~x") ["unquote" "x"]))
-  (expect! "unquote-splicing" (= (rd1 "~@xs") ["unquote-splicing" "xs"]))
+  (expect! "quote" (= (rd1! "'foo") ["quote" "foo"]))
+  (expect! "deref" (= (rd1! "@state") ["deref" "state"]))
+  (expect! "Var quote" (= (rd1! "#'service/run") ["syntax" "service/run"]))
+  (expect! "Var quote EOF is a reader error in datum mode"
+    (let [output (read-all! "#'")
+          errors (reader-errors)]
+      (and
+        (= (get output "datums") [["syntax" nil]])
+        (= (count errors) 1)
+        (str/includes? (nth errors 0)
+          "Var quote needs a following name"))))
+  (expect! "Var quote EOF is a reader error in syntax mode"
+    (let [output (read-program-with-syntax! "#'" "var-quote-eof.bclj")]
+      (and
+        (= (get output "datums") [["syntax" nil]])
+        (= (count (get output "errors")) 1)
+        (str/includes? (nth (get output "errors") 0)
+          "Var quote needs a following name"))))
+  (expect! "quasiquote" (= (rd1! "`foo") ["quasiquote" "foo"]))
+  (expect! "unquote" (= (rd1! "~x") ["unquote" "x"]))
+  (expect! "unquote-splicing" (= (rd1! "~@xs") ["unquote-splicing" "xs"]))
   (expect! "unquote terminates symbols"
-    (= (rd1 "`(f ~x)") ["quasiquote" ["f" ["unquote" "x"]]]))
+    (= (rd1! "`(f ~x)") ["quasiquote" ["f" ["unquote" "x"]]]))
   (expect! "meta: keyword"
-    (= (rd1 "^:dynamic *x*") ["#%meta" ":dynamic" "*x*"]))
+    (= (rd1! "^:dynamic *x*") ["#%meta" ":dynamic" "*x*"]))
   (expect! "meta: map (true classifies to boolean per datum encoding)"
-    (= (rd1 "^{:dynamic true} *x*")
+    (= (rd1! "^{:dynamic true} *x*")
        ["#%meta" [MAP-TAG ":dynamic" true] "*x*"]))
   (expect! "comma is whitespace"
-    (= (rd1 "[1, 2,3]") [BRACKET-TAG 1 2 3]))
+    (= (rd1! "[1, 2,3]") [BRACKET-TAG 1 2 3]))
   (expect! "trailing comma before close"
-    (= (rd1 "{:a 1,}") [MAP-TAG ":a" 1]))
+    (= (rd1! "{:a 1,}") [MAP-TAG ":a" 1]))
 
   ;; --- comments ---
-  (expect! "line comment skipped" (= (rd "; ignore\n42") [42]))
-  (expect! "inline comment" (= (rd "1 ; comment\n2") [1 2]))
-  (expect! "multiple comment lines" (= (rd ";; first\n;; second\n42") [42]))
+  (expect! "line comment skipped" (= (rd! "; ignore\n42") [42]))
+  (expect! "inline comment" (= (rd! "1 ; comment\n2") [1 2]))
+  (expect! "multiple comment lines" (= (rd! ";; first\n;; second\n42") [42]))
 
   ;; --- char literals ---
-  (expect! "char: named tab" (= (rd1 "\\tab") [CHAR-TAG 9]))
-  (expect! "char: named space" (= (rd1 "\\space") [CHAR-TAG 32]))
-  (expect! "char: named newline" (= (rd1 "\\newline") [CHAR-TAG 10]))
-  (expect! "char: named return" (= (rd1 "\\return") [CHAR-TAG 13]))
-  (expect! "char: named formfeed" (= (rd1 "\\formfeed") [CHAR-TAG 12]))
-  (expect! "char: named backspace" (= (rd1 "\\backspace") [CHAR-TAG 8]))
-  (expect! "char: single printable A" (= (rd1 "\\A") [CHAR-TAG 65]))
-  (expect! "char: single printable z" (= (rd1 "\\z") [CHAR-TAG 122]))
+  (expect! "char: named tab" (= (rd1! "\\tab") [CHAR-TAG 9]))
+  (expect! "char: named space" (= (rd1! "\\space") [CHAR-TAG 32]))
+  (expect! "char: named newline" (= (rd1! "\\newline") [CHAR-TAG 10]))
+  (expect! "char: named return" (= (rd1! "\\return") [CHAR-TAG 13]))
+  (expect! "char: named formfeed" (= (rd1! "\\formfeed") [CHAR-TAG 12]))
+  (expect! "char: named backspace" (= (rd1! "\\backspace") [CHAR-TAG 8]))
+  (expect! "char: single printable A" (= (rd1! "\\A") [CHAR-TAG 65]))
+  (expect! "char: single printable z" (= (rd1! "\\z") [CHAR-TAG 122]))
   (expect! "char: opening parenthesis consumes the delimiter"
-    (= (rd1 "(int \\()") ["int" [CHAR-TAG 40]]))
+    (= (rd1! "(int \\()") ["int" [CHAR-TAG 40]]))
   (expect! "char: closing parenthesis consumes the delimiter"
-    (= (rd1 "(int \\))") ["int" [CHAR-TAG 41]]))
+    (= (rd1! "(int \\))") ["int" [CHAR-TAG 41]]))
   (expect! "char: semicolon is data rather than a comment"
-    (= (rd1 "(int \\;)") ["int" [CHAR-TAG 59]]))
-  (expect! "char: \\uNNNN printable" (= (rd1 "\\u0041") [CHAR-TAG 65]))
-  (expect! "char: \\uNNNN non-ascii" (= (rd1 "\\u00e9") [CHAR-TAG 233]))
-  (expect! "char: in list" (= (rd1 "(str \\A \\space)")
+    (= (rd1! "(int \\;)") ["int" [CHAR-TAG 59]]))
+  (expect! "char: \\uNNNN printable" (= (rd1! "\\u0041") [CHAR-TAG 65]))
+  (expect! "char: \\uNNNN non-ascii" (= (rd1! "\\u00e9") [CHAR-TAG 233]))
+  (expect! "char: in list" (= (rd1! "(str \\A \\space)")
                                ["str" [CHAR-TAG 65] [CHAR-TAG 32]]))
 
   ;; --- #lang parsing ---
   (expect! "bare #lang beagle selects Core"
-    (= (get (read-all "#lang beagle\n") "target") "core"))
+    (= (get (read-all! "#lang beagle\n") "target") "core"))
   (expect! "#lang beagle/clj"
-    (= (get (read-all "#lang beagle/clj\n") "target") "clj"))
+    (= (get (read-all! "#lang beagle/clj\n") "target") "clj"))
   (expect! "#lang beagle/js"
-    (let [result (read-all "#lang beagle/js\n(ns app)")]
+    (let [result (read-all! "#lang beagle/js\n(ns app)")]
       (and (= (get result "target") "js")
            (= (get result "datums") [["ns" "app"]]))))
   (expect! "no #lang"
-    (let [result (read-all "(ns app)")]
+    (let [result (read-all! "(ns app)")]
       (and (nil? (get result "target"))
            (= (get result "datums") [["ns" "app"]]))))
   (expect! "Core renders as bare #lang beagle"
@@ -1206,75 +1226,75 @@
     (nil? (target-lang-line "missing")))
 
   (expect! "declare-extern with fn type"
-    (let [result (rd1 "(declare-extern fetch (Fn [String] (Promise Any)))")]
+    (let [result (rd1! "(declare-extern fetch (Fn [String] (Promise Any)))")]
       (and (= (nth result 0) "declare-extern")
            (= (nth result 1) "fetch")
            (= (nth result 2) ["Fn" [BRACKET-TAG "String"] ["Promise" "Any"]]))))
-  (expect! "method call" (= (rd1 "(.toString x)") [".toString" "x"]))
-  (expect! "property access" (= (rd1 "(.-length arr)") [".-length" "arr"]))
-  (expect! "static call" (= (rd1 "(Math/abs x)") ["Math/abs" "x"]))
+  (expect! "method call" (= (rd1! "(.toString x)") [".toString" "x"]))
+  (expect! "property access" (= (rd1! "(.-length arr)") [".-length" "arr"]))
+  (expect! "static call" (= (rd1! "(Math/abs x)") ["Math/abs" "x"]))
   (expect! "qualified symbol stays intact for semantic parse lowering"
-    (= (rd1 "odd.ns/->thing?!") "odd.ns/->thing?!"))
+    (= (rd1! "odd.ns/->thing?!") "odd.ns/->thing?!"))
   (expect! "quoted qualified symbol stays literal data"
-    (= (rd1 "'odd.ns/->thing?!") ["quote" "odd.ns/->thing?!"]))
+    (= (rd1! "'odd.ns/->thing?!") ["quote" "odd.ns/->thing?!"]))
   (expect! "qualified require alias"
-    (= (rd1 "(:tx a)") [":tx" "a"]))
+    (= (rd1! "(:tx a)") [":tx" "a"]))
   (expect! "threading macro"
-    (= (rd1 "(-> x inc str)") ["->" "x" "inc" "str"]))
-  (expect! "negative number in list" (= (rd1 "(+ x -5)") ["+" "x" -5]))
-  (expect! "minus as symbol" (= (rd1 "(- 5 3)") ["-" 5 3]))
-  (expect! "dot method symbol" (= (rd1 ".charAt") ".charAt"))
+    (= (rd1! "(-> x inc str)") ["->" "x" "inc" "str"]))
+  (expect! "negative number in list" (= (rd1! "(+ x -5)") ["+" "x" -5]))
+  (expect! "minus as symbol" (= (rd1! "(- 5 3)") ["-" 5 3]))
+  (expect! "dot method symbol" (= (rd1! ".charAt") ".charAt"))
   (expect! "static JavaScript selector remains a dot-prefixed token"
-    (= (rd1 "(.-raw_name obj)") [".-raw_name" "obj"]))
-  (expect! "dynamic var" (= (rd1 "*state*") "*state*"))
-  (expect! "constructor symbol" (= (rd1 "Point.") "Point."))
-  (expect! "empty list" (= (rd1 "()") []))
-  (expect! "empty vector" (= (rd1 "[]") [BRACKET-TAG]))
-  (expect! "empty map" (= (rd1 "{}") [MAP-TAG]))
+    (= (rd1! "(.-raw_name obj)") [".-raw_name" "obj"]))
+  (expect! "dynamic var" (= (rd1! "*state*") "*state*"))
+  (expect! "constructor symbol" (= (rd1! "Point.") "Point."))
+  (expect! "empty list" (= (rd1! "()") []))
+  (expect! "empty vector" (= (rd1! "[]") [BRACKET-TAG]))
+  (expect! "empty map" (= (rd1! "{}") [MAP-TAG]))
   (expect! "multiple top-level forms"
-    (let [result (rd "(def x 1)\n(def y 2)")]
+    (let [result (rd! "(def x 1)\n(def y 2)")]
       (and (= (count result) 2)
            (= (nth (nth result 0) 1) "x")
            (= (nth (nth result 1) 1) "y"))))
   (expect! "string in list"
-    (let [result (rd1 "(str \"hello\" \" world\")")]
+    (let [result (rd1! "(str \"hello\" \" world\")")]
       (and (= (nth result 0) "str")
            (= (nth result 1) [STRING-TAG "hello"])
            (= (nth result 2) [STRING-TAG " world"]))))
   (expect! "keyword :else in map"
-    (= (rd1 "{:else true}") [MAP-TAG ":else" true]))
+    (= (rd1! "{:else true}") [MAP-TAG ":else" true]))
   (expect! "str concat call"
-    (let [result (rd1 "(str \"Hello, \" name \"!\")")]
+    (let [result (rd1! "(str \"Hello, \" name \"!\")")]
       (and (= (nth result 0) "str")
            (= (nth result 1) [STRING-TAG "Hello, "])
            (= (nth result 2) "name")
            (= (nth result 3) [STRING-TAG "!"]))))
   (expect! "full clj header"
-    (let [result (read-all "#lang beagle/clj\n(ns app.main)\n(def x 1)")]
+    (let [result (read-all! "#lang beagle/clj\n(ns app.main)\n(def x 1)")]
       (and (= (get result "target") "clj")
            (= (count (get result "datums")) 2)
            (= (nth (nth (get result "datums") 0) 0) "ns")
            (= (nth (nth (get result "datums") 1) 0) "def"))))
 
-  ;; --- read-program contract ---
-  (expect! "read-program returns datum vector"
-    (= (read-program "#lang beagle/clj\n(ns app)\n(def x 1)")
+  ;; --- read-program! contract ---
+  (expect! "read-program! returns datum vector"
+    (= (read-program! "#lang beagle/clj\n(ns app)\n(def x 1)")
        [["ns" "app"] ["def" "x" 1]]))
-  (expect! "read-program: clj target injects NO define-target (parser default)"
-    (= (read-program "#lang beagle/clj\n(ns app)") [["ns" "app"]]))
-  (expect! "read-program: Core prepends (define-target core)"
-    (= (read-program "#lang beagle\n(def x 1)")
+  (expect! "read-program!: clj target injects NO define-target (parser default)"
+    (= (read-program! "#lang beagle/clj\n(ns app)") [["ns" "app"]]))
+  (expect! "read-program!: Core prepends (define-target core)"
+    (= (read-program! "#lang beagle\n(def x 1)")
        [["define-target" "core"] ["def" "x" 1]]))
-  (expect! "read-program: nix target prepends (define-target nix)"
-    (= (read-program "#lang beagle/nix\n(ns app)")
+  (expect! "read-program!: nix target prepends (define-target nix)"
+    (= (read-program! "#lang beagle/nix\n(ns app)")
        [["define-target" "nix"] ["ns" "app"]]))
-  (expect! "read-program: no #lang -> no injection"
-    (= (read-program "(ns app)") [["ns" "app"]]))
-  (expect! "read-program: explicit define-target present -> no double injection"
-    (= (read-program "#lang beagle/js\n(define-target js)\n(ns app)")
+  (expect! "read-program!: no #lang -> no injection"
+    (= (read-program! "(ns app)") [["ns" "app"]]))
+  (expect! "read-program!: explicit define-target present -> no double injection"
+    (= (read-program! "#lang beagle/js\n(define-target js)\n(ns app)")
        [["define-target" "js"] ["ns" "app"]]))
-  (expect! "read-datum returns value+pos"
-    (let [r (read-datum "42 rest" 0)]
+  (expect! "read-datum! returns value+pos"
+    (let [r (read-datum! "42 rest" 0)]
       (and (= (get r "value") 42) (= (get r "pos") 2))))
   (expect! "syntax reader keeps exact caller bytes and child span"
     (let [source "#lang beagle/clj\n(identity (+ 1 2))"

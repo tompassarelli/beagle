@@ -155,6 +155,78 @@
    (lambda (namespace _importer)
      (and (eq? namespace 'macro-definition-site) MACRO-PROVIDER))))
 
+(define (target-extension target)
+  (case target
+    [(js) "bjs"]
+    [(clj) "bclj"]
+    [(nix) "bnix"]))
+
+(define (constrained-box-provider namespace target)
+  (define source-path
+    (format "fixtures/record-validator-rename/~a.~a"
+            namespace (target-extension target)))
+  (define stxs
+    (syntax-forms
+     (list
+      (list 'ns namespace)
+      (list 'define-target target)
+      (list 'defn 'valid-box?
+            (br (list 'value 'Int)) 'Bool '(> value 0))
+      (list 'defrecord 'Box
+            (br (list 'value 'Int 'valid-box?))))))
+  (define prog (parse-program stxs #:source-path source-path))
+  (type-check! prog)
+  (module-source
+   namespace
+   source-path
+   stxs
+   (program->module-interface prog #:source-id source-path)))
+
+(define (renamed-record-consumer target provider-a provider-b)
+  (define source-path
+    (format "fixtures/record-validator-rename/consumer.~a"
+            (target-extension target)))
+  (define prog
+    (parse-program
+     (syntax-forms
+      (list
+       (list 'define-target target)
+       (list
+        'ns
+        'record-validator-rename.consumer
+        (list
+         ':require
+         (br 'record-validator-rename.provider-a
+             ':refer (br 'Box)
+             ':rename (mt 'Box 'Position))
+         (br 'record-validator-rename.provider-b
+             ':refer (br 'Box)
+             ':rename (mt 'Box 'Parcel))))
+       (list
+        'defn 'update-position
+        (br (list 'position 'Position)) 'Position
+        (list 'with 'position (br ':value 2)))))
+     #:source-path source-path
+     #:module-resolver
+     (lambda (namespace _importer)
+       (cond
+         [(eq? namespace 'record-validator-rename.provider-a) provider-a]
+         [(eq? namespace 'record-validator-rename.provider-b) provider-b]
+         [else #f]))))
+  (type-check! prog)
+  prog)
+
+(define (nix-compiler-binding name)
+  (string-append
+   "bgl____"
+   (apply
+    string-append
+    (for/list ([byte
+                (in-bytes
+                 (string->bytes/utf-8 (symbol->string name)))])
+      (define hex (number->string byte 16))
+      (if (= (string-length hex) 1) (string-append "0" hex) hex)))))
+
 (define RENAMED-LIBSPEC
   (native-libspec (list SOURCE-NAME) SOURCE-NAME LOCAL-NAME))
 
@@ -203,6 +275,31 @@
      (consumer-program
       (native-libspec '(source-send occupied) 'source-send 'occupied)
       '(def answer String (occupied))))))
+
+(test-case "separate require libspecs cannot claim the same final local"
+  (check-exn
+   (lambda (failure)
+     (and (beagle-parse-error? failure)
+          (regexp-match?
+           #rx":rename.*final local shared.*more than one libspec"
+           (exn-message failure))))
+   (lambda ()
+     (parse-program
+      (syntax-forms
+       (list
+        '(define-target js)
+        (list
+         'ns
+         'foreign-module-rename.cross-require
+         (list
+          ':require
+          (native-libspec '(source-send) 'source-send 'shared)
+          (native-libspec '(occupied) 'occupied 'shared)))
+        '(def answer String "unreachable")))
+      #:source-path "fixtures/foreign-module-rename/cross-require.bjs"
+      #:foreign-module-resolver
+      (lambda (identity _importer)
+        (and (equal? identity MODULE-IDENTITY) FOREIGN-SOURCE))))))
 
 (test-case "renamed parametric foreign type keeps graph identity and arguments"
   (define prog
@@ -305,6 +402,91 @@
   (check-true
    (string-contains? js "make_position(\"constructor\")"))
   (check-true (string-contains? js "position_value(built)")))
+
+(test-case "referred record validators are selected by final local per provider"
+  (define provider-validator (record-validator-symbol 'Box))
+  (define position-validator (record-validator-symbol 'Position))
+  (define parcel-validator (record-validator-symbol 'Parcel))
+  (for ([target (in-list '(js clj nix))])
+    (define provider-a
+      (constrained-box-provider
+       'record-validator-rename.provider-a target))
+    (define provider-b
+      (constrained-box-provider
+       'record-validator-rename.provider-b target))
+    (define prog (renamed-record-consumer target provider-a provider-b))
+    (define import-a (car (program-imported-module-interfaces prog)))
+    (define import-b (cadr (program-imported-module-interfaces prog)))
+    (check-eq?
+     (program-record-validator-ref prog 'Position)
+     position-validator
+     (format "~a final record local did not own its validator" target))
+    (check-equal?
+     (program-record-validator-import-bindings prog import-a)
+     (list (import-binding provider-validator position-validator))
+     (format "~a provider A validator import was not exact" target))
+    (check-equal?
+     (program-record-validator-import-bindings prog import-b)
+     '()
+     (format "~a unused provider B validator was imported" target))
+    (define emitted (emit-program prog))
+    (case target
+      [(js)
+       (check-true
+        (string-contains?
+         emitted
+         (format "~a as ~a" provider-validator position-validator)))
+       (check-true
+        (string-contains? emitted (format "~a({" position-validator)))
+       (check-false
+        (string-contains? emitted (symbol->string parcel-validator)))]
+      [(clj)
+       (check-true
+        (string-contains?
+         emitted
+         (format "~a ~a" provider-validator position-validator)))
+       (check-true
+        (string-contains? emitted (format "(~a " position-validator)))
+       (check-false
+        (string-contains? emitted (symbol->string parcel-validator)))]
+      [(nix)
+       (define provider-binding (nix-compiler-binding provider-validator))
+       (define position-binding (nix-compiler-binding position-validator))
+       (define parcel-binding (nix-compiler-binding parcel-validator))
+       (check-true
+        (string-contains?
+         emitted
+         (format "~a = bgl____module__0.~a;"
+                 position-binding provider-binding)))
+       (check-true
+        (string-contains?
+         emitted
+         (format "(~a bgl____update__candidate)" position-binding)))
+       (check-false (string-contains? emitted parcel-binding))])))
+
+(test-case "JS emission rejects distinct runtime imports with one lowered local"
+  (define prog
+    (beagle-consumer-program
+     (br 'macro-definition-site
+         ':refer (br 'normalize '->Box)
+         ':rename (mt 'normalize 'x '->Box '->x))
+     '(def answer String (x "collision"))))
+  (check-not-exn (lambda () (type-check! prog)))
+  (check-exn
+   (lambda (failure)
+     (and (exn:fail? failure)
+          (let ([message (exn-message failure)])
+            (and
+             (string-contains? message "beagle-js: require identity ")
+             (string-contains? message "macro-definition-site")
+             (string-contains?
+              message
+              "authored sources 'normalize and '->Box")
+             (string-contains?
+              message
+              "runtime sources 'normalize and 'Box")
+             (string-contains? message "JavaScript local x")))))
+   (lambda () (emit-program prog))))
 
 (define (publication-identities rename-items)
   (define prog

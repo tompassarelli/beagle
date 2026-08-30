@@ -90,18 +90,22 @@
 ;; parse and a module-interface during authoritative parsing.
 (struct module-source (namespace source-id stxs interface) #:transparent)
 
-;; One consumer-side import of an interface.  IDENTITY is the exact canonical
-;; requirement; PREFIX is the spelling accepted at qualified use sites; REFER
-;; is #f or the explicitly referred symbol list.
-(struct module-import (identity interface prefix refer) #:transparent)
+;; One ordered import binding. SOURCE is the provider-owned export name;
+;; LOCAL is the unqualified consumer binding selected by `:rename`.
+(struct import-binding (source local) #:transparent)
+
+;; One consumer-side import of an interface. IDENTITY is the exact canonical
+;; requirement; PREFIX is the spelling accepted at qualified use sites;
+;; BINDINGS is the authored `:refer` order after applying `:rename` once.
+(struct module-import (identity interface prefix bindings) #:transparent)
 
 ;; The parser owns surface syntax, but it must pass one normalized import
 ;; contract to every module consumer.  In particular, the string `"react"`
 ;; and the namespace `react` are different identities: the former is an exact
 ;; native ESM specifier while the latter is a Beagle module-provider key.
 (struct module-identity (kind value) #:transparent)
-(struct canonical-libspec (identity alias refer rename) #:transparent)
-(struct canonical-global-refer (refer rename) #:transparent)
+(struct canonical-libspec (identity alias bindings) #:transparent)
+(struct canonical-global-refer (bindings) #:transparent)
 
 (define (libspec-error format-string . arguments)
   (apply error 'normalize-require-libspec format-string arguments))
@@ -120,7 +124,15 @@
                    description value))
   value)
 
-(define (validated-rename value refer description)
+(define (validate-import-binding-name! name description role)
+  (define context (format "~a ~a" description role))
+  (validate-identifier! name context)
+  (when (regexp-match? #rx"/" (symbol->string name))
+    (libspec-error
+     "~a must be an unqualified bindable identifier, got: ~v"
+     context name)))
+
+(define (validated-import-bindings refer value description)
   (unless (hash? value)
     (libspec-error "~a must be a symbol-to-symbol map, got: ~v"
                    description value))
@@ -132,9 +144,7 @@
     (libspec-error "~a must be a symbol-to-symbol map, got: ~v"
                    description value))
   (define sources (map car entries))
-  (define targets (map cdr entries))
-  (unless (and (distinct-symbols? targets)
-               (andmap (lambda (source) (memq source refer)) sources))
+  (unless (andmap (lambda (source) (memq source refer)) sources)
     (libspec-error
      "~a may rename each explicitly referred symbol once, got: ~v"
      description value))
@@ -142,8 +152,30 @@
           (eq? (car entry) (cdr entry)))
     (libspec-error "~a cannot rename a symbol to itself, got: ~v"
                    description value))
-  (for/hasheq ([entry (in-list entries)])
-    (values (car entry) (cdr entry))))
+  (define bindings
+    (for/list ([source (in-list refer)])
+      (import-binding source (hash-ref value source source))))
+  (for ([binding (in-list bindings)])
+    (validate-import-binding-name!
+     (import-binding-source binding) description "source")
+    (validate-import-binding-name!
+     (import-binding-local binding) description "final local"))
+  (define locals (map import-binding-local bindings))
+  (unless (distinct-symbols? locals)
+    (libspec-error
+     "~a final local names must be unique across renamed and unrenamed refers, got: ~v"
+     description locals))
+  bindings)
+
+(define (import-bindings->refer bindings)
+  (map import-binding-source bindings))
+
+(define (import-bindings->rename bindings)
+  (for/hasheq ([binding (in-list bindings)]
+               #:unless (eq? (import-binding-source binding)
+                             (import-binding-local binding)))
+    (values (import-binding-source binding)
+            (import-binding-local binding))))
 
 (define (libspec-identity source kind)
   (case kind
@@ -180,7 +212,8 @@
   (let loop ([rest (cdr items)])
     (cond
       [(null? rest)
-       (canonical-libspec identity alias refer rename)]
+       (canonical-libspec
+        identity alias (validated-import-bindings refer rename ":rename"))]
       [(or (not (plain-symbol? (car rest)))
            (not (memq (car rest) '(:as :refer :rename))))
        (libspec-error
@@ -205,18 +238,8 @@
           (set! rename (cadr rest))])
        (loop (cddr rest))])))
 
-;; `:rename` validation depends on `:refer`, so finish the normalized value in
-;; a second pass.  Keeping it separate makes a future parser call independent
-;; of source option order.
 (define (normalize-canonical-libspec items #:kind [kind 'require])
-  (define provisional (normalize-require-libspec items #:kind kind))
-  (canonical-libspec
-   (canonical-libspec-identity provisional)
-   (canonical-libspec-alias provisional)
-   (canonical-libspec-refer provisional)
-   (validated-rename (canonical-libspec-rename provisional)
-                     (canonical-libspec-refer provisional)
-                     ":rename")))
+  (normalize-require-libspec items #:kind kind))
 
 ;; `refer-global` is a separate namespace clause, not a module import.  It is
 ;; nevertheless normalized here because its renamed globals must retain a
@@ -234,8 +257,7 @@
        (unless refer
          (libspec-error "refer-global requires :only [global ...]"))
        (canonical-global-refer
-        refer
-        (validated-rename rename refer "refer-global :rename"))]
+        (validated-import-bindings refer rename "refer-global :rename"))]
       [(or (not (plain-symbol? (car rest)))
            (not (memq (car rest) '(:only :rename))))
        (libspec-error
@@ -1167,17 +1189,17 @@
     [else details]))
 
 (define (require-entry->canonical-datum entry)
+  (define bindings (require-entry-bindings entry))
+  (define rename (import-bindings->rename bindings))
   `(require
     (identity
      ,(module-identity-kind (require-entry-identity entry))
      ,(module-identity-value (require-entry-identity entry)))
     (alias ,(require-entry-alias entry))
-    (refer ,@(or (require-entry-refer entry) '()))
+    (refer ,@(import-bindings->refer bindings))
     (rename
-     ,@(for/list ([source (in-list
-                            (sort (hash-keys (require-entry-rename entry))
-                                  symbol<?))])
-         (list source (hash-ref (require-entry-rename entry) source))))))
+     ,@(for/list ([source (in-list (sort (hash-keys rename) symbol<?))])
+         (list source (hash-ref rename source))))))
 
 (define (interface-canonical-datum
          namespace target gen-class? bindings macro-fingerprints
@@ -1646,13 +1668,81 @@
 (define (record-constructor-symbol name)
   (string->symbol (format "->~a" name)))
 
-(define (record-referred? refer name)
-  (and refer
-       (or (memq name refer)
-           (memq (record-constructor-symbol name) refer))))
+(define (import-local-for-source bindings source)
+  (for/first ([binding (in-list bindings)]
+              #:when (eq? source (import-binding-source binding)))
+    (import-binding-local binding)))
 
-(define (type-referred? refer name)
-  (and refer (memq name refer)))
+(define (record-import-local bindings name)
+  (or
+   (import-local-for-source bindings name)
+   ;; Preserve the pre-rename contract where an unrenamed constructor refer
+   ;; also admits the provider's record name. A renamed constructor has no
+   ;; principled record spelling; only an explicit record binding can name it.
+   (let ([constructor (record-constructor-symbol name)])
+     (and (eq? constructor
+               (import-local-for-source bindings constructor))
+          name))))
+
+(define (record-contract-entry-for-import-source interface source)
+  (define contracts (module-interface-record-contracts interface))
+  (define direct (hash-ref contracts source #f))
+  (if direct
+      (cons source direct)
+      (for/first ([(name contract) (in-hash contracts)]
+                  #:when (eq? source (record-constructor-symbol name)))
+        (cons name contract))))
+
+;; Return the additional runtime imports needed by referred constrained-record
+;; updates. Each binding maps the provider's private validator export to the
+;; consumer-local validator spelling derived from that exact module import.
+(define (program-record-validator-import-bindings prog import)
+  (unless (and (module-import? import)
+               (memq import (program-imported-module-interfaces prog)))
+    (raise-arguments-error
+     'program-record-validator-import-bindings
+     "expected an exact module import owned by the program"
+     "import" import))
+  (define used-consumer-validators
+    (for/seteq ([contract
+                 (in-list
+                  (semantic-contract-table-values
+                   (program-semantic-contracts prog)))]
+                #:when
+                (and (record-update-contract? contract)
+                     (symbol?
+                      (record-update-contract-validator-symbol contract))))
+      (record-update-contract-validator-symbol contract)))
+  (define interface (module-import-interface import))
+  (define bindings (module-import-bindings import))
+  (define-values (_seen reversed)
+    (for/fold ([seen (seteq)] [result '()])
+              ([binding (in-list bindings)])
+      (define entry
+        (record-contract-entry-for-import-source
+         interface (import-binding-source binding)))
+      (cond
+        [(not entry) (values seen result)]
+        [(set-member? seen (car entry)) (values seen result)]
+        [else
+         (define name (car entry))
+         (define contract (cdr entry))
+         (define provider-validator
+           (interface-record-contract-validator-symbol contract))
+         (define local (record-import-local bindings name))
+         (define consumer-validator
+           (and local provider-validator (record-validator-symbol local)))
+         (values
+          (set-add seen name)
+          (if (and consumer-validator
+                   (set-member? used-consumer-validators consumer-validator))
+              (cons
+               (import-binding provider-validator consumer-validator)
+               result)
+              result))])))
+  (reverse reversed))
+
+(struct imported-record-resolution (contract qualifier local) #:transparent)
 
 (define (program-protocol-contract-ref prog protocol-name [failure #f])
   (define local-contracts
@@ -1673,7 +1763,7 @@
             (let* ([interface (module-import-interface import)]
                    [prefix (module-import-prefix import)]
                    [namespace (module-interface-namespace interface)]
-                   [refer (module-import-refer import)])
+                   [bindings (module-import-bindings import)])
               (for/first
                   ([name
                     (in-list
@@ -1685,8 +1775,8 @@
                    (or
                     (eq? protocol-name (qualify-type-name prefix name))
                     (eq? protocol-name (qualify-type-name namespace name))
-                    (and (eq? protocol-name name)
-                         (type-referred? refer name))))
+                    (eq? protocol-name
+                         (import-local-for-source bindings name))))
                 (module-interface-protocol-contract-ref
                  interface name #f))))]
           #:when entry)
@@ -1718,7 +1808,7 @@
                #:when
                (or (eq? type-name name)
                    (eq? type-name (qualify-type-name local-namespace name))))
-     (cons contract #f))
+     (imported-record-resolution contract #f name))
    (for*/first
        ([import (in-list (program-imported-module-interfaces prog))]
         [entry
@@ -1726,58 +1816,63 @@
           (let* ([interface (module-import-interface import)]
                  [prefix (module-import-prefix import)]
                  [namespace (module-interface-namespace interface)]
-                 [refer (module-import-refer import)])
+                 [bindings (module-import-bindings import)])
             (for/first
                 ([(name contract)
                   (in-hash (module-interface-record-contracts interface))]
                  #:when
                  (or (eq? type-name (qualify-type-name prefix name))
                      (eq? type-name (qualify-type-name namespace name))
-                     (and (eq? type-name name)
-                          (record-referred? refer name))))
-              (cons
+                     (eq? type-name (record-import-local bindings name))))
+              (define local (record-import-local bindings name))
+              (imported-record-resolution
                contract
-               (cond
-                 [(eq? type-name name) #f]
-                 ;; Runtime module bindings use the require prefix (an authored
-                 ;; alias or the default namespace leaf), even when type
-                 ;; canonicalization rewrote TYPE-NAME to the provider's full
-                 ;; namespace. Preserve that executable identity in semantic
-                 ;; contracts instead of leaking a non-bound source namespace.
-                 [else prefix])))))]
+               ;; A referred record has a real final local even when its
+               ;; canonical type is provider-qualified. Runtime contracts use
+               ;; that local, and emitters synthesize the private validator as
+               ;; one additional source-identical refer. Qualified-only uses
+               ;; retain the authored/default require prefix.
+               (and (not local) prefix)
+               local))))]
         #:when entry)
      entry)))
 
 (define (program-record-contract-ref prog type-name [failure #f])
   (define resolution (program-record-contract-resolution prog type-name))
   (if resolution
-      (car resolution)
+      (imported-record-resolution-contract resolution)
       (if (procedure? failure) (failure) failure)))
 
-;; Returns the conceptual provider-owned validator binding. Target emitters
-;; apply their ordinary identifier mangling to this symbol. Imported results
-;; retain the use-site qualifier so module lowering can import/call the provider
-;; helper without re-resolving type ownership.
+;; Returns the executable validator reference. Qualified imports retain their
+;; use-site qualifier; referred imports derive a private consumer-local helper
+;; name from the final record local so provider spellings never select imports.
 (define (program-record-validator-ref prog type-name [failure #f])
   (define resolution (program-record-contract-resolution prog type-name))
   (cond
     [resolution
      (define validator
-       (interface-record-contract-validator-symbol (car resolution)))
-     (define qualifier (cdr resolution))
+       (interface-record-contract-validator-symbol
+        (imported-record-resolution-contract resolution)))
+     (define qualifier (imported-record-resolution-qualifier resolution))
+     (define local (imported-record-resolution-local resolution))
      (and validator
-          (if qualifier
-              (qualify-type-name qualifier validator)
-              validator))]
+          (cond
+            [qualifier (qualify-type-name qualifier validator)]
+            [local (record-validator-symbol local)]
+            [else validator]))]
     [else (if (procedure? failure) (failure) failure)]))
 
 (define (program-record-runtime-name-ref prog type-name [failure #f])
   (define resolution (program-record-contract-resolution prog type-name))
   (cond
     [resolution
-     (define name (interface-record-contract-name (car resolution)))
-     (define qualifier (cdr resolution))
-     (if qualifier (qualify-type-name qualifier name) name)]
+     (define name
+       (interface-record-contract-name
+        (imported-record-resolution-contract resolution)))
+     (define qualifier (imported-record-resolution-qualifier resolution))
+     (if qualifier
+         (qualify-type-name qualifier name)
+         (or (imported-record-resolution-local resolution) name))]
     [else (if (procedure? failure) (failure) failure)]))
 
 (define (module-interfaces-overlay-digest interfaces)
@@ -1825,12 +1920,15 @@
  module-interface-protocol-method-contract-ref
  program-record-contract-ref
  program-record-validator-ref
+ program-record-validator-import-bindings
  program-record-runtime-name-ref
  program-protocol-contract-ref
  program-protocol-method-contract-ref
  module-interfaces-overlay-digest
  normalize-canonical-libspec
  normalize-refer-global
+ import-bindings->refer
+ import-bindings->rename
  (struct-out interface-binding)
  (struct-out interface-macro)
  (struct-out interface-constraint)
@@ -1842,6 +1940,7 @@
  (struct-out interface-protocol-contract)
  (struct-out module-interface)
  (struct-out module-source)
+ (struct-out import-binding)
  (struct-out module-import)
  (struct-out module-identity)
  (struct-out canonical-libspec)

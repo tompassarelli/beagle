@@ -503,8 +503,8 @@
      imported-prefixes
      (module-interface-namespace interface)
      #t)
-    (for ([name (in-list (or (module-import-refer module-import) '()))])
-      (hash-set! referred-imports name #t)))
+    (for ([binding (in-list (module-import-bindings module-import))])
+      (hash-set! referred-imports (import-binding-local binding) #t)))
   (define (imported-name? name)
     (define s (symbol->string name))
     (or (for/or ([prefix (in-hash-keys imported-prefixes)])

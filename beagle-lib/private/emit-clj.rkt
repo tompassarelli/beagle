@@ -367,9 +367,13 @@ CLJ
                   (module-interface-namespace
                    (module-import-interface import)))
                  eq?))])
-    (set-add
-     s
-     (reference-key (qualified-ref qualifier runtime-name #f)))))
+    (define qualified
+      (set-add
+       s
+       (reference-key (qualified-ref qualifier runtime-name #f))))
+    (define local
+      (binding-local-for-source (module-import-bindings import) runtime-name))
+    (if local (set-add qualified local) qualified)))
 
 (define (build-local-names prog)
   (for/fold ([names (set)]) ([form (in-list (program-forms prog))])
@@ -570,9 +574,8 @@ CLJ
      (append
       base-rs
       (list
-       (require-entry 'clojure.string 'str #f
-                      (module-identity 'beagle-namespace 'clojure.string)
-                      (hasheq))))]))
+       (require-entry 'clojure.string 'str '()
+                      (module-identity 'beagle-namespace 'clojure.string))))]))
 
 ;; Find the index of the last `.` in s, or #f if none.
 (define (string-last-dot s)
@@ -590,89 +593,98 @@ CLJ
       (string->symbol
        (last (string-split (symbol->string (require-entry-ns entry)) ".")))))
 
+(define (binding-by-source bindings source)
+  (for/first ([binding (in-list bindings)]
+              #:when (eq? (import-binding-source binding) source))
+    binding))
+
+(define (binding-local-for-source bindings source)
+  (define binding (binding-by-source bindings source))
+  (and binding (import-binding-local binding)))
+
 (define (require-module-import prog entry)
   (for/first ([import (in-list (program-imported-module-interfaces prog))]
               #:when
-              (eq? (module-interface-namespace
-                    (module-import-interface import))
-                   (require-entry-ns entry)))
+              (equal? (module-import-identity import)
+                      (require-entry-identity entry)))
     import))
 
-(define (used-unqualified-record-validators prog)
-  (for/set ([contract
-             (in-list
-              (semantic-contract-table-values
-               (program-semantic-contracts prog)))]
-            #:when
-            (and (record-update-contract? contract)
-                 (symbol?
-                  (record-update-contract-validator-symbol contract))))
-    (record-update-contract-validator-symbol contract)))
-
-(define (referred-record-validators prog entry refer)
+(define (runtime-refer-source? prog entry source)
   (define import (require-module-import prog entry))
   (define interface (and import (module-import-interface import)))
-  (define used (used-unqualified-record-validators prog))
-  (if (not interface)
-      '()
-      (for/list
-          ([(record-name contract)
-            (in-hash (module-interface-record-contracts interface))]
-           #:when
-           (let ([validator
-                  (interface-record-contract-validator-symbol contract)])
-             (and validator
-                  (set-member? used validator)
-                  (or (memq record-name refer)
-                      (memq
-                       (string->symbol (format "->~a" record-name))
-                       refer)))))
-        (interface-record-contract-validator-symbol contract))))
-
-(define (runtime-refer-name prog entry name)
-  (define import (require-module-import prog entry))
-  (define interface (and import (module-import-interface import)))
+  (define local
+    (binding-local-for-source (require-entry-bindings entry) source))
   (define binding
-    (and interface (module-interface-binding-ref interface name #f)))
+    (and interface (module-interface-binding-ref interface source #f)))
   (cond
     ;; Type declarations and macros exist only during Beagle compilation; a
     ;; Clojure namespace cannot refer them as Vars.
     [(and interface
-          (module-interface-type-export? interface name)
+          (module-interface-type-export? interface source)
           (not binding))
      #f]
-    [(hash-ref (program-macros prog) name #f) #f]
+    [(or (and interface
+              (hash-ref (module-interface-macros interface) source #f))
+         (and local (hash-ref (program-macros prog) local #f)))
+     #f]
     [(and binding (eq? (interface-binding-kind binding) 'extern)) #f]
-    [else name]))
+    [else #t]))
 
 (define (emit-require prog r)
   (define ns (require-entry-ns r))
-  (define refer-syms (require-entry-refer r))
-  (define runtime-refer
-    (and refer-syms
-         (remove-duplicates
-          (append
-           (filter-map
-            (lambda (name) (runtime-refer-name prog r name))
-            refer-syms)
-           (referred-record-validators prog r refer-syms)))))
+  (define bindings (require-entry-bindings r))
+  (define module-import (require-module-import prog r))
+  (define runtime-bindings
+    (remove-duplicates
+     (append
+      (filter
+       (lambda (binding)
+         (runtime-refer-source?
+          prog r (import-binding-source binding)))
+       bindings)
+      (if module-import
+          (program-record-validator-import-bindings prog module-import)
+          '()))
+     equal?))
+  (define renamed-runtime-bindings
+    (filter
+     (lambda (binding)
+       (not (eq? (import-binding-source binding)
+                 (import-binding-local binding))))
+     runtime-bindings))
   (define alias
     (or (require-entry-alias r)
         ;; Default alias: the last `.`-separated segment of the namespace.
         ;; Suppressed for refer-only requires (no alias requested).
-        (and (not refer-syms)
+        (and (null? bindings)
              (let* ([ns-str (symbol->string ns)]
                     [idx (string-last-dot ns-str)])
                (if idx (substring ns-str (+ idx 1)) ns-str)))))
   (cond
-    [(and refer-syms (null? runtime-refer)) #f]
+    [(and (pair? bindings) (null? runtime-bindings)) #f]
     [else
-     (format "[~a~a~a]"
+     (format "[~a~a~a~a]"
              ns
              (if alias (format " :as ~a" alias) "")
-             (if (and runtime-refer (pair? runtime-refer))
+             (if (pair? runtime-bindings)
                  (format " :refer [~a]"
-                         (string-join (map symbol->string runtime-refer) " "))
+                         (string-join
+                          (map
+                           (lambda (binding)
+                             (symbol->string
+                              (import-binding-source binding)))
+                           runtime-bindings)
+                          " "))
+                 "")
+             (if (pair? renamed-runtime-bindings)
+                 (format
+                  " :rename {~a}"
+                  (string-join
+                   (for/list ([binding (in-list renamed-runtime-bindings)])
+                     (format "~a ~a"
+                             (import-binding-source binding)
+                             (import-binding-local binding)))
+                   " "))
                  ""))]))
 
 ;; Split a fully-qualified Java class symbol like 'java.io.File into

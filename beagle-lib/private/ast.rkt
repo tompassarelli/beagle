@@ -1467,7 +1467,7 @@
 (struct type-impl    (protocol-name methods)                 #:transparent)
 (struct impl-method  (name params rest-param return-type body) #:transparent)
 (struct let-binding (name type constraint value)            #:transparent)
-(struct require-entry (ns alias refer identity rename) #:transparent)
+(struct require-entry (ns alias bindings identity) #:transparent)
 
 ;; --- program structure -----------------------------------------------------
 (struct regex-contract (pattern-source match-type unit) #:transparent)

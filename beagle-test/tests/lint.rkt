@@ -83,6 +83,7 @@
   (define out
     (lint-prog
      '(define-target js)
+     '(declare-extern BoxRenderable Any)
      (list 'ns 'test.ui
            (list ':require
                  (br '|@opentui/core| ':refer (br 'BoxRenderable))))))

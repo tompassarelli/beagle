@@ -286,14 +286,16 @@
             ([prog (in-list programs)])
     (for/fold ([next plan])
               ([required (in-list (program-requires prog))])
-      (define namespace (require-entry-ns required))
+      (define identity (require-entry-identity required))
+      (define bindings (require-entry-bindings required))
       (define requested
-        (if (require-entry-refer required)
-            (list->set (require-entry-refer required))
+        (if (pair? bindings)
+            (for/set ([binding (in-list bindings)])
+              (import-binding-source binding))
             (set '*)))
       (hash-update
        next
-       namespace
+       identity
        (lambda (prior) (set-union prior requested))
        (set)))))
 
@@ -314,7 +316,10 @@
         ([current-js-export-names
           (and
            (eq? target 'js)
-           (hash-ref export-plan (program-namespace prog) (set)))]
+           (hash-ref
+            export-plan
+            (module-identity 'beagle-namespace (program-namespace prog))
+            (set)))]
          [current-nix-module-omit-attrs omit-attrs])
       (emit-program prog)))
   (cond

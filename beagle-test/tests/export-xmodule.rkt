@@ -139,8 +139,12 @@
    (canonical-libspec-identity spec)
    (module-identity 'native-esm "@scope/package/subpath"))
   (check-equal? (canonical-libspec-alias spec) 'pkg)
-  (check-equal? (canonical-libspec-refer spec) '(make))
-  (check-equal? (canonical-libspec-rename spec) (hasheq 'make 'build)))
+  (check-equal? (canonical-libspec-bindings spec)
+                (list (import-binding 'make 'build)))
+  (check-equal? (import-bindings->refer (canonical-libspec-bindings spec))
+                '(make))
+  (check-equal? (import-bindings->rename (canonical-libspec-bindings spec))
+                (hasheq 'make 'build)))
 
 (test-case "namespace and native ESM identities never collapse"
   (define namespace-spec
@@ -225,8 +229,14 @@
   (define globals
     (normalize-refer-global
      (list ':only '(Date String) ':rename (hasheq 'Date 'my-date))))
-  (check-equal? (canonical-global-refer-refer globals) '(Date String))
-  (check-equal? (canonical-global-refer-rename globals)
+  (check-equal? (canonical-global-refer-bindings globals)
+                (list (import-binding 'Date 'my-date)
+                      (import-binding 'String 'String)))
+  (check-equal? (import-bindings->refer
+                 (canonical-global-refer-bindings globals))
+                '(Date String))
+  (check-equal? (import-bindings->rename
+                 (canonical-global-refer-bindings globals))
                 (hasheq 'Date 'my-date)))
 
 (test-case "libspec validation rejects duplicate, implicit, and ambiguous renames"
@@ -247,6 +257,26 @@
                (normalize-refer-global
                 (list ':only '(Date) ':rename (hasheq 'Date 'Date))))))
 
+(test-case "import binding names are unqualified and outside compiler namespaces"
+  (for ([spec
+         (in-list
+          (list
+           (list "pkg" ':refer '($beagle$source))
+           (list "pkg" ':refer '(source) ':rename
+                 (hasheq 'source 'bgl____local))
+           (list "pkg" ':refer '(pkg/source))
+           (list "pkg" ':refer '(source) ':rename
+                 (hasheq 'source 'consumer/local))))]
+        [expected
+         (in-list
+          (list #rx"reserved compiler identifier prefix"
+                #rx"reserved compiler identifier prefix"
+                #rx"unqualified bindable identifier"
+                #rx"unqualified bindable identifier"))])
+    (check-exn expected
+               (lambda () (normalize-canonical-libspec spec))
+               (format "reject import binding in ~v" spec))))
+
 (test-case "top-level canonical libspecs retain module identities and renames"
   (define prog (fixture-program "top-level-libspec.bjs"))
   (type-check! prog)
@@ -260,7 +290,10 @@
   (check-equal?
    (module-identity-value (require-entry-identity native))
    "@scope/package/subpath")
-  (check-equal? (require-entry-rename native) (hasheq 'make 'build))
+  (check-equal? (require-entry-bindings native)
+                (list (import-binding 'make 'build)))
+  (check-equal? (import-bindings->rename (require-entry-bindings native))
+                (hasheq 'make 'build))
   (define serialized-requires (hash-ref (program->json prog) 'requires))
   (define serialized-native
     (for/first ([entry (in-list serialized-requires)]

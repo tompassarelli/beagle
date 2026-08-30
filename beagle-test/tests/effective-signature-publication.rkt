@@ -69,16 +69,14 @@
        (require-entry
         'pkg.name
         'beagle-package
-        '(shared)
-        (module-identity 'beagle-namespace 'pkg.name)
-        (hasheq 'shared 'beagle-shared)))
+        (list (import-binding 'shared 'beagle-shared))
+        (module-identity 'beagle-namespace 'pkg.name)))
      (define native-require
        (require-entry
         'pkg.name
         'native-package
-        '(shared)
-        (module-identity 'native-esm "pkg.name")
-        (hasheq 'shared 'native-shared)))
+        (list (import-binding 'shared 'native-shared))
+        (module-identity 'native-esm "pkg.name")))
      (define (digest requires)
        (module-interface-digest
         (make-module-interface

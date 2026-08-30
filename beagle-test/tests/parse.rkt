@@ -1819,7 +1819,8 @@
   (check-equal? (length rs) 2)
   (define fs-entry
     (car (filter (lambda (r) (eq? (require-entry-ns r) 'babashka.fs)) rs)))
-  (check-equal? (require-entry-refer fs-entry) '(exists?))
+  (check-equal? (require-entry-bindings fs-entry)
+                (list (import-binding 'exists? 'exists?)))
   (check-equal? (sort (map symbol->string (program-imports p)) string<?)
                 '("java.time.Duration" "java.time.LocalDate")))
 
@@ -1843,7 +1844,8 @@
                                       ':refer (br 'join 'trim)))))
   (define r (car (program-requires p)))
   (check-eq? (require-entry-alias r) 'str)
-  (check-equal? (require-entry-refer r) '(join trim)))
+  (check-equal? (import-bindings->refer (require-entry-bindings r))
+                '(join trim)))
 
 (parse-err/rx ":refer :all rejected by canonical refer list"
   #rx"duplicate-free list of symbols"

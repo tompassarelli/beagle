@@ -315,7 +315,7 @@
        (module-identity 'namespace 'fixture.intermediate)
        intermediate
        'intermediate
-       #f))))
+       '()))))
   (define graph-id (foreign-interface-v1-semantic-id graph))
   (check-equal? (hash-keys interfaces) (list graph-id))
   (check-eq? (hash-ref interfaces graph-id) graph))
@@ -690,7 +690,7 @@
                      (hash 'key "n:string" 'value "n:string" 'readonly #t)))
          (list "object indexes reject unsorted key nodes"
                (list (hash 'key "n:z" 'value "n:string" 'readonly #f)
-                     (hash 'key "n:string" 'value "n:z" 'readonly #f))))))])
+                     (hash 'key "n:string" 'value "n:z" 'readonly #f)))))])
   (define indexes (cadr spec))
   (reject
    (car spec)

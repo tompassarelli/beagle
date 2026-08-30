@@ -1870,6 +1870,7 @@
   (define imp-union-members (make-hash))
   (define imp-param-unions (make-hash))
   (define imp-enums (make-hash))
+  (define require-local-owners (make-hasheq))
   ;; Every non-local value that `binding` may legally rebind: dynamic vars
   ;; imported from typed modules plus explicit ^:dynamic foreign declarations.
   (define external-dyn-vars (mutable-seteq))
@@ -1878,15 +1879,18 @@
   (define declared-module-contract #f)
   (define declared-module-contract-source #f)
 
-  (define (referred? refer-syms name)
-    (and refer-syms (memq name refer-syms)))
+  (define (imported-local bindings source)
+    (for/first ([binding (in-list bindings)]
+                #:when (eq? source (import-binding-source binding)))
+      (import-binding-local binding)))
 
-  (define (interface-spellings interface prefix refer-syms name)
+  (define (interface-spellings interface prefix bindings source)
+    (define local (imported-local bindings source))
     (remove-duplicates
      (append
-      (list (qualify-name prefix name)
-            (qualify-name (module-interface-namespace interface) name))
-      (if (referred? refer-syms name) (list name) '()))
+      (list (qualify-name prefix source)
+            (qualify-name (module-interface-namespace interface) source))
+      (if local (list local) '()))
      eq?))
 
   (define (validate-interface! interface)
@@ -1954,22 +1958,22 @@
                (values name (copy-type bound)))))]
       [else type]))
 
-  (define (register-interface-types! interface prefix refer-syms)
+  (define (register-interface-types! interface prefix bindings)
     (validate-interface! interface)
     (define namespace (module-interface-namespace interface))
     (define prefixes (current-candidate-type-prefixes))
-    (define bindings (current-candidate-type-bindings))
+    (define type-bindings (current-candidate-type-bindings))
     (hash-set! prefixes prefix interface)
     (hash-set! prefixes namespace interface)
     (for ([(name export)
            (in-hash (module-interface-type-exports interface))])
       (validate-interface-type-export! interface name export)
       (define visible-names
-        (interface-spellings interface prefix refer-syms name))
+        (interface-spellings interface prefix bindings name))
       (for ([visible-name (in-list visible-names)])
         (define visible-ref (lower-qualified-reference visible-name))
         (when visible-ref (qualified-type-name visible-ref))
-        (hash-set! bindings
+        (hash-set! type-bindings
                    (or visible-ref visible-name)
                    (cons interface export))
         (when (and (zero? (interface-type-export-arity export))
@@ -1986,18 +1990,22 @@
                      visible-name
                      (interface-type-export-arity export)))))))
 
-  (define (record-referred? refer-syms name)
-    (or (referred? refer-syms name)
-        (referred?
-         refer-syms
-         (string->symbol (format "->~a" name)))))
+  (define (unrenamed-related-import? bindings source)
+    (eq? source (imported-local bindings source)))
 
-  (define (record-spellings interface prefix refer-syms name)
+  (define (record-local bindings name)
+    (or (imported-local bindings name)
+        (and (unrenamed-related-import?
+              bindings (string->symbol (format "->~a" name)))
+             name)))
+
+  (define (record-spellings interface prefix bindings name)
+    (define local (record-local bindings name))
     (remove-duplicates
      (append
       (list (qualify-name prefix name)
             (qualify-name (module-interface-namespace interface) name))
-      (if (record-referred? refer-syms name) (list name) '()))
+      (if local (list local) '()))
      eq?))
 
   (define (interface-provider-names interface)
@@ -2010,7 +2018,7 @@
       (hash-set! names name #t)
       names))
 
-  (define (import-interface-macros! interface prefix refer-syms)
+  (define (import-interface-macros! interface prefix bindings)
     (define provider-names (interface-provider-names interface))
     (for ([(name macro) (in-hash (module-interface-macros interface))])
       (unless (and (interface-macro? macro)
@@ -2040,12 +2048,12 @@
       (for ([qualified-name (in-list qualified-names)])
         (register-macro!
          registry qualified-name (interface-macro-kind macro) params template))
-      (when (and (referred? refer-syms name)
-                 (not (hash-has-key? registry name)))
+      (define local (imported-local bindings name))
+      (when (and local (not (hash-has-key? registry local)))
         (register-macro!
-         registry name (interface-macro-kind macro) params template))))
+         registry local (interface-macro-kind macro) params template))))
 
-  (define (import-interface-records! interface prefix refer-syms)
+  (define (import-interface-records! interface prefix bindings)
     (define namespace (module-interface-namespace interface))
     (for ([(name contract)
            (in-hash (module-interface-record-contracts interface))])
@@ -2058,7 +2066,7 @@
         (for/list ([field (in-list fields)])
           (symbol->string (param-name field))))
       (for ([spelling
-             (in-list (record-spellings interface prefix refer-syms name))])
+             (in-list (record-spellings interface prefix bindings name))])
         (hash-set! imp-rec-fields spelling field-map)
         (hash-set! imp-rec-field-order spelling field-order)
         (hash-set! imp-rec-ns spelling namespace))))
@@ -2077,10 +2085,10 @@
       (values (qualify-name qualifier member)
               (interface-record-fields interface member))))
 
-  (define (register-interface-union! interface prefix refer-syms name
+  (define (register-interface-union! interface prefix bindings name
                                      type-params members)
     (define namespace (module-interface-namespace interface))
-    (define bare? (referred? refer-syms name))
+    (define bare-local (imported-local bindings name))
     (define (members-for qualifier)
       (if qualifier (qualified-union-members qualifier members) members))
     (define (member-fields-for qualifier)
@@ -2099,27 +2107,27 @@
                'member-fields (member-fields-for qualifier))))
     (register-members! (qualify-name prefix name) prefix)
     (register-members! (qualify-name namespace name) namespace)
-    (when bare? (register-members! name #f))
+    (when bare-local (register-members! bare-local #f))
     (unless (null? type-params)
       (register-parametric! (qualify-name prefix name) prefix)
       (register-parametric! (qualify-name namespace name) namespace)
-      (when bare? (register-parametric! name #f))))
+      (when bare-local (register-parametric! bare-local #f))))
 
-  (define (import-interface-type-contracts! interface prefix refer-syms)
+  (define (import-interface-type-contracts! interface prefix bindings)
     (define namespace (module-interface-namespace interface))
     (for ([(name declaration)
            (in-hash (module-interface-type-declarations interface))])
       (match (interface-type-declaration-details declaration)
         [`(type-params ,type-params members ,member-specs)
          (register-interface-union!
-          interface prefix refer-syms name type-params (map car member-specs))]
+          interface prefix bindings name type-params (map car member-specs))]
         [`(members ,member-specs)
          (register-interface-union!
-          interface prefix refer-syms name '() (map car member-specs))]
+          interface prefix bindings name '() (map car member-specs))]
         [`(values ,_ ...)
          (for ([spelling
                 (in-list (interface-spellings
-                          interface prefix refer-syms name))])
+                          interface prefix bindings name))])
            (hash-set! imp-enums spelling #t))]
         [`(backing ,_ predicates ,predicates)
          (define parsed-predicates
@@ -2134,26 +2142,27 @@
          (for ([runtime-name (in-list (list ctor accessor))])
            (for ([spelling
                   (in-list (interface-spellings
-                            interface prefix refer-syms runtime-name))])
+                            interface prefix bindings runtime-name))])
              (hash-set! imp-scalar-fns spelling #t)))
-         (define scalar-referred?
-           (or (referred? refer-syms name)
-               (referred? refer-syms ctor)
-               (referred? refer-syms accessor)))
+         (define scalar-local
+           (or (imported-local bindings name)
+               (and (or (unrenamed-related-import? bindings ctor)
+                        (unrenamed-related-import? bindings accessor))
+                    name)))
          (define scalar-spellings
            (remove-duplicates
             (append
              (list (qualify-name prefix name)
                    (qualify-name namespace name))
-             (if scalar-referred? (list name) '()))
+             (if scalar-local (list scalar-local) '()))
             eq?))
          (when (pair? parsed-predicates)
            (for ([spelling (in-list scalar-spellings)])
              (hash-set! imp-scalar-preds spelling parsed-predicates)))]
         [_ (void)])))
 
-  (define (import-interface! identity interface prefix refer-syms)
-    (register-interface-types! interface prefix refer-syms)
+  (define (import-interface! identity interface prefix bindings)
+    (register-interface-types! interface prefix bindings)
     (define alias-exports
       (sort
        (for/list ([(name export)
@@ -2174,7 +2183,7 @@
         [alias
          (define visible-name
            (car (interface-spellings
-                 interface prefix refer-syms (car alias))))
+                 interface prefix bindings (car alias))))
          (register-type-alias-display! (copy-type type) visible-name)]
         [(type-foreign? type)
          (type-foreign/instantiated
@@ -2208,7 +2217,7 @@
          (set-type-poly-origin! copied (type-poly-origin type))
          copied]
         [else type]))
-    (for ([name (in-list (or refer-syms '()))])
+    (for ([name (in-list (import-bindings->refer bindings))])
       (unless (or (module-interface-export? interface name)
                   (module-interface-type-export? interface name))
         (error 'beagle
@@ -2221,26 +2230,26 @@
         (display-imported-aliases (interface-binding-type binding)))
       (for ([spelling
              (in-list (interface-spellings
-                       interface prefix refer-syms name))])
+                       interface prefix bindings name))])
         (unless (and (eq? spelling name) (hash-has-key? externs name))
           (hash-set! externs spelling binding-type)))
-      (when (referred? refer-syms name)
-        (hash-set! imp-symbol-ns name prefix)))
-    (import-interface-macros! interface prefix refer-syms)
+      (define local (imported-local bindings name))
+      (when local (hash-set! imp-symbol-ns local prefix)))
+    (import-interface-macros! interface prefix bindings)
     (for ([name (in-hash-keys (module-interface-type-exports interface))])
       (for ([spelling
              (in-list (interface-spellings
-                       interface prefix refer-syms name))])
+                       interface prefix bindings name))])
         (set-add! imp-type-names spelling)))
-    (import-interface-records! interface prefix refer-syms)
-    (import-interface-type-contracts! interface prefix refer-syms)
+    (import-interface-records! interface prefix bindings)
+    (import-interface-type-contracts! interface prefix bindings)
     (for ([name (in-set (module-interface-dynamic-vars interface))])
       (for ([spelling
              (in-list (interface-spellings
-                       interface prefix refer-syms name))])
+                       interface prefix bindings name))])
         (set-add! external-dyn-vars spelling)))
     (set! imp-module-interfaces
-          (cons (module-import identity interface prefix refer-syms)
+          (cons (module-import identity interface prefix bindings)
                 imp-module-interfaces)))
 
   (define (canonical-require-namespace spec)
@@ -2316,14 +2325,14 @@
   (define (pre-register-require-types! spec)
     (define rn (canonical-require-namespace spec))
     (define alias (canonical-libspec-alias spec))
-    (define refer-syms (canonical-libspec-refer spec))
+    (define bindings (canonical-libspec-bindings spec))
     (define prefix
       (or alias (string->symbol (last-of (split-ns-segments rn)))))
     (define candidate (candidate-for-require spec))
     (define interface (and candidate (module-source-interface candidate)))
     (cond
       [interface
-       (register-interface-types! interface prefix refer-syms)]
+       (register-interface-types! interface prefix bindings)]
       [candidate
        ;; Bootstrap knows the namespace but has not minted its semantic
        ;; interface yet. Qualified types remain opaque until the next round.
@@ -2335,8 +2344,7 @@
   (define (register-require! spec)
     (define rn (canonical-require-namespace spec))
     (define alias (canonical-libspec-alias spec))
-    (define refer-syms (canonical-libspec-refer spec))
-    (define rename (canonical-libspec-rename spec))
+    (define bindings (canonical-libspec-bindings spec))
     (define identity-kind
       (module-identity-kind (canonical-libspec-identity spec)))
     (define source-backed? (source-backed-require? spec))
@@ -2349,31 +2357,45 @@
     (define (qualified-extern? qualifier name)
       (declared-extern? (qualify-name qualifier name)))
     (define extern-authorized?
-      (if (pair? refer-syms)
-          (for/and ([name (in-list refer-syms)])
-            (or (declared-extern? name)
-                (qualified-extern? prefix name)
-                (qualified-extern? rn name)))
+      (if (pair? bindings)
+          (for/and ([binding (in-list bindings)])
+            (define source (import-binding-source binding))
+            (or (declared-extern? source)
+                (qualified-extern? prefix source)
+                (qualified-extern? rn source)))
           (for/or ([name (in-set declared-extern-names)])
             (define text (symbol->string name))
             (or (string-prefix? text
                                 (string-append (symbol->string prefix) "/"))
                 (string-prefix? text
                                 (string-append (symbol->string rn) "/"))))))
+    (for ([binding (in-list bindings)])
+      (define local (import-binding-local binding))
+      (define prior (hash-ref require-local-owners local #f))
+      (when prior
+        (raise-parse-error
+         'bad-meta-value
+         "require: :rename final local ~a is referred by more than one libspec"
+         local))
+      (hash-set! require-local-owners local
+                 (cons (canonical-libspec-identity spec)
+                       (import-binding-source binding))))
     (cond
       [interface
        (import-interface! (canonical-libspec-identity spec)
-                          interface prefix refer-syms)]
+                          interface prefix bindings)]
       [candidate
        (define prefixes (current-candidate-type-prefixes))
        (hash-set! prefixes prefix rn)
        (hash-set! prefixes rn rn)
        ;; A parse-only bootstrap round may see referred values before their
        ;; interface exists. They are deliberately imprecise and never checked.
-       (for ([name (in-list (or refer-syms '()))])
-         (hash-set! externs name (type-prim 'Any))
-         (hash-set! externs (qualify-name prefix name) (type-prim 'Any))
-         (hash-set! imp-symbol-ns name prefix))]
+       (for ([binding (in-list bindings)])
+         (define source (import-binding-source binding))
+         (define local (import-binding-local binding))
+         (hash-set! externs local (type-prim 'Any))
+         (hash-set! externs (qualify-name prefix source) (type-prim 'Any))
+         (hash-set! imp-symbol-ns local prefix))]
       [(or (eq? identity-kind 'global)
            (and source-backed?
                 (or (host-namespace? rn target)
@@ -2381,16 +2403,18 @@
        ;; Foreign package / host runtime refers are runtime bindings whose
        ;; types come from the catalog or from `declare-extern`, not from
        ;; beagle source.
-       (for ([name (in-list (or refer-syms '()))])
-         (define qualified (qualify-name prefix name))
+       (for ([binding (in-list bindings)])
+         (define source (import-binding-source binding))
+         (define local (import-binding-local binding))
+         (define qualified (qualify-name prefix source))
          (define binding-type
-           (or (hash-ref externs name #f)
+           (or (hash-ref externs source #f)
                (hash-ref externs qualified #f)
-               (hash-ref externs (qualify-name rn name) #f)
+               (hash-ref externs (qualify-name rn source) #f)
                (type-prim 'Any)))
-         (hash-set! externs name binding-type)
+         (hash-set! externs local binding-type)
          (hash-set! externs qualified binding-type)
-         (hash-set! imp-symbol-ns name prefix))]
+         (hash-set! imp-symbol-ns local prefix))]
       ;; Nothing provides this namespace: not a candidate in this invocation
       ;; and not a catalog/extern-authorized host namespace. Accepting it would
       ;; register a phantom alias whose every
@@ -2405,8 +2429,7 @@
     (set!
      requires
      (cons
-      (require-entry rn alias (and (pair? refer-syms) refer-syms)
-                     (canonical-libspec-identity spec) rename)
+      (require-entry rn alias bindings (canonical-libspec-identity spec))
       requires)))
 
   (define current-require-registration

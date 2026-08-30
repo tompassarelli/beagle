@@ -208,6 +208,27 @@
 ;; errors, which still travel through their ordinary error callback.
 (define current-purity-warning-port (make-parameter #f))
 
+(define (module-identity-receipt-input identity)
+  (vector 'module-identity
+          (module-identity-kind identity)
+          (module-identity-value identity)))
+
+(define (import-binding-receipt-input binding)
+  (vector (import-binding-source binding)
+          (import-binding-local binding)))
+
+(define (import-bindings-receipt-input bindings)
+  (list->vector (map import-binding-receipt-input bindings)))
+
+(define (module-import-receipt-input import)
+  (hash
+   'identity (module-identity-receipt-input (module-import-identity import))
+   'provider
+   (module-interface-namespace (module-import-interface import))
+   'prefix (module-import-prefix import)
+   'bindings
+   (import-bindings-receipt-input (module-import-bindings import))))
+
 (define (compiler-semantic-receipt-inputs prog)
   (hash
    'check-profile (current-check-profile)
@@ -217,9 +238,14 @@
    'requires
    (list->vector
     (for/list ([entry (in-list (program-requires prog))])
-      (vector (require-entry-ns entry)
-              (require-entry-alias entry)
-              (require-entry-refer entry))))))
+      (hash
+       'identity
+       (module-identity-receipt-input (require-entry-identity entry))
+       'namespace (require-entry-ns entry)
+       'alias (require-entry-alias entry)
+       'bindings
+       (import-bindings-receipt-input
+        (require-entry-bindings entry)))))))
 
 (define (record-check-selection-receipts! prog)
   (define target (program-target prog))
@@ -1410,6 +1436,22 @@
        (call-form? arg)
        (memq (call-form-fn arg) '(keys vals))))
 
+(define (module-import-binding-for-source import source)
+  (for/first ([binding (in-list (module-import-bindings import))]
+              #:when (eq? source (import-binding-source binding)))
+    binding))
+
+(define (module-import-local-name import source)
+  (define binding (module-import-binding-for-source import source))
+  (and binding (import-binding-local binding)))
+
+(define (module-import-binding-receipt-query import binding)
+  (hash
+   'kind 'imported-binding
+   'import (module-import-receipt-input import)
+   'source (import-binding-source binding)
+   'local (import-binding-local binding)))
+
 (define (make-collection-contract t node #:extern [extern-name #f])
   (define kind (type-app-ctor t))
   (define args (type-app-args t))
@@ -1438,7 +1480,6 @@
     (define interface (module-import-interface import))
     (define namespace (module-interface-namespace interface))
     (define prefix (module-import-prefix import))
-    (define refer (module-import-refer import))
     (set-add! imported-prefixes prefix)
     (set-add! imported-prefixes namespace)
     (for ([name (in-hash-keys (module-interface-bindings interface))])
@@ -1447,9 +1488,9 @@
        (string->symbol (format "~a/~a" prefix name)))
       (set-add!
        imported-bindings
-       (string->symbol (format "~a/~a" namespace name)))
-      (when (and refer (memq name refer))
-        (set-add! imported-bindings name))))
+       (string->symbol (format "~a/~a" namespace name))))
+    (for ([binding (in-list (module-import-bindings import))])
+      (set-add! imported-bindings (import-binding-local binding))))
   (for ([name (in-hash-keys (program-externs prog))])
     (define match
       (regexp-match #rx"^([^/]+)/" (symbol->string name)))
@@ -1868,7 +1909,6 @@
   (for ([import (in-list (program-imported-module-interfaces prog))])
     (define interface (module-import-interface import))
     (define prefix (module-import-prefix import))
-    (define refer (module-import-refer import))
     (define provider-contracts
       (interface-error-contracts interface (program-target prog)))
     (for ([(name binding) (in-hash (module-interface-bindings interface))]
@@ -1878,6 +1918,7 @@
          (interface-binding-raises binding)
          provider-contracts
          #f))
+      (define local (module-import-local-name import name))
       (when contract
         (hash-set!
          raising-functions
@@ -1889,8 +1930,8 @@
           (module-interface-namespace interface)
           name)
          contract)
-        (when (and refer (memq name refer))
-          (hash-set! raising-functions name contract)))))
+        (when local
+          (hash-set! raising-functions local contract)))))
   (for* ([raw-form (in-list (program-forms prog))]
          [form (in-value (unwrap-definition-form raw-form))]
          #:when (defn-form? form))
@@ -2252,17 +2293,19 @@
     (define namespace (module-interface-namespace interface))
     (define members (interface-member-candidates interface))
     (define profile (semantic-profile-for-target (program-target prog)))
+    (define import-input (module-import-receipt-input import))
     (record-program-read-receipt!
      prog
      (make-read-receipt-v1
       'module-member-enumeration
-      (list 'import prefix namespace)
+      import-input
       members
       (list->vector members)
       profile
       (program-target prog)
       (hash 'check-profile (current-check-profile)
-            'consumer 'build-initial-env)
+            'consumer 'build-initial-env
+            'import import-input)
       #:semantic-fact-ids (list (module-interface-digest interface))))
     (for ([(name binding) (in-hash (module-interface-bindings interface))]
           #:unless (eq? (interface-binding-kind binding) 'macro))
@@ -2317,16 +2360,18 @@
   ;; required namespace's catalog entry onto each referred bare name, again
   ;; replacing only parser-created Any placeholders.
   (for ([r (in-list (program-requires prog))]
-        #:when (require-entry-refer r))
+        #:when (pair? (require-entry-bindings r)))
     (define namespace (require-entry-ns r))
     (define catalog (builtin-env-for-target (program-target prog)))
-    (for ([name (in-list (require-entry-refer r))])
+    (for ([binding (in-list (require-entry-bindings r))])
+      (define source (import-binding-source binding))
+      (define local (import-binding-local binding))
       (define contract
-        (hash-ref catalog (qualified-ref namespace name #f) #f))
+        (hash-ref catalog (qualified-ref namespace source #f) #f))
       (when (and contract
-                 (or (not (hash-has-key? env name))
-                     (any-type? (hash-ref env name))))
-        (hash-set! env name contract))))
+                 (or (not (hash-has-key? env local))
+                     (any-type? (hash-ref env local))))
+        (hash-set! env local contract))))
   ;; record types imported from other modules
   (define imported-field-order (program-imported-record-field-order prog))
   (for ([(rec-name field-map) (in-hash (program-imported-record-fields prog))])
@@ -2346,7 +2391,6 @@
     (define interface (module-import-interface import))
     (define prefix (module-import-prefix import))
     (define namespace (module-interface-namespace interface))
-    (define refer (module-import-refer import))
     (for ([(name contract)
            (in-hash (module-interface-record-contracts interface))])
       (define fields (interface-record-contract-fields contract))
@@ -2361,11 +2405,17 @@
         (append
          (list (qualified-interface-name prefix name)
                (qualified-interface-name namespace name))
-         (if (and refer
-                  (or (memq name refer)
-                      (memq (string->symbol (format "->~a" name)) refer)))
-             (list name)
-             '())))
+         (cond
+           [(module-import-local-name import name) => list]
+           [(module-import-binding-for-source
+             import
+             (string->symbol (format "->~a" name)))
+            => (lambda (binding)
+                 (if (eq? (import-binding-source binding)
+                          (import-binding-local binding))
+                     (list name)
+                     '()))]
+           [else '()])))
       (for ([spelling (in-list (remove-duplicates spellings equal?))])
         (hash-set! RECORD-FIELDS spelling field-map)
         (hash-set! RECORD-FIELD-ORDER spelling field-order))))
@@ -3021,17 +3071,17 @@
     (define interface (module-import-interface import))
     (define prefix (module-import-prefix import))
     (define namespace (module-interface-namespace interface))
-    (define refer (module-import-refer import))
     (for ([(name binding) (in-hash (module-interface-bindings interface))])
       ;; A known-negative provider must remain distinguishable from an unknown
       ;; host call while computing the local fixed point. Store #f explicitly
       ;; so UNKNOWN-CALL-SYNCHRONOUS? cannot accidentally bless it.
       (define provider
         (and (interface-binding-synchronous? binding) namespace))
+      (define local (module-import-local-name import name))
       (hash-set! proofs (qualified-interface-name prefix name) provider)
       (hash-set! proofs (qualified-interface-name namespace name) provider)
-      (when (and refer (memq name refer))
-        (hash-set! proofs name provider))))
+      (when local
+        (hash-set! proofs local provider))))
   ;; Typed externs and platform/builtin callables have no Beagle body capable
   ;; of hiding await. Their type declarations are the host boundary proof.
   ;; Imported interface bindings are also projected into PROGRAM-EXTERNS for
@@ -3171,15 +3221,15 @@
     (define interface (module-import-interface import))
     (define prefix (module-import-prefix import))
     (define namespace (module-interface-namespace interface))
-    (define refer (module-import-refer import))
     (for ([(name binding) (in-hash (module-interface-bindings interface))])
       (define provider
         (and (interface-binding-returns-synchronous-callable? binding)
              namespace))
+      (define local (module-import-local-name import name))
       (hash-set! proofs (qualified-interface-name prefix name) provider)
       (hash-set! proofs (qualified-interface-name namespace name) provider)
-      (when (and refer (memq name refer))
-        (hash-set! proofs name provider))))
+      (when local
+        (hash-set! proofs local provider))))
   ;; Greatest fixed point handles factories that return another local factory's
   ;; result, including recursive SCCs, without source-order bias.
   (for ([name (in-hash-keys local-definitions)])
@@ -10104,6 +10154,23 @@
 (define current-interface-member-candidate-cache (make-parameter #f))
 (define current-resolution-receipt-cache (make-parameter #f))
 
+(define (module-import-resolution-indexes prog)
+  (define prefix->import (make-hash))
+  (define local->binding (make-hasheq))
+  (for ([import (in-list (program-imported-module-interfaces prog))])
+    (define interface (module-import-interface import))
+    (hash-set! prefix->import
+               (symbol->string (module-import-prefix import))
+               import)
+    (hash-set! prefix->import
+               (symbol->string (module-interface-namespace interface))
+               import)
+    (for ([binding (in-list (module-import-bindings import))])
+      (hash-set! local->binding
+                 (import-binding-local binding)
+                 (cons import binding))))
+  (values prefix->import local->binding))
+
 (define (interface-member-candidates interface)
   (define cache (current-interface-member-candidate-cache))
   (define (compute)
@@ -10112,7 +10179,8 @@
       (hash-ref! cache interface compute)
       (compute)))
 
-(define (record-resolution-receipt! prog query candidates result interface)
+(define (record-resolution-receipt! prog query candidates result interface
+                                    #:import [import #f])
   (define cache (current-resolution-receipt-cache))
   (when cache
     ;; The receipt table is identity-deduplicated. Avoid reserializing the
@@ -10133,7 +10201,8 @@
         profile
         target
         (hash 'check-profile (current-check-profile)
-              'resolution 'module-interface)
+              'resolution 'module-interface
+              'import (and import (module-import-receipt-input import)))
         #:semantic-fact-ids
         (if interface
             (list (module-interface-digest interface))
@@ -10143,17 +10212,8 @@
 (define (check-module-interface-resolution! prog)
   (when (and (>= (current-check-profile) 1)
              (pair? (program-imported-module-interfaces prog)))
-    (define prefix->interface (make-hash))
-    (for ([import (in-list (program-imported-module-interfaces prog))])
-      (define interface (module-import-interface import))
-      (hash-set! prefix->interface
-                 (symbol->string (module-import-prefix import))
-                 interface)
-      ;; A fully-qualified use remains valid even when the require also names
-      ;; an alias.
-      (hash-set! prefix->interface
-                 (symbol->string (module-interface-namespace interface))
-                 interface))
+    (define-values (prefix->import local->binding)
+      (module-import-resolution-indexes prog))
     (define violations '())
     (define (visit! ref loc)
       (define-values (spelling prefix member)
@@ -10174,22 +10234,35 @@
                (values raw (substring raw 0 slash)
                        (string->symbol (substring raw (add1 slash))))
                (values raw #f #f))]))
-      (when prefix
-        (define interface (hash-ref prefix->interface prefix #f))
+      (define bare-entry
+        (and (not prefix)
+             (symbol? ref)
+             (hash-ref local->binding ref #f)))
+      (define import
+        (if prefix
+            (hash-ref prefix->import prefix #f)
+            (and bare-entry (car bare-entry))))
+      (define binding (and bare-entry (cdr bare-entry)))
+      (when import
+        (define interface (module-import-interface import))
+        (define source (if binding (import-binding-source binding) member))
         (define candidates
-          (if interface (interface-member-candidates interface) '()))
+          (interface-member-candidates interface))
         (record-resolution-receipt!
          prog
-         spelling
+         (if binding
+             (module-import-binding-receipt-query import binding)
+             spelling)
          candidates
-         (if (and interface (module-interface-export? interface member))
+         (if (module-interface-export? interface source)
              'hit
              'miss)
-         interface)
-        (when (and interface
-                   (not (module-interface-export? interface member)))
+         interface
+         #:import import)
+        (when (and prefix
+                   (not (module-interface-export? interface source)))
           (set! violations
-                (cons (list spelling member interface loc) violations)))))
+                (cons (list spelling source interface loc) violations)))))
     (for ([form (in-list (program-forms prog))])
       (walk-exprs-for-syms form (program-src-table prog) visit!))
     (when (pair? violations)
@@ -10277,16 +10350,8 @@
     (define module-prefixes
       (for/set ([(_ p) (in-hash (program-imported-symbol-ns prog))])
         (symbol->string p)))
-    (define prefix->interface
-      (for/fold ([out (hash)])
-                ([import (in-list (program-imported-module-interfaces prog))])
-        (define interface (module-import-interface import))
-        (hash-set
-         (hash-set out
-                   (symbol->string (module-import-prefix import))
-                   interface)
-         (symbol->string (module-interface-namespace interface))
-         interface)))
+    (define-values (prefix->import local->binding)
+      (module-import-resolution-indexes prog))
     (define noted-ns (mutable-set))
     (define violations '())
     (define (visit! ref loc)
@@ -10316,7 +10381,16 @@
                   (qualified-interface-name
                    (qualified-ref-qualifier ref)
                    (qualified-ref-name ref))))))
-      (define interface (and qualified? (hash-ref prefix->interface p #f)))
+      (define bare-entry
+        (and (not qualified?)
+             (symbol? ref)
+             (hash-ref local->binding ref #f)))
+      (define import
+        (if qualified?
+            (hash-ref prefix->import p #f)
+            (and bare-entry (car bare-entry))))
+      (define binding (and bare-entry (cdr bare-entry)))
+      (define interface (and import (module-import-interface import)))
       (define ns (hash-ref required p #f))
       (define candidates
         (cond
@@ -10325,10 +10399,19 @@
           [else '()]))
       (record-resolution-receipt!
        prog
-       s
+       (if binding
+           (module-import-binding-receipt-query import binding)
+           s)
        candidates
-       (if resolved-in-env? 'hit 'miss)
-       interface)
+       (if (if binding
+               (module-interface-export?
+                interface
+                (import-binding-source binding))
+               resolved-in-env?)
+           'hit
+           'miss)
+       interface
+       #:import import)
       (when (and qualified?
                  (char-alphabetic? (string-ref s 0))
                  (or (not clj-target?)

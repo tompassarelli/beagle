@@ -895,7 +895,6 @@
 (define current-js-union-members (make-parameter (hasheq)))
 (define current-js-record-field-bindings (make-parameter (hasheq)))
 (define current-js-record-ns (make-parameter (hasheq)))
-(define current-js-record-validator-refs (make-parameter (hasheq)))
 (define current-js-record-constructors (make-parameter (set)))
 (define current-js-declared-externs (make-parameter (set)))
 (define current-js-scalar-fns (make-parameter (set)))
@@ -1605,29 +1604,26 @@
       (hash-set h rec-name field-names)))
   (for*/fold ([table with-legacy-type-names])
              ([import (in-list (program-imported-module-interfaces prog))]
-              [entry
-               (in-value
-                (let ([interface (module-import-interface import)])
-                  (list interface
-                        (module-import-prefix import)
-                        (module-interface-namespace interface)
-                        (module-import-refer import))))]
               [(record-name contract)
                (in-hash
-                (module-interface-record-contracts (car entry)))])
+                (module-interface-record-contracts
+                 (module-import-interface import)))])
     (define fields
       (for/list ([field (in-list
                          (interface-record-contract-fields contract))])
         (symbol->string (param-name field))))
+    (define interface (module-import-interface import))
+    (define prefix (module-import-prefix import))
+    (define namespace (module-interface-namespace interface))
     (define prefix-ref
-      (qualified-ref (cadr entry) record-name (caddr entry)))
+      (qualified-ref prefix record-name namespace))
     (define namespace-ref
-      (qualified-ref (caddr entry) record-name (caddr entry)))
+      (qualified-ref namespace record-name namespace))
     (define next
       (hash-set (hash-set table prefix-ref fields) namespace-ref fields))
-    (if (and (cadddr entry) (memq record-name (cadddr entry)))
-        (hash-set next record-name fields)
-        next)))
+    (define local
+      (binding-local-for-source (module-import-bindings import) record-name))
+    (if local (hash-set next local fields) next)))
 
 (define (record-namespace-ref name)
   (define namespaces (current-js-record-ns))
@@ -1743,86 +1739,6 @@
                    (hash-ref (deferror-form-member-fields form) member '())))]
       [else table])))
 
-;; A checked record-update contract names the declaration by its canonical
-;; provider identity. JavaScript, however, must call that provider through the
-;; consumer's actual require spelling: `p.$validator` for `:as p`, or the
-;; hidden named import for `:refer`. Keep that projection explicit and derived
-;; from the authoritative module interface; never turn a namespace string into
-;; an identifier and hope it matches the runtime import.
-(define (build-record-validator-reference-table prog)
-  (for/fold ([table (hasheq)])
-            ([contract
-              (in-list
-               (semantic-contract-table-values
-                (program-semantic-contracts prog)))]
-             #:when
-             (and (record-update-contract? contract)
-                  (record-update-contract-validator-symbol contract)))
-    (define record-name (record-update-contract-record-name contract))
-    (define resolved-contract
-      (program-record-contract-ref prog record-name #f))
-    (define validator
-      (and resolved-contract
-           (interface-record-contract-validator-symbol resolved-contract)))
-    (define namespace
-      (hash-ref (program-imported-record-ns prog) record-name #f))
-    (define import
-      (and namespace
-           (for/first
-               ([candidate
-                 (in-list (program-imported-module-interfaces prog))]
-                #:when
-                (eq? (module-interface-namespace
-                      (module-import-interface candidate))
-                     namespace))
-             candidate)))
-    (define interface (and import (module-import-interface import)))
-    (define imported-record-name
-      (and interface
-           (for/first
-               ([(candidate-name candidate-contract)
-                 (in-hash (module-interface-record-contracts interface))]
-                #:when
-                (equal? candidate-contract resolved-contract))
-             candidate-name)))
-    (cond
-      [(not imported-record-name) table]
-      [else
-       (define refer (module-import-refer import))
-       (define referred?
-         (and refer
-              (or (memq imported-record-name refer)
-                  (memq
-                   (string->symbol (format "->~a" imported-record-name))
-                   refer))))
-       (hash-set
-        table
-        record-name
-        (if referred?
-            validator
-            (qualified-ref
-             (module-import-prefix import) validator namespace)))])))
-
-(define (record-update-runtime-validator contract)
-  (define validator (record-update-contract-validator-symbol contract))
-  (cond
-    [(not validator) #f]
-    [(hash-ref
-      (current-js-record-validator-refs)
-      (record-update-contract-record-name contract)
-      #f)
-     => values]
-    [(not
-      (hash-has-key?
-       (current-js-record-ns)
-       (record-update-contract-record-name contract)))
-     validator]
-    [else
-     (error
-      'beagle-js
-      "record update for ~a lacks an authoritative runtime validator import"
-      (record-update-contract-record-name contract))]))
-
 (define RECORD-CONSTRUCTOR-KINDS
   '(record-constructor union-constructor error-constructor))
 
@@ -1833,6 +1749,17 @@
   (or (require-entry-alias entry)
       (string->symbol
        (last (string-split (symbol->string (require-entry-ns entry)) ".")))))
+
+;; Ordered import bindings are the only authority for bare import spellings.
+;; Provider metadata is always keyed by SOURCE; target identifiers use LOCAL.
+(define (binding-by-source bindings source)
+  (for/first ([binding (in-list bindings)]
+              #:when (eq? (import-binding-source binding) source))
+    binding))
+
+(define (binding-local-for-source bindings source)
+  (define binding (binding-by-source bindings source))
+  (and binding (import-binding-local binding)))
 
 (define (require-module-import prog entry)
   (for/first ([import (in-list (program-imported-module-interfaces prog))]
@@ -1876,9 +1803,11 @@
                  (string->symbol (string-append "->" (symbol->string name)))))))
   (for/fold ([constructors local]) ([entry (in-list (program-requires prog))])
     (for/fold ([next constructors])
-              ([name (in-list (or (require-entry-refer entry) '()))]
-               #:when (record-constructor-import? prog entry name))
-      (set-add next name))))
+              ([binding (in-list (require-entry-bindings entry))]
+               #:when
+               (record-constructor-import?
+                prog entry (import-binding-source binding)))
+      (set-add next (import-binding-local binding)))))
 
 (define (build-scalar-fns prog)
   (define predicated
@@ -1930,9 +1859,10 @@
         values
         (qualified-ref (module-import-prefix import) runtime-name namespace))
        (qualified-ref namespace runtime-name namespace)))
-    (if (and (module-import-refer import)
-             (memq runtime-name (module-import-refer import)))
-        (set-add with-qualified runtime-name)
+    (define local-runtime-name
+      (binding-local-for-source (module-import-bindings import) runtime-name))
+    (if local-runtime-name
+        (set-add with-qualified local-runtime-name)
         with-qualified)))
 
 (define (validate-js-target! prog)
@@ -1961,8 +1891,10 @@
   (define from-externs (list->set (hash-keys (program-externs prog))))
   (define from-refers
     (for/fold ([s (set)]) ([r (in-list (program-requires prog))])
-      (define refer (require-entry-refer r))
-      (if refer (set-union s (list->set refer)) s)))
+      (set-union
+       s
+       (for/set ([binding (in-list (require-entry-bindings r))])
+         (import-binding-local binding)))))
   (set-union from-forms from-externs from-refers))
 
 ;; A namespace alias and a lexical binding occupy distinct source roles even
@@ -1995,7 +1927,7 @@
 (define (build-js-module-binding-table prog)
   (for/fold ([table (hasheq)])
             ([entry (in-list (program-requires prog))]
-             #:unless (require-entry-refer entry))
+             #:when (null? (require-entry-bindings entry)))
     (define prefix (require-prefix entry))
     (define namespace (require-entry-ns entry))
     (define collides?
@@ -2098,8 +2030,6 @@
                  [current-js-record-field-bindings
                   (build-record-field-binding-table prog)]
                  [current-js-record-ns (program-imported-record-ns prog)]
-                 [current-js-record-validator-refs
-                  (build-record-validator-reference-table prog)]
                  [current-js-record-constructors
                   (build-record-constructor-set prog)]
                  [current-js-declared-externs
@@ -2337,109 +2267,149 @@
     [identity
      (error 'beagle-js "unsupported require module identity: ~v" identity)]))
 
+(struct js-runtime-import
+  (authored-source runtime-source normalized-local)
+  #:transparent)
+
+;; Constructor lowering and JS mangling can converge distinct authored locals.
+;; That convergence is valid only when both names denote one provider runtime
+;; source, as record type/runtime names and authored `->Record` constructors do.
+(define (normalize-js-runtime-imports! entry imports)
+  (define-values (_by-js-local reversed)
+    (for/fold ([by-js-local (hash)]
+               [reversed '()])
+              ([candidate (in-list imports)])
+      (define js-local
+        (mangle-name (js-runtime-import-normalized-local candidate)))
+      (define previous (hash-ref by-js-local js-local #f))
+      (cond
+        [(not previous)
+         (values (hash-set by-js-local js-local candidate)
+                 (cons candidate reversed))]
+        [(equal? (js-runtime-import-runtime-source previous)
+                 (js-runtime-import-runtime-source candidate))
+         (values by-js-local reversed)]
+        [else
+         (error
+          'beagle-js
+          (string-append
+           "require identity ~v imports authored sources ~v and ~v through "
+           "runtime sources ~v and ~v, which both emit as JavaScript local ~a")
+          (require-entry-identity entry)
+          (js-runtime-import-authored-source previous)
+          (js-runtime-import-authored-source candidate)
+          (js-runtime-import-runtime-source previous)
+          (js-runtime-import-runtime-source candidate)
+          js-local)])))
+  (reverse reversed))
+
 (define (emit-module-header prog)
   (define importer-ns (symbol->string (program-namespace prog)))
   (define rs (program-requires prog))
-  (define used-unqualified-record-validators
-    (for/set ([contract
-               (in-list
-                (semantic-contract-table-values
-                 (program-semantic-contracts prog)))]
-              #:when
-              (and (record-update-contract? contract)
-                   (record-update-runtime-validator contract)
-                   (symbol?
-                    (record-update-runtime-validator contract))))
-      (record-update-runtime-validator contract)))
-  (define (referred-record-validators entry refer)
-    (define import (require-module-import prog entry))
-    (define interface (and import (module-import-interface import)))
-    (if (not interface)
-        '()
-        (for/list
-            ([(record-name contract)
-              (in-hash (module-interface-record-contracts interface))]
-             #:when
-             (let ([validator
-                    (interface-record-contract-validator-symbol contract)])
-               (and validator
-                    (set-member?
-                     used-unqualified-record-validators validator)
-                    (or (memq record-name refer)
-                        (memq
-                         (string->symbol (format "->~a" record-name))
-                         refer)))))
-          (interface-record-contract-validator-symbol contract))))
-  (define (runtime-import-name entry name)
+  (define (runtime-import-source-name entry source)
     (define import (require-module-import prog entry))
     (define interface (and import (module-import-interface import)))
     (define binding
-      (and interface (module-interface-binding-ref interface name #f)))
+      (and interface (module-interface-binding-ref interface source #f)))
     (define kind (and binding (interface-binding-kind binding)))
     (cond
       [(and interface
-            (module-interface-type-export? interface name)
+            (module-interface-type-export? interface source)
             (not binding))
        #f]
-      [(record-constructor-import? prog entry name)
-       (string->symbol (substring (symbol->string name) 2))]
+      [(record-constructor-import? prog entry source)
+       (string->symbol (substring (symbol->string source) 2))]
       [(eq? kind 'scalar-accessor)
        #f]
       [(eq? kind 'scalar-constructor)
        (and (interface-scalar-predicated?
              interface
-             (string->symbol (substring (symbol->string name) 2)))
-            name)]
+             (string->symbol (substring (symbol->string source) 2)))
+            source)]
       [(eq? kind 'extern) #f]
-      [else name]))
-  (define (runtime-import-spec entry source-name local-name)
+      [else source]))
+  (define (runtime-import-local-name entry source local)
+    (if (and (record-constructor-import? prog entry source)
+             (string-prefix? (symbol->string local) "->"))
+        (string->symbol (substring (symbol->string local) 2))
+        local))
+  (define (runtime-import-spec entry runtime-import)
     (define import (require-module-import prog entry))
     (define interface (and import (module-import-interface import)))
     (define public-name
       (and interface
-           (module-interface-public-esm-name interface source-name #f)))
-    (if public-name
-        (format "~v as ~a" public-name (mangle-name local-name))
-        (mangle-name local-name)))
-  ;; A record's type/runtime name and authored `->Record` constructor both
-  ;; resolve to the same JavaScript factory binding. ESM permits either export
-  ;; spelling, but it cannot declare that local binding twice.
-  (define (same-runtime-import-binding? left right)
-    (eq? (cdr left) (cdr right)))
+           (module-interface-public-esm-name
+            interface
+            (js-runtime-import-authored-source runtime-import)
+            #f)))
+    (define provider-binding
+      (if public-name
+          (format "~v" public-name)
+          (mangle-name (js-runtime-import-runtime-source runtime-import))))
+    (define local-binding
+      (mangle-name
+       (js-runtime-import-normalized-local runtime-import)))
+    (if (or public-name (not (string=? provider-binding local-binding)))
+        (format "~a as ~a" provider-binding local-binding)
+        provider-binding))
   ;; A `:refer`'d name that resolved to a macro is compile-time only — it's
   ;; expanded away and never referenced at runtime, and the target module emits
   ;; no runtime export for it. Emitting it in `import { … }` produces an ESM that
   ;; throws "does not provide an export named X" in any consumer that ISN'T
   ;; bundled (e.g. tests loaded via dynamic import). Drop macro refers; if a
   ;; require's refers are ALL macros, emit no import line at all.
-  (define macros (program-macros prog))
+  (define (compile-time-macro-import? entry source)
+    (define import (require-module-import prog entry))
+    (define interface (and import (module-import-interface import)))
+    (define local
+      (binding-local-for-source (require-entry-bindings entry) source))
+    (or (and interface
+             (hash-ref (module-interface-macros interface) source #f))
+        (and local (hash-ref (program-macros prog) local #f))))
   (define lines
     (filter
      (lambda (s) (not (string=? s "")))
      (for/list ([r (in-list rs)])
-       (define refer (require-entry-refer r))
+       (define bindings (require-entry-bindings r))
+       (define module-import (require-module-import prog r))
        (define module-path-literal
          (js-string-lit (require-module-path importer-ns r)))
-       (if refer
-         (let ([runtime-refer
-                (remove-duplicates
-                 (append
-                  (filter-map
-                   (lambda (name)
-                     (define local-name
-                       (and (not (hash-ref macros name #f))
-                            (runtime-import-name r name)))
-                     (and local-name (cons name local-name)))
-                  refer)
-                  (for/list ([name (in-list (referred-record-validators r refer))])
-                    (cons name name)))
-                 same-runtime-import-binding?)])
-           (if (null? runtime-refer)
+       (if (pair? bindings)
+         (let ()
+           (define runtime-imports
+             (normalize-js-runtime-imports!
+              r
+              (append
+               (filter-map
+                (lambda (binding)
+                  (define source (import-binding-source binding))
+                  (define runtime-source
+                    (and (not (compile-time-macro-import? r source))
+                         (runtime-import-source-name r source)))
+                  (and runtime-source
+                       (js-runtime-import
+                        source
+                        runtime-source
+                        (runtime-import-local-name
+                         r source (import-binding-local binding)))))
+                bindings)
+               (for/list
+                   ([binding
+                     (in-list
+                      (if module-import
+                          (program-record-validator-import-bindings
+                           prog module-import)
+                          '()))])
+                 (js-runtime-import
+                  (import-binding-source binding)
+                  (import-binding-source binding)
+                  (import-binding-local binding))))))
+           (if (null? runtime-imports)
              ""
              (format "import { ~a } from ~a;"
                      (string-join
-                      (for/list ([entry (in-list runtime-refer)])
-                        (runtime-import-spec r (car entry) (cdr entry)))
+                      (for/list ([runtime-import (in-list runtime-imports)])
+                        (runtime-import-spec r runtime-import))
                       ", ")
                      module-path-literal)))
          (let ([alias (require-prefix r)])
@@ -3697,6 +3667,16 @@
 
 ;; --- with (record update) --------------------------------------------------
 
+(define (emit-record-update-validator-reference validator)
+  (define parts (string-split (symbol->string validator) "/"))
+  (if (null? (cdr parts))
+      (emit-expr validator)
+      (emit-qualified-reference
+       (qualified-ref
+        (string->symbol (car parts))
+        (string->symbol (string-join (cdr parts) "/"))
+        #f))))
+
 (define (emit-with e)
   (define target-str (emit-expr (with-form-target e)))
   (define record-type
@@ -3729,13 +3709,14 @@
             target-str (string-join update-strs ", ")))
   (define validator
     (and (record-update-contract? contract)
-         (record-update-runtime-validator contract)))
+         (record-update-contract-validator-symbol contract)))
   (define validated-value
     (if validator
-        ;; The checker resolves this conceptual symbol to the provider-owned
-        ;; helper. Qualified imports route through their namespace object;
-        ;; referred helpers are synthesized into the named ESM import list.
-        (format "~a(~a)" (emit-expr validator) value)
+        ;; The checker resolves qualified providers and final referred locals;
+        ;; module lowering imports the latter from the exact provider.
+        (format "~a(~a)"
+                (emit-record-update-validator-reference validator)
+                value)
         value))
   (if statically-record?
       (runtime-render-call

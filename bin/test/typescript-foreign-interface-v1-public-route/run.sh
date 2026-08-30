@@ -54,6 +54,21 @@ if (selected?.ann?.kind !== "foreign" || selected?.effectiveType?.kind !== "fore
 if (JSON.stringify(ast).includes("\"name\":\"Any\"")) throw new Error("checked projection contains Beagle Any");
 ' || fail "checked AST did not retain canonical foreign import semantics"
 
+set +e
+bb -cp "$root/self-host/seed" -m selfhost.main \
+    emit-from-ast --target js \
+    <"$scratch/consumer.ast.json" \
+    >"$scratch/direct-ast.stdout" \
+    2>"$scratch/direct-ast.stderr"
+direct_ast_status=$?
+set -e
+[[ "$direct_ast_status" -eq 1 ]] ||
+    fail "renamed checked AST exited $direct_ast_status through the direct emitter, expected 1"
+grep -Fq -- \
+    'a checked program with :rename must enter through source graph admission' \
+    "$scratch/direct-ast.stderr" ||
+    fail "direct emitter did not require renamed AST to enter through source graph admission"
+
 sed 's/(choose "public-route")/(parse "public-route")/' "$consumer" >"$project/bare-source.bjs"
 if "$root/bin/beagle" check "$project/bare-source.bjs" \
     >"$scratch/bare.stdout" 2>"$scratch/bare.stderr"; then

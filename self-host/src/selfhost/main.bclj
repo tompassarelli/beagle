@@ -239,6 +239,7 @@
         cached (get (deref MODULE-RESOLUTION-EDGE-CACHE) edge-key)]
     (if (some? cached)
       (get cached "path")
+      ;; A record distinguishes a captured miss from an edge not yet probed.
       (let [providers (get (get (deref MODULE-RESOLUTION) "providers") rn [])
             path (cond
               (> (count providers) 1)
@@ -253,8 +254,7 @@
               (nth providers 0)
 
               :else
-              (let [candidates
-                      (root-candidate-paths rn (source-extension absolute-source))]
+              (let [candidates (root-candidate-paths rn (source-extension absolute-source))]
                 (cond
                   (> (count candidates) 1)
                   (do (selfhost.rt/eprint
@@ -265,7 +265,6 @@
                       nil)
                   (= (count candidates) 1) (nth candidates 0)
                   :else nil)))]
-        ;; A record distinguishes a captured miss from an edge not yet probed.
         (swap! MODULE-RESOLUTION-EDGE-CACHE assoc edge-key {"path" path})
         path))))
 
@@ -350,8 +349,7 @@
       (get cached "requires")
       (do
         (p/reset-errors!)
-        (let [requires
-                (p/discover-requires-reporting! (get unit "datums"))
+        (let [requires (p/discover-requires-reporting! (get unit "datums"))
               errors (p/parse-errors)]
           (if (> (count errors) 0)
             (do
@@ -364,20 +362,25 @@
 ;; One classifier owns every require route seen by admission and final loading.
 ;; Resolution misses are legitimate only at the explicitly authorized host or
 ;; declare-extern boundary; all other misses are terminal native diagnostics.
+;; Applicability is orthogonal to route kind: a renamed Beagle-source edge is
+;; still resolved and traversed during graph admission, but it can never reach
+;; native surface loading until every downstream consumer implements rename.
 (defn- require-route!
   [require Any
    source-unit Any
    target String] Any
-  (if (or (p/native-esm-require? require) (p/renamed-require? require))
-    {"kind" "unsupported"}
+  (if (p/native-esm-require? require)
+    {"kind" "unsupported" "applicable" false}
     (let [ns (get require "ns")
           prefix (require-prefix require)
           refer-syms (require-refer-syms require)
+          applicable (not (p/renamed-require? require))
           source-path (get source-unit "path")
           path (resolve-required-source! ns source-path)]
       (cond
         (some? path)
         {"kind" "source"
+         "applicable" applicable
          "unit" (read-required-source-unit! ns path)
          "prefix" prefix
          "refer" refer-syms}
@@ -386,7 +389,7 @@
             (extern-authorized-require?
               (declared-extern-names (get source-unit "datums"))
               ns prefix refer-syms))
-        {"kind" "host"}
+        {"kind" "host" "applicable" applicable}
 
         :else
         (do
@@ -411,15 +414,15 @@
           [current Any
            require Any] Any
           (let [route (require-route! require unit target)
-                kind (get route "kind")]
+                kind (get route "kind")
+                next (if (= true (get route "applicable"))
+                       current
+                       (assoc current "admitted" false))]
             (cond
-              (= kind "unsupported")
-              (assoc current "admitted" false)
-
               (= kind "source")
-              (admit-source-unit*! (get route "unit") target current)
+              (admit-source-unit*! (get route "unit") target next)
 
-              :else current)))
+              :else next)))
         (assoc state "seen" (assoc (get state "seen") path true))
         (discover-source-requires! unit)))))
 
@@ -524,7 +527,7 @@
       (let [route (require-route! require source-unit target)
             kind (get route "kind")]
         (cond
-          (= kind "unsupported")
+          (not (= true (get route "applicable")))
           (do
             (unsupported-route-invariant! (get source-unit "path"))
             surfaces)
@@ -760,6 +763,12 @@
        (every? (fn [key String] Bool (contains? projection key))
          CHECKED-PROGRAM-KEYS)))
 
+(defn- contains-renamed-require? [requires Any] Bool
+  (boolean
+    (some
+      (fn [require Any] Bool (p/renamed-require? require))
+      requires)))
+
 (defn- complete-binding? [binding Any] Bool
   (and (map? binding)
        (contains? binding "name")
@@ -957,6 +966,10 @@
 
     (not (vector? (get projection "requires")))
     (invalid-projection! "requires must be an array")
+
+    (contains-renamed-require? (get projection "requires"))
+    (invalid-projection!
+      "a checked program with :rename must enter through source graph admission")
 
     (not (and (vector? (get projection "imports"))
               (every? string? (get projection "imports"))))

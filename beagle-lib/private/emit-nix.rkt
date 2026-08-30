@@ -116,10 +116,15 @@
 (define (require-module-import prog entry)
   (for/first ([import (in-list (program-imported-module-interfaces prog))]
               #:when
-              (eq? (module-interface-namespace
-                    (module-import-interface import))
-                   (require-entry-ns entry)))
+              (equal? (module-import-identity import)
+                      (require-entry-identity entry)))
     import))
+
+(define (require-beagle-namespace entry)
+  (match (require-entry-identity entry)
+    [(module-identity 'beagle-namespace (? symbol? namespace)) namespace]
+    [identity
+     (error 'beagle-nix "unsupported require module identity: ~v" identity)]))
 
 (define NON-RUNTIME-INTERFACE-KINDS
   '(extern macro protocol-method defmulti))
@@ -129,38 +134,6 @@
   (and binding
        (not (memq (interface-binding-kind binding)
                   NON-RUNTIME-INTERFACE-KINDS))))
-
-(define (used-unqualified-record-validators prog)
-  (for/seteq ([contract
-               (in-list
-                (semantic-contract-table-values
-                 (program-semantic-contracts prog)))]
-              #:when
-              (and (record-update-contract? contract)
-                   (record-update-contract-validator-symbol contract)
-                   (not
-                    (string-contains?
-                     (symbol->string
-                      (record-update-contract-validator-symbol contract))
-                     "/"))))
-    (record-update-contract-validator-symbol contract)))
-
-(define (referred-record-validator-symbols prog entry interface)
-  (define used (used-unqualified-record-validators prog))
-  (define referred (or (require-entry-refer entry) '()))
-  (for/list ([(record-name contract)
-              (in-hash (module-interface-record-contracts interface))]
-             #:do
-             [(define validator
-                (interface-record-contract-validator-symbol contract))
-              (define constructor
-                (string->symbol (format "->~a" record-name)))]
-             #:when
-             (and validator
-                  (set-member? used validator)
-                  (or (memq record-name referred)
-                      (memq constructor referred))))
-    validator))
 
 ;; Nix syntactic keywords. `import` is a function (builtins.import), not a
 ;; keyword, so it's intentionally excluded.
@@ -592,13 +565,14 @@
     (for/fold ([prefixes (hash)])
               ([entry (in-list (program-requires prog))]
                [index (in-naturals)])
-      (define namespace (symbol->string (require-entry-ns entry)))
+      (define namespace
+        (symbol->string (require-beagle-namespace entry)))
       (define default-prefix (last (string-split namespace ".")))
       (define alias (require-entry-alias entry))
       (define runtime-prefix
         (if alias
             (mangle-name alias)
-            (if (require-entry-refer entry)
+            (if (pair? (require-entry-bindings entry))
                 (format "bgl____module__~a" index)
                 (mangle-name (string->symbol default-prefix)))))
       (define with-namespace (hash-set prefixes namespace runtime-prefix))
@@ -648,29 +622,31 @@
         (apply
          append
          (for/list ([r (in-list requires)] [index (in-naturals)])
-           (define namespace (symbol->string (require-entry-ns r)))
+           (define provider-namespace (require-beagle-namespace r))
+           (define namespace (symbol->string provider-namespace))
            (define module-name (format "bgl____module__~a" index))
            (define module-import (require-module-import prog r))
            (define interface
              (and module-import (module-import-interface module-import)))
            (define alias
              (or (require-entry-alias r)
-                 (and (not (require-entry-refer r))
+                 (and (null? (require-entry-bindings r))
                       (string->symbol (last (string-split namespace "."))))))
            (append
             (list
              (format "  ~a = import ~a;"
                      module-name
                      (relative-nix-module-path
-                      ns (require-entry-ns r))))
+                      ns provider-namespace)))
             (if alias
                 (list (format "  ~a = ~a;" (mangle-name alias) module-name))
                 '())
-            (for/list ([name (in-list (or (require-entry-refer r) '()))]
+            (for/list ([binding (in-list (require-entry-bindings r))]
                        #:when
                        (cond
                          [interface
-                          (runtime-interface-binding? interface name)]
+                          (runtime-interface-binding?
+                           interface (import-binding-source binding))]
                          [else
                           (error
                            'beagle-nix
@@ -680,19 +656,19 @@
                             "guess its runtime export surface")
                            namespace)]))
               (format "  ~a = ~a.~a;"
-                      (mangle-name name)
+                      (mangle-name (import-binding-local binding))
                       module-name
-                      (mangle-name name)))
-            (if interface
+                      (mangle-name (import-binding-source binding))))
+            (if module-import
                 (for/list
-                    ([validator
+                    ([binding
                       (in-list
-                       (referred-record-validator-symbols
-                        prog r interface))])
+                       (program-record-validator-import-bindings
+                        prog module-import))])
                   (format "  ~a = ~a.~a;"
-                          (mangle-name validator)
+                          (mangle-name (import-binding-local binding))
                           module-name
-                          (mangle-name validator)))
+                          (mangle-name (import-binding-source binding))))
                 '()))))
         "\n")
        "\n")))

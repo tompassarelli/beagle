@@ -35,6 +35,8 @@
 
 (define (require-entry->json r)
   (define identity (require-entry-identity r))
+  (define bindings (require-entry-bindings r))
+  (define rename (import-bindings->rename bindings))
   (hasheq
    'ns (symbol->string (require-entry-ns r))
    'identity
@@ -43,12 +45,12 @@
                     (if (symbol? value) (symbol->string value) value)))
    'alias (and (require-entry-alias r)
                (symbol->string (require-entry-alias r)))
-   'refer (and (require-entry-refer r)
-               (map symbol->string (require-entry-refer r)))
+   'refer (and (pair? bindings)
+               (map symbol->string (import-bindings->refer bindings)))
    'rename
-   (for/hasheq ([source (in-list (hash-keys (require-entry-rename r)))])
+   (for/hasheq ([source (in-list (hash-keys rename))])
      (values (symbol->string source)
-             (symbol->string (hash-ref (require-entry-rename r) source))))))
+             (symbol->string (hash-ref rename source))))))
 
 (define (float->json-value value)
   (cond

@@ -4,6 +4,7 @@
          racket/path
          racket/file
          racket/list
+         racket/match
          racket/runtime-path
          racket/set
          racket/string
@@ -83,13 +84,16 @@
 (define (materialize-js-runtime-requires! prog out-dir)
   (when out-dir
     (for ([entry (in-list (program-requires prog))])
-      (define relative-path (ns->path (require-entry-ns entry) 'js))
-      (define runtime-source
-        (build-path canonical-js-runtime-root relative-path))
-      (when (file-exists? runtime-source)
-        (define runtime-output (build-path out-dir relative-path))
-        (make-parent-directory* runtime-output)
-        (copy-file runtime-source runtime-output #t)))))
+      (match (require-entry-identity entry)
+        [(module-identity 'beagle-namespace (? symbol? namespace))
+         (define relative-path (ns->path namespace 'js))
+         (define runtime-source
+           (build-path canonical-js-runtime-root relative-path))
+         (when (file-exists? runtime-source)
+           (define runtime-output (build-path out-dir relative-path))
+           (make-parent-directory* runtime-output)
+           (copy-file runtime-source runtime-output #t))]
+        [_ (void)]))))
 
 (define (emit-checked-program prog path out-dir in-place? export-plan
                               #:warning-count [warning-count 0]
@@ -116,7 +120,10 @@
     (parameterize
       ([current-js-export-names
         (and (eq? target 'js)
-             (hash-ref export-plan ns (set)))])
+             (hash-ref
+              export-plan
+              (module-identity 'beagle-namespace ns)
+              (set)))])
       (emit-program prog)))
   (artifact-sink path target source)
   (define out-path
@@ -286,21 +293,24 @@
     (build-from-stxs
      stxs src-path out-dir json? warn? in-place? export-plan)))
 
-;; Exact ESM export demand for a batch. A named `:refer` requests only those
-;; bindings; a namespace import requests every public defn. The emitter keeps
-;; declaration rendering separate and receives only this set-valued sink plan.
+;; Exact ESM export demand for a batch. A named `:refer` requests provider
+;; sources, never consumer-local aliases; a namespace import requests every
+;; public defn. Exact identities keep same-spelled native ESM and Beagle modules
+;; from sharing one demand bucket.
 (define (programs->export-plan programs)
   (for/fold ([plan (hash)])
             ([prog (in-list programs)]
              #:when prog)
     (for/fold ([next plan])
               ([r (in-list (program-requires prog))])
-      (define ns (require-entry-ns r))
+      (define identity (require-entry-identity r))
+      (define bindings (require-entry-bindings r))
       (define requested
-        (if (require-entry-refer r)
-            (list->set (require-entry-refer r))
+        (if (pair? bindings)
+            (for/set ([binding (in-list bindings)])
+              (import-binding-source binding))
             (set '*)))
-      (hash-update next ns
+      (hash-update next identity
                    (lambda (prior) (set-union prior requested))
                    (set)))))
 

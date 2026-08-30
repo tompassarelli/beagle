@@ -287,12 +287,24 @@
     (= (char-at sym 0) "*")
     (= (char-at sym (- (count sym) 1)) "*")))
 
+(def COMPILER-IDENTIFIER-PREFIXES (Vec String) ["$beagle$" "bgl____"])
+
+(defn- reserved-compiler-identifier? [sym String] Bool
+  (boolean
+    (some
+      (fn [segment String] Bool
+        (boolean
+          (some
+            (fn [prefix String] Bool (str/starts-with? segment prefix))
+            COMPILER-IDENTIFIER-PREFIXES)))
+      (str/split sym #"/"))))
+
 (defn validate-identifier!
   [sym String
    context String] Any
-  (when (str/starts-with? sym "$beagle$")
+  (when (reserved-compiler-identifier? sym)
     (err! (str context " '" sym
-            "' uses the reserved compiler identifier prefix $beagle$")))
+            "' uses a reserved compiler identifier prefix")))
   sym)
 
 (defn- binding-datum->src [d Any] String
@@ -4376,6 +4388,10 @@
       (let [ref (lower-qualified-reference! (nth d 1))
             value (if (nil? ref) (make-ref! (nth d 1)) ref)]
         (assoc value "node" "clj-var-ref")))
+    (and (vector? d) (= (count d) 2) (= (nth d 0) "syntax"))
+    (err!
+      (str "Clojure Var quote expects one binding name, got: "
+        (racket-written-datum (nth d 1))))
     (and (vector? d) (> (count d) 0))
     (parse-list-form! d)
     :else
@@ -4438,6 +4454,22 @@
 ;; parsing, which reports the same malformed libspec through this decoder.
 (def REQUIRE-LIBSPEC-OPTIONS (Vec String) [":as" ":refer" ":rename"])
 
+;; The wire remains the canonical `refer` vector plus `rename` map.  This
+;; typed, ordered view is derived only while validating binding semantics, so
+;; source identity and final consumer spelling cannot drift into parallel
+;; authorities.
+(defrecord RequireBinding
+  [source String
+   local String])
+
+(defn ordered-require-bindings
+  [refer (Vec String)
+   rename (Map String String)] (Vec RequireBinding)
+  (mapv
+    (fn [source String] RequireBinding
+      (->RequireBinding source (get rename source source)))
+    refer))
+
 (defn- unquote-require-datum [datum Any] Any
   (if (and (vector? datum)
         (= (count datum) 2)
@@ -4461,6 +4493,37 @@
    message String] Any
   (when report? (err! (str "require: " message)))
   nil)
+
+(defn- validate-require-binding-name!
+  [name String
+   role String
+   report? Bool] Bool
+  (cond
+    (reserved-compiler-identifier? name)
+    (do
+      (require-libspec-error! report?
+        (str role " '" name "' uses a reserved compiler identifier prefix"))
+      false)
+
+    (str/includes? name "/")
+    (do
+      (require-libspec-error! report?
+        (str role " must be an unqualified bindable identifier, got: " name))
+      false)
+
+    :else true))
+
+(defn- validate-require-binding-names!
+  [bindings (Vec RequireBinding)
+   report? Bool] Bool
+  (every?
+    (fn [binding RequireBinding] Bool
+      (and
+        (validate-require-binding-name!
+          (requirebinding-source binding) ":rename source" report?)
+        (validate-require-binding-name!
+          (requirebinding-local binding) ":rename final local" report?)))
+    bindings))
 
 (defn- decode-refer!
   [datum Any
@@ -4519,10 +4582,14 @@
    refer Any
    report? Bool] Bool
   (let [sources (vec (keys rename))
+        bindings (ordered-require-bindings refer rename)
         locals (mapv
-                 (fn [source String] String (get rename source source))
-                 refer)]
+                 (fn [binding RequireBinding] String
+                   (requirebinding-local binding))
+                 bindings)]
     (cond
+      (not (validate-require-binding-names! bindings report?)) false
+
       (not (every?
              (fn [source String] Bool (has-item? refer source))
              sources))
@@ -4549,6 +4616,34 @@
         false)
 
       :else true)))
+
+(defn- validate-require-final-locals!
+  [requires Any
+   report? Bool] Bool
+  (let [bindings (reduce
+          (fn
+            [ordered Any
+             require Any] Any
+            (let [refer (get require "refer")]
+              (into ordered
+                (ordered-require-bindings
+                  (if (= refer false) [] refer)
+                  (get require "rename" {})))))
+          []
+          requires)]
+    (loop [remaining Any bindings
+           occupied Any {}]
+      (if (= (count remaining) 0)
+        true
+        (let [binding (first remaining)
+              local (requirebinding-local binding)]
+          (if (= true (get occupied local))
+            (do
+              (require-libspec-error! report?
+                (str ":rename final local " local
+                  " is referred by more than one libspec"))
+              false)
+            (recur (rest remaining) (assoc occupied local true))))))))
 
 (defn- require-source-identity [source Any] Any
   (cond
@@ -4694,7 +4789,9 @@
                 (when (some? r) (swap! requires conj r))))
             :else
             nil))))
-    (deref requires)))
+    (let [result (deref requires)]
+      (validate-require-final-locals! result report?)
+      result)))
 
 (defn discover-requires! [datums Any] Any
   (discover-requires*! datums false))
@@ -4884,6 +4981,7 @@
               (swap! imports into (parse-import-spec! spec "import")))
             :else
             nil))))
+    (validate-require-final-locals! (deref requires) true)
     (reset! CURRENT-PARSE-TARGET (deref target))
     (let [resolved-syntaxes (expand-and-resolve-program-syntax! (deref PROGRAM-SYNTAXES))
           resolved-datums (mapv mac/macro-datum resolved-syntaxes)]
@@ -6286,6 +6384,15 @@
       (and (= (get node "node") "clj-var-ref")
         (= (get node "qualifier") "north.main")
         (= (get node "name") "capture-facts"))))
+  (expect! "Clojure Var quote rejects a non-name before call lowering"
+    (let [_ (reset-errors!)
+          node (parse-expr* ["syntax" 42])
+          errors (parse-errors)]
+      (and
+        (= (get node "kind") "nil")
+        (= (count errors) 1)
+        (str/includes? (nth errors 0)
+          "Clojure Var quote expects one binding name, got: 42"))))
   (expect! "generic call"
     (let [node (parse-expr* ["println" ["#%string" "hello"]])]
       (and (= (get node "node") "call")
@@ -6728,9 +6835,86 @@
        "alias" "pkg"
        "refer" ["make"]
        "rename" {"make" "build"}}))
+  (expect! "require bindings preserve source order and derive final locals once"
+    (let [bindings (ordered-require-bindings
+            ["parse" "UserId"]
+            {"parse" "choose"})]
+      (and
+        (= (mapv
+             (fn [binding RequireBinding] String
+               (requirebinding-source binding))
+             bindings)
+          ["parse" "UserId"])
+        (= (mapv
+             (fn [binding RequireBinding] String
+               (requirebinding-local binding))
+             bindings)
+          ["choose" "UserId"]))))
+  (expect! "require binding names reject compiler-reserved and qualified source/local"
+    (let [invalid-specs [[BRACKET-TAG "pkg"
+            ":refer" [BRACKET-TAG "$beagle$source"]]
+           [BRACKET-TAG "pkg"
+            ":refer" [BRACKET-TAG "source"]
+            ":rename" [MAP-TAG "source" "bgl____local"]]
+           [BRACKET-TAG "pkg"
+            ":refer" [BRACKET-TAG "pkg/source"]]
+           [BRACKET-TAG "pkg"
+            ":refer" [BRACKET-TAG "source"]
+            ":rename" [MAP-TAG "source" "consumer/local"]]]]
+      (reset-errors!)
+      (let [quiet-results (mapv
+              (fn [spec Any] Any (decode-require-libspec! spec false))
+              invalid-specs)
+            quiet-errors (parse-errors)]
+        (reset-errors!)
+        (let [reporting-results (mapv
+                (fn [spec Any] Any (decode-require-libspec! spec true))
+                invalid-specs)
+              reporting-errors (parse-errors)]
+          (and
+            (every? (fn [result Any] Bool (nil? result)) quiet-results)
+            (= (count quiet-errors) 0)
+            (every? (fn [result Any] Bool (nil? result)) reporting-results)
+            (= (count reporting-errors) 4)
+            (= (count
+                 (filterv
+                   (fn [message String] Bool
+                     (str/includes? message
+                       "reserved compiler identifier prefix"))
+                   reporting-errors))
+              2)
+            (= (count
+                 (filterv
+                   (fn [message String] Bool
+                     (str/includes? message "unqualified bindable identifier"))
+                   reporting-errors))
+              2))))))
+  (expect! "require final-local collision is shared by discovery and parsing"
+    (let [datums [["require"
+            [BRACKET-TAG "first.lib"
+             ":refer" [BRACKET-TAG "parse"]
+             ":rename" [MAP-TAG "parse" "choose"]]
+            [BRACKET-TAG "second.lib"
+             ":refer" [BRACKET-TAG "choose"]]]]
+          _ (reset-errors!)
+          discovered (discover-requires-reporting! datums)
+          discovery-errors (parse-errors)
+          program (parse-program! datums)
+          program-errors (parse-errors)
+          collision? (fn [messages Any] Bool
+            (boolean
+              (some
+                (fn [message String] Bool
+                  (str/includes? message
+                    ":rename final local choose is referred by more than one libspec"))
+                messages)))]
+      (and
+        (= (count discovered) 2)
+        (= (count (get program "requires")) 2)
+        (collision? discovery-errors)
+        (collision? program-errors))))
   (expect! "require libspec rejects the malformed grammar as one table"
-    (let [invalid-specs
-          [[BRACKET-TAG "pkg" ":as" "p" ":as" "again"]
+    (let [invalid-specs [[BRACKET-TAG "pkg" ":as" "p" ":as" "again"]
            [BRACKET-TAG "pkg" ":refer" [BRACKET-TAG "make"]
             ":refer" [BRACKET-TAG "send"]]
            [BRACKET-TAG "pkg" ":refer" [BRACKET-TAG "make"]
