@@ -175,13 +175,13 @@
   (t/instant? value) (t/->AtomRow :instant nil nil nil nil nil value)
   :else (fail! :invalid-packed-checkpoint "packed Store atom payload decoded outside Atom")))
 
-(defn- encode-term [value]
-  (let [^ByteArrayOutputStream out (ByteArrayOutputStream.)]
+(defn- encode-term! [value]
+  (let [out (ByteArrayOutputStream.)]
   (rpc/write-term-codec-v1! out value max-term-bytes max-term-nodes max-term-depth)
   (.toByteArray out)))
 
 (defn term-byte-count! [value]
-  (alength (encode-term value)))
+  (alength (encode-term! value)))
 
 (defn- ^String hex [bytes]
   (apply str (map (fn [value] (format "%02x" (bit-and 255 (int value)))) bytes)))
@@ -190,18 +190,16 @@
   (.digest (MessageDigest/getInstance "SHA-256") bytes))
 
 (defn- ^String sha256-file [^String path]
-  (let [^MessageDigest digest (MessageDigest/getInstance "SHA-256")
-   ^bytes chunk (byte-array page-bytes)]
-  (with-open [input (RandomAccessFile. path "r")]
-  (loop [read-count (.read input chunk 0 page-bytes)]
+  (let [digest (MessageDigest/getInstance "SHA-256")
+   chunk (byte-array page-bytes)]
+  (with-open [input (RandomAccessFile. path "r")] (loop [read-count (.read input chunk 0 page-bytes)]
   (if (< read-count 0) nil (do
   (.update digest chunk 0 read-count)
   (recur (.read input chunk 0 page-bytes))))))
   (hex (.digest digest))))
 
 (defn- hash64 [bytes]
-  (.getLong (doto (ByteBuffer/wrap (sha256-bytes bytes))
-  (.order ByteOrder/LITTLE_ENDIAN))))
+  (.getLong (doto (ByteBuffer/wrap (sha256-bytes bytes)) (.order ByteOrder/LITTLE_ENDIAN))))
 
 (defn- align-page [value]
   (* page-bytes (quot (+ value (dec page-bytes)) page-bytes)))
@@ -209,25 +207,24 @@
 (defn- checked-i32! [value]
   (if (and (>= value -2147483648) (<= value 2147483647)) value (fail! :packed-capacity-exceeded "packed Store term identifier exceeds signed 32-bit capacity")))
 
-(defn- ^ByteBuffer bytes-buffer [size]
-  (doto (ByteBuffer/allocate size)
-  (.order ByteOrder/LITTLE_ENDIAN)))
+(defn- bytes-buffer [size]
+  (doto (ByteBuffer/allocate size) (.order ByteOrder/LITTLE_ENDIAN)))
 
-(defn- buffer-bytes [^ByteBuffer buffer]
-  (let [^bytes bytes (byte-array (.limit buffer))
-   ^ByteBuffer view (.duplicate buffer)]
+(defn- buffer-bytes [buffer]
+  (let [bytes (byte-array (.limit buffer))
+   view (.duplicate buffer)]
   (.position view 0)
   (.get view bytes)
   bytes))
 
 (defn- long-column [values]
-  (let [^ByteBuffer buffer (bytes-buffer (* 8 (count values)))]
+  (let [buffer (bytes-buffer (* 8 (count values)))]
   (doseq [value values]
   (.putLong buffer value))
   (buffer-bytes buffer)))
 
 (defn- int-column! [values]
-  (let [^ByteBuffer buffer (bytes-buffer (* 4 (count values)))]
+  (let [buffer (bytes-buffer (* 4 (count values)))]
   (doseq [value values]
   (.putInt buffer (int (checked-i32! value))))
   (buffer-bytes buffer)))
@@ -245,7 +242,7 @@
   :else (fail! :invalid-packed-checkpoint "packed Store operation action code is invalid")))
 
 (defn- prefix-count [prefix section]
-  (if (nil? prefix) 0 (let [^CheckpointManifest manifest (packedprefix-manifest prefix)]
+  (if (nil? prefix) 0 (let [manifest (packedprefix-manifest prefix)]
   (cond
   (= section :atoms) (checkpointmanifest-atom-count manifest)
   (= section :triples) (checkpointmanifest-triple-count manifest)
@@ -285,16 +282,16 @@
 
 (defn- atom-sections! [prefix tail]
   (let [total (merged-atom-count prefix tail)
-   ^longs offsets (long-array (+ total 1))
-   ^ByteArrayOutputStream payload (ByteArrayOutputStream.)
+   offsets (long-array (+ total 1))
+   payload (ByteArrayOutputStream.)
    lookups (loop [position 0
    entries []]
-  (if (>= position total) entries (let [bytes (encode-term (atom-value! (merged-atom-at! prefix tail position)))]
+  (if (>= position total) entries (let [bytes (encode-term! (atom-value! (merged-atom-at! prefix tail position)))]
   (aset-long offsets position (.size payload))
   (.write payload bytes)
   (recur (+ position 1) (conj entries [(hash64 bytes) position])))))]
   (aset-long offsets total (.size payload))
-  (let [^ByteBuffer lookup-buffer (bytes-buffer (* total 12))]
+  (let [lookup-buffer (bytes-buffer (* total 12))]
   (doseq [entry (sort-by (fn [entry] [(nth entry 0) (nth entry 1)]) lookups)]
   (.putLong lookup-buffer (nth entry 0))
   (.putInt lookup-buffer (int (nth entry 1))))
@@ -302,9 +299,9 @@
 
 (defn- triple-columns! [prefix tail]
   (let [total (merged-triple-count prefix tail)
-   ^ints t1 (int-array total)
-   ^ints t2 (int-array total)
-   ^ints t3 (int-array total)]
+   t1 (int-array total)
+   t2 (int-array total)
+   t3 (int-array total)]
   (loop [position 0]
   (if (>= position total) nil (let [row (merged-triple-at! prefix tail position)]
   (aset-int t1 position (int (checked-i32! (t/triplerow-t1 row))))
@@ -316,13 +313,13 @@
 (defn- history-columns! [prefix tail]
   (let [transactions (merged-transaction-count prefix tail)
    operations (merged-operation-count prefix tail)
-   ^longs tx-seq (long-array transactions)
-   ^longs tx-first (long-array transactions)
-   ^ints tx-count (int-array transactions)
-   ^longs op-seq (long-array operations)
-   ^ints op-ordinal (int-array operations)
-   ^bytes op-action (byte-array operations)
-   ^ints op-triple (int-array operations)]
+   tx-seq (long-array transactions)
+   tx-first (long-array transactions)
+   tx-count (int-array transactions)
+   op-seq (long-array operations)
+   op-ordinal (int-array operations)
+   op-action (byte-array operations)
+   op-triple (int-array operations)]
   (loop [position 0]
   (if (>= position transactions) nil (let [row (merged-transaction-at! prefix tail position)]
   (aset-long tx-seq position (t/transactionrow-sequence row))
@@ -351,11 +348,11 @@
    action (bit-and 255 (int (aget op-action position)))]
   (if (= action 1) (recur (+ position 1) (assoc active handle (conj positions position)) (conj withdrawals -1)) (if (empty? positions) (recur (+ position 1) active (conj withdrawals -1)) (recur (+ position 1) (assoc active handle (pop positions)) (conj withdrawals (peek positions))))))))
    entries (sort-by first (filter (fn [entry] (pos? (count (second entry)))) (:active derived)))
-   ^ints handles (int-array (count entries))
-   ^longs offsets (long-array (count entries))
-   ^ints counts (int-array (count entries))
+   handles (int-array (count entries))
+   offsets (long-array (count entries))
+   counts (int-array (count entries))
    run-count (reduce + (map (fn [entry] (count (second entry))) entries))
-   ^longs runs (long-array run-count)]
+   runs (long-array run-count)]
   (loop [entry-position 0
    run-position 0]
   (if (>= entry-position (count entries)) nil (let [entry (nth entries entry-position)
@@ -385,7 +382,7 @@
   :else [c a b position])]
   (recur (+ position 1) (conj collected [key position row])))))
    ordered (sort-by first entries)
-   ^ByteBuffer buffer (bytes-buffer (* total 16))]
+   buffer (bytes-buffer (* total 16))]
   (doseq [entry ordered]
   (let [position (second entry)
    row (nth entry 2)
@@ -415,13 +412,13 @@
   (loop [remaining sections
    offset page-bytes
    placed []]
-  (if (empty? remaining) placed (let [^Section current (first remaining)
+  (if (empty? remaining) placed (let [current (first remaining)
    aligned (align-page offset)
    bytes (section-bytes current)]
   (recur (next remaining) (+ aligned (alength bytes)) (conj placed (->Section (section-id current) (section-width current) aligned bytes)))))))
 
 (defn- page-header [sections atoms triples transactions operations next-sequence active-count active-run-count]
-  (let [^ByteBuffer buffer (bytes-buffer page-bytes)
+  (let [buffer (bytes-buffer page-bytes)
    magic-bytes (.getBytes magic StandardCharsets/UTF_8)]
   (.put buffer magic-bytes)
   (.position buffer 16)
@@ -444,27 +441,22 @@
   (.putLong buffer (alength (section-bytes entry))))
   (buffer-bytes buffer)))
 
-(defn- zero-fill! [^RandomAccessFile file amount]
-  (let [^bytes zeroes (byte-array page-bytes)]
+(defn- zero-fill! [file amount]
+  (let [zeroes (byte-array page-bytes)]
   (loop [remaining amount]
   (if (<= remaining 0) nil (let [chunk (min remaining page-bytes)]
   (.write file zeroes 0 chunk)
   (recur (- remaining chunk)))))))
 
 (defn- write-page-file! [^String path header sections]
-  (with-open [file (RandomAccessFile. path "rw")]
-  (.setLength file 0)
-  (.write file header 0 (alength header))
-  (loop [remaining sections
+  (with-open [file (RandomAccessFile. path "rw")] (.setLength file 0) (.write file header 0 (alength header)) (loop [remaining sections
    position page-bytes]
-  (if (empty? remaining) nil (let [^Section entry (first remaining)
+  (if (empty? remaining) nil (let [entry (first remaining)
    offset (section-offset entry)
    bytes (section-bytes entry)]
   (zero-fill! file (- offset position))
   (.write file bytes 0 (alength bytes))
-  (recur (next remaining) (+ offset (alength bytes))))))
-  (.force (.getChannel file) true)
-  (.length file)))
+  (recur (next remaining) (+ offset (alength bytes)))))) (.force (.getChannel file) true) (.length file)))
 
 (defn- write-u8! [out value]
   (.write out (int (bit-and 255 value)))
@@ -483,11 +475,9 @@
   (recur (+ offset 1))))))
 
 (defn- strict-utf8 [^String value]
-  (let [encoder (doto (.newEncoder StandardCharsets/UTF_8)
-  (.onMalformedInput CodingErrorAction/REPORT)
-  (.onUnmappableCharacter CodingErrorAction/REPORT))
-   ^ByteBuffer buffer (.encode encoder (CharBuffer/wrap value))
-   ^bytes bytes (byte-array (.remaining buffer))]
+  (let [encoder (doto (.newEncoder StandardCharsets/UTF_8) (.onMalformedInput CodingErrorAction/REPORT) (.onUnmappableCharacter CodingErrorAction/REPORT))
+   buffer (.encode encoder (CharBuffer/wrap value))
+   bytes (byte-array (.remaining buffer))]
   (.get buffer bytes)
   bytes))
 
@@ -500,7 +490,7 @@
 (declare read-manifest! hex-bytes! prune-checkpoints!)
 
 (defn- manifest-bytes! [^CheckpointManifest manifest]
-  (let [^ByteArrayOutputStream out (ByteArrayOutputStream.)]
+  (let [out (ByteArrayOutputStream.)]
   (.write out (.getBytes manifest-magic StandardCharsets/UTF_8))
   (loop [position (count manifest-magic)]
   (if (>= position 16) nil (do
@@ -534,7 +524,7 @@
   :else (fail! :invalid-packed-manifest "packed Store manifest digest is not lowercase hexadecimal")))
 
 (defn- hex-bytes! [^String value]
-  (if (not (valid-fingerprint? value)) (fail! :invalid-packed-manifest "packed Store manifest digest is invalid") (let [^bytes bytes (byte-array digest-bytes)]
+  (if (not (valid-fingerprint? value)) (fail! :invalid-packed-manifest "packed Store manifest digest is invalid") (let [bytes (byte-array digest-bytes)]
   (loop [position 0]
   (if (>= position digest-bytes) bytes (let [left (int (.charAt value (* position 2)))
    right (int (.charAt value (+ (* position 2) 1)))]
@@ -546,12 +536,9 @@
   nil)
 
 (defn- write-manifest-last! [^String path ^CheckpointManifest manifest]
-  (let [^String temporary (str path ".tmp")
+  (let [temporary (str path ".tmp")
    bytes (manifest-bytes! manifest)]
-  (with-open [file (RandomAccessFile. temporary "rw")]
-  (.setLength file 0)
-  (.write file bytes 0 (alength bytes))
-  (.force (.getChannel file) true))
+  (with-open [file (RandomAccessFile. temporary "rw")] (.setLength file 0) (.write file bytes 0 (alength bytes)) (.force (.getChannel file) true))
   (atomic-move! temporary path)))
 
 (defn- ensure-directory! [^String path]
@@ -574,49 +561,47 @@
    sections (place-sections [(section atom-offsets-section 8 (:offsets atom-data)) (section atom-payload-section 0 (:payload atom-data)) (section atom-lookup-section 12 (:lookup atom-data)) (section triple-t1-section 4 (int-column! (:t1 triple-data))) (section triple-t2-section 4 (int-column! (:t2 triple-data))) (section triple-t3-section 4 (int-column! (:t3 triple-data))) (section transaction-sequence-section 8 (long-column (:tx-seq history))) (section transaction-first-operation-section 8 (long-column (:tx-first history))) (section transaction-operation-count-section 4 (int-column! (:tx-count history))) (section operation-sequence-section 8 (long-column (:op-seq history))) (section operation-ordinal-section 4 (int-column! (:op-ordinal history))) (section operation-action-section 1 (:op-action history)) (section operation-triple-section 4 (int-column! (:op-triple history))) (section withdrawal-target-section 8 (:withdrawals active)) (section active-handle-section 4 (int-column! (:handles active))) (section active-offset-section 8 (long-column (:offsets active))) (section active-count-section 4 (int-column! (:counts active))) (section active-run-section 8 (long-column (:runs active))) (section spo-section 16 (index-bytes! prefix tail :spo)) (section pos-section 16 (index-bytes! prefix tail :pos)) (section osp-section 16 (index-bytes! prefix tail :osp))])
    header (page-header sections atoms triples transactions operations (t/termstoredump-next-sequence tail) (:active-count active) (:run-count active))
    revision (checkpointsource-revision source)
-   ^String stem (format "checkpoint-%019d" revision)
-   ^String temporary (str directory "/." stem ".pages.tmp")
+   stem (format "checkpoint-%019d" revision)
+   temporary (str directory "/." stem ".pages.tmp")
    mapped-bytes (write-page-file! temporary header sections)
-   ^String page-sha (sha256-file temporary)
-   ^String component (str stem "-" (subs page-sha 0 16) page-suffix)
-   ^String final-page (str directory "/" component)
-   ^String manifest-path (str directory "/" stem manifest-suffix)
-   ^CheckpointManifest manifest (->CheckpointManifest manifest-path component (checkpointsource-space-id source) revision (t/termstoredump-next-sequence tail) schema-id (checkpointsource-log-valid-bytes source) (checkpointsource-log-prefix-sha256 source) page-sha atoms triples transactions operations (:active-count active) (:run-count active) mapped-bytes)]
+   page-sha (sha256-file temporary)
+   component (str stem "-" (subs page-sha 0 16) page-suffix)
+   final-page (str directory "/" component)
+   manifest-path (str directory "/" stem manifest-suffix)
+   manifest (->CheckpointManifest manifest-path component (checkpointsource-space-id source) revision (t/termstoredump-next-sequence tail) schema-id (checkpointsource-log-valid-bytes source) (checkpointsource-log-prefix-sha256 source) page-sha atoms triples transactions operations (:active-count active) (:run-count active) mapped-bytes)]
   (atomic-move! temporary final-page)
   (write-manifest-last! manifest-path manifest)
   (prune-checkpoints! directory)
   manifest)))
 
-(defn- ensure-remaining! [^ByteBuffer buffer amount ^String context]
+(defn- ensure-remaining! [buffer amount ^String context]
   (if (and (>= amount 0) (>= (.remaining buffer) amount)) nil (fail! :invalid-packed-manifest (str "packed Store manifest is truncated in " context))))
 
-(defn- read-u32! [^ByteBuffer buffer ^String context]
+(defn- read-u32! [buffer ^String context]
   (ensure-remaining! buffer 4 context)
   (Integer/toUnsignedLong (.getInt buffer)))
 
-(defn- read-i64! [^ByteBuffer buffer ^String context]
+(defn- read-i64! [buffer ^String context]
   (ensure-remaining! buffer 8 context)
   (.getLong buffer))
 
-(defn- read-fixed! [^ByteBuffer buffer amount ^String context]
+(defn- read-fixed! [buffer amount ^String context]
   (ensure-remaining! buffer amount context)
-  (let [^bytes bytes (byte-array amount)]
+  (let [bytes (byte-array amount)]
   (.get buffer bytes)
   bytes))
 
-(defn- ^String read-text! [^ByteBuffer buffer ^String context]
+(defn- ^String read-text! [buffer ^String context]
   (let [amount (read-u32! buffer context)]
   (if (> amount 1048576) (fail! :invalid-packed-manifest "packed Store manifest text exceeds its bound") (let [bytes (read-fixed! buffer amount context)
-   decoder (doto (.newDecoder StandardCharsets/UTF_8)
-  (.onMalformedInput CodingErrorAction/REPORT)
-  (.onUnmappableCharacter CodingErrorAction/REPORT))]
+   decoder (doto (.newDecoder StandardCharsets/UTF_8) (.onMalformedInput CodingErrorAction/REPORT) (.onUnmappableCharacter CodingErrorAction/REPORT))]
   (str (.decode decoder (ByteBuffer/wrap bytes)))))))
 
 (defn- ^Boolean magic-valid? [bytes ^String expected]
   (= expected (String. bytes StandardCharsets/UTF_8)))
 
 (defn- manifest-filename-revision! [^String path]
-  (let [^String name (.getName (File. path))
+  (let [name (.getName (File. path))
    matched (re-matches #"checkpoint-([0-9]{19})\.manifest" name)]
   (if (nil? matched) (fail! :invalid-packed-manifest "packed Store manifest filename is invalid") (try
   (Long/parseLong (nth matched 1))
@@ -632,8 +617,7 @@
    body (Arrays/copyOfRange bytes 0 body-length)
    stored (Arrays/copyOfRange bytes body-length total)]
   (if (not (Arrays/equals stored (sha256-bytes body))) (fail! :invalid-packed-manifest "packed Store manifest checksum does not match") nil)
-  (let [^ByteBuffer buffer (doto (ByteBuffer/wrap body)
-  (.order ByteOrder/LITTLE_ENDIAN))
+  (let [buffer (doto (ByteBuffer/wrap body) (.order ByteOrder/LITTLE_ENDIAN))
    magic-bytes (read-fixed! buffer (count manifest-magic) "magic")]
   (if (not (magic-valid? magic-bytes manifest-magic)) (fail! :invalid-packed-manifest "packed Store manifest magic does not match") nil)
   (ensure-remaining! buffer (- 16 (count manifest-magic)) "magic padding")
@@ -650,11 +634,11 @@
    active-count (read-i64! buffer "active count")
    active-runs (read-i64! buffer "active run count")
    mapped-bytes (read-i64! buffer "mapped byte count")
-   ^String prefix-sha (hex (read-fixed! buffer digest-bytes "log prefix checksum"))
-   ^String page-sha (hex (read-fixed! buffer digest-bytes "page checksum"))
-   ^String space (read-text! buffer "SpaceId")
-   ^String schema (read-text! buffer "schema")
-   ^String component (read-text! buffer "component")]
+   prefix-sha (hex (read-fixed! buffer digest-bytes "log prefix checksum"))
+   page-sha (hex (read-fixed! buffer digest-bytes "page checksum"))
+   space (read-text! buffer "SpaceId")
+   schema (read-text! buffer "schema")
+   component (read-text! buffer "component")]
   (if (not (= 0 (.remaining buffer))) (fail! :invalid-packed-manifest "packed Store manifest has trailing bytes") nil)
   (if (not (= filename-revision revision)) (fail! :invalid-packed-manifest "packed Store manifest filename revision does not match its body") nil)
   (if (not (and (= version format-version) (and (= page-size page-bytes) (and (= schema schema-id) (and (>= revision 0) (and (= next-sequence (+ revision 1)) (and (>= valid-bytes 0) (and (>= atoms 0) (and (>= triples 0) (and (>= transactions 0) (and (>= operations 0) (and (>= active-count 0) (and (>= active-runs 0) (>= mapped-bytes page-bytes)))))))))))))) (fail! :invalid-packed-manifest "packed Store manifest fields are inconsistent") nil)
@@ -662,9 +646,9 @@
   (->CheckpointManifest path component space revision next-sequence schema valid-bytes prefix-sha page-sha atoms triples transactions operations active-count active-runs mapped-bytes))))))
 
 (defn candidate-manifests [^String directory]
-  (let [^File folder (File. directory)
+  (let [folder (File. directory)
    files (if (.isDirectory folder) (or (.listFiles folder) (make-array File 0)) (make-array File 0))]
-  (mapv (fn [^File file] (.getPath file)) (sort-by (fn [^File file] (.getName file)) (fn [left right] (compare right left)) (filter (fn [^File file] (some? (re-matches #"checkpoint-[0-9]{19}\.manifest" (.getName file)))) files)))))
+  (mapv (fn [file] (.getPath file)) (sort-by (fn [file] (.getName file)) (fn [left right] (compare right left)) (filter (fn [file] (some? (re-matches #"checkpoint-[0-9]{19}\.manifest" (.getName file)))) files)))))
 
 (defn- valid-manifests! [paths]
   (loop [remaining (seq paths)
@@ -679,11 +663,11 @@
   (loop [remaining (seq manifests)
    paths #{}
    components #{}]
-  (if (nil? remaining) {:paths paths :components components} (let [^CheckpointManifest manifest (first remaining)]
+  (if (nil? remaining) {:paths paths :components components} (let [manifest (first remaining)]
   (recur (next remaining) (conj paths (checkpointmanifest-path manifest)) (conj components (checkpointmanifest-component manifest)))))))
 
 (defn- prune-checkpoints! [^String directory]
-  (let [^File folder (File. directory)
+  (let [folder (File. directory)
    candidates (candidate-manifests directory)
    retained (vec (take checkpoint-retention-count (valid-manifests! candidates)))
    identities (manifest-identities retained)
@@ -691,14 +675,14 @@
    components (:components identities)]
   (doseq [manifest-path candidates]
   (if (not (contains? paths manifest-path)) (Files/deleteIfExists (.toPath (File. manifest-path))) nil))
-  (doseq [file (filterv (fn [^File candidate] (some? (re-matches #"checkpoint-[0-9]{19}-[0-9a-f]{16}\.pages" (.getName candidate)))) (vec (or (.listFiles folder) (make-array File 0))))]
+  (doseq [file (filterv (fn [candidate] (some? (re-matches #"checkpoint-[0-9]{19}-[0-9a-f]{16}\.pages" (.getName candidate)))) (vec (or (.listFiles folder) (make-array File 0))))]
   (if (not (contains? components (.getName file))) (Files/deleteIfExists (.toPath file)) nil))
   nil))
 
 (defn ^CheckpointSource manifest-source! [^CheckpointManifest manifest]
   (checkpoint-source! (checkpointmanifest-space-id manifest) (checkpointmanifest-revision manifest) (checkpointmanifest-log-valid-bytes manifest) (checkpointmanifest-log-prefix-sha256 manifest)))
 
-(defn- ^ByteBuffer buffer [^PackedPrefix prefix id]
+(defn- buffer [^PackedPrefix prefix id]
   (get (packedprefix-buffers prefix) id))
 
 (defn- section-long [^PackedPrefix prefix id position]
@@ -710,22 +694,19 @@
 (defn- section-byte [^PackedPrefix prefix id position]
   (bit-and 255 (int (.get (buffer prefix id) position))))
 
-(defn- ^ByteBuffer map-section [^String file offset length]
-  (if (= length 0) (bytes-buffer 0) (with-open [random (RandomAccessFile. file "r")]
-  (let [channel (.getChannel random)
+(defn- map-section [^String file offset length]
+  (if (= length 0) (bytes-buffer 0) (with-open [random (RandomAccessFile. file "r")] (let [channel (.getChannel random)
    mapped (.map channel FileChannel$MapMode/READ_ONLY offset length)]
   (.order mapped ByteOrder/LITTLE_ENDIAN)
   mapped))))
 
 (defn- read-page-table! [^String path ^CheckpointManifest manifest]
-  (let [^File file (File. path)
+  (let [file (File. path)
    length (.length file)]
   (if (not (= length (checkpointmanifest-mapped-bytes manifest))) (fail! :invalid-packed-checkpoint "packed Store page length does not match its manifest") nil)
-  (with-open [random (RandomAccessFile. file "r")]
-  (let [^bytes header (byte-array page-bytes)]
+  (with-open [random (RandomAccessFile. file "r")] (let [header (byte-array page-bytes)]
   (.readFully random header)
-  (let [^ByteBuffer view (doto (ByteBuffer/wrap header)
-  (.order ByteOrder/LITTLE_ENDIAN))
+  (let [view (doto (ByteBuffer/wrap header) (.order ByteOrder/LITTLE_ENDIAN))
    stored-magic (read-fixed! view (count magic) "page magic")]
   (if (not (magic-valid? stored-magic magic)) (fail! :invalid-packed-checkpoint "packed Store page magic does not match") nil)
   (.position view 16)
@@ -794,11 +775,11 @@
   :else nil))
 
 (defn ^PackedPrefix open-checkpoint! [^String manifest-path ^CheckpointSource source]
-  (let [^CheckpointManifest manifest (read-manifest! manifest-path)]
+  (let [manifest (read-manifest! manifest-path)]
   (validate-source! manifest source)
   (let [directory (.getParentFile (File. manifest-path))
-   ^String component (checkpointmanifest-component manifest)
-   ^String page-file (str directory "/" component)]
+   component (checkpointmanifest-component manifest)
+   page-file (str directory "/" component)]
   (if (not (.isFile (File. page-file))) (fail! :packed-component-missing "packed Store manifest component is missing") nil)
   (if (not (= (checkpointmanifest-page-sha256 manifest) (sha256-file page-file))) (fail! :invalid-packed-checkpoint "packed Store page checksum does not match its manifest") nil)
   (let [table (read-page-table! page-file manifest)]
@@ -840,11 +821,11 @@
 (defn atom-row-at! [^PackedPrefix prefix position]
   (if (or (< position 0) (>= position (atom-count prefix))) (fail! :invalid-packed-position "packed Store atom position is outside the prefix") (let [start (section-long prefix atom-offsets-section position)
    end (section-long prefix atom-offsets-section (+ position 1))
-   ^ByteBuffer payload (buffer prefix atom-payload-section)]
-  (if (not (and (>= start 0) (and (>= end start) (<= end (.limit payload))))) (fail! :invalid-packed-checkpoint "packed Store atom offsets are invalid") (let [^ByteBuffer view (.duplicate payload)]
+   payload (buffer prefix atom-payload-section)]
+  (if (not (and (>= start 0) (and (>= end start) (<= end (.limit payload))))) (fail! :invalid-packed-checkpoint "packed Store atom offsets are invalid") (let [view (.duplicate payload)]
   (.position view (int start))
   (.limit view (int end))
-  (let [^ByteBuffer slice (.slice view)
+  (let [slice (.slice view)
    decoded (rpc/decode-term-codec-v1! slice max-term-bytes max-term-nodes max-term-depth)
    value (t/termcodecdecoded-value decoded)]
   (if (or (not (= 0 (.remaining slice))) (t/triple? value)) (fail! :invalid-packed-checkpoint "packed Store atom payload is invalid") (atom-row! value))))))))
@@ -872,7 +853,7 @@
   :else 0))
 
 (defn find-triple-position [^PackedPrefix prefix t1 t2 t3]
-  (let [^ByteBuffer index (buffer prefix spo-section)
+  (let [index (buffer prefix spo-section)
    total (triple-count prefix)]
   (loop [low 0
    high (- total 1)]
@@ -884,7 +865,7 @@
   (< comparison 0) (recur (+ middle 1) high)
   :else (recur low (- middle 1))))))))
 
-(defn- compare-index-prefix [^ByteBuffer index position prefix]
+(defn- compare-index-prefix [index position prefix]
   (let [base (* position 16)]
   (loop [offset 0]
   (if (>= offset (count prefix)) 0 (let [actual (.getInt index (+ base (* offset 4)))
@@ -895,7 +876,7 @@
   :else (recur (+ offset 1))))))))
 
 (defn- index-prefix-positions [^PackedPrefix prefix-store index-id wanted]
-  (let [^ByteBuffer index (buffer prefix-store index-id)
+  (let [index (buffer prefix-store index-id)
    total (triple-count prefix-store)
    first-position (loop [low 0
    high total]
@@ -916,14 +897,14 @@
   (some? t3) (index-prefix-positions prefix osp-section [t3])
   :else []))
 
-(defn- ^Boolean bytes-equal-range? [^ByteBuffer payload start end bytes]
+(defn- ^Boolean bytes-equal-range? [payload start end bytes]
   (if (not (= (- end start) (alength bytes))) false (loop [position 0]
   (if (>= position (alength bytes)) true (if (= (bit-and 255 (int (.get payload (+ start position)))) (bit-and 255 (int (aget bytes position)))) (recur (+ position 1)) false)))))
 
-(defn find-atom-position [^PackedPrefix prefix value]
-  (let [bytes (encode-term value)
+(defn find-atom-position! [^PackedPrefix prefix value]
+  (let [bytes (encode-term! value)
    wanted (hash64 bytes)
-   ^ByteBuffer index (buffer prefix atom-lookup-section)
+   index (buffer prefix atom-lookup-section)
    total (atom-count prefix)
    first-hit (loop [low 0
    high (- total 1)
@@ -934,7 +915,7 @@
   (< current wanted) (recur (+ middle 1) high found)
   (> current wanted) (recur low (- middle 1) found)
   :else (recur low (- middle 1) middle)))))
-   ^ByteBuffer payload (buffer prefix atom-payload-section)]
+   payload (buffer prefix atom-payload-section)]
   (if (< first-hit 0) -1 (loop [lookup-position first-hit]
   (if (>= lookup-position total) -1 (let [base (* lookup-position 12)
    current (.getLong index base)]

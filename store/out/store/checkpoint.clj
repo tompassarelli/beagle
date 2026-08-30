@@ -17,7 +17,7 @@
 (defn select-boot! [^String directory source-for-manifest tail-row-limit tail-byte-limit]
   (loop [candidates (seq (packed/candidate-manifests directory))
    rejections []]
-  (if (nil? candidates) {:context nil :source :storelog-full-replay :source-record nil :selected-manifest nil :prefix-records 0 :rejections rejections} (let [^String manifest-path (first candidates)
+  (if (nil? candidates) {:context nil :source :storelog-full-replay :source-record nil :selected-manifest nil :prefix-records 0 :rejections rejections} (let [manifest-path (first candidates)
    attempt (try
   (let [manifest (packed/read-manifest! manifest-path)
    source (source-for-manifest manifest)

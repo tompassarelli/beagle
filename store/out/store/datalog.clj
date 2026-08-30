@@ -380,7 +380,7 @@
    right-int (integer-value right)
    left-number (numeric-value left)
    right-number (numeric-value right)
-   ^BuiltinValueResult invalid (->BuiltinValueResult nil nil)]
+   invalid (->BuiltinValueResult nil nil)]
   (cond
   (= operator :mod) (if (nil? left-int) invalid (if (nil? right-int) invalid (if (= right-int 0) invalid (->BuiltinValueResult (integer-builtin-value operator left-int right-int) nil))))
   (= operator :/) (if (nil? left-number) invalid (if (nil? right-number) invalid (if (= right-number 0.0) invalid (->BuiltinValueResult nil (double-builtin-value operator left-number right-number)))))
@@ -550,7 +550,7 @@
 
 (defn ^String term-key [value]
   (cond
-  (string? value) (let [^String text value]
+  (string? value) (let [text value]
   (length-key "s" text))
   (integer? value) (let [integer-value value]
   (str "i" integer-value ";"))
@@ -563,9 +563,9 @@
   (t/instant? value) (let [instant-value value]
   (str "m" (t/instant-epoch-seconds instant-value) ":" (t/instant-nanos instant-value) ";"))
   (t/triple? value) (let [triple-value value
-   ^String t1 (term-key (t/triple-t1 triple-value))
-   ^String t2 (term-key (t/triple-t2 triple-value))
-   ^String t3 (term-key (t/triple-t3 triple-value))]
+   t1 (term-key (t/triple-t1 triple-value))
+   t2 (term-key (t/triple-t2 triple-value))
+   t3 (term-key (t/triple-t3 triple-value))]
   (str "t" (count t1) ":" t1 (count t2) ":" t2 (count t3) ":" t3))
   :else "x0:"))
 
@@ -585,7 +585,7 @@
 
 (defn- ^CandidateSource candidate-source-add [^String relation ^CandidateSource source tuple]
   (let [handle (count (candidatesource-rows source))
-   ^CandidateSource with-row (assoc source :rows (conj (candidatesource-rows source) tuple))]
+   with-row (assoc source :rows (conj (candidatesource-rows source) tuple))]
   (if (and (= relation triple-relation) (= 3 (count tuple))) (assoc with-row :spo (trie-add (candidatesource-spo source) tuple [0 1 2] handle) :pos (trie-add (candidatesource-pos source) tuple [1 2 0] handle) :osp (trie-add (candidatesource-osp source) tuple [2 0 1] handle)) (assoc with-row :positions (add-position-handles (candidatesource-positions source) tuple handle)))))
 
 (defn- ^CandidateSource candidate-source-add-rows [^String relation ^CandidateSource source tuples]
@@ -600,7 +600,7 @@
 (defn- add-delta-sources [sources delta relations]
   (reduce (fn [current ^String relation] (let [tuples (get delta relation #{})
    existing (get current relation)
-   ^CandidateSource base (if (instance? CandidateSource existing) existing (empty-candidate-source))]
+   base (if (instance? CandidateSource existing) existing (empty-candidate-source))]
   (if (empty? tuples) current (assoc current relation (candidate-source-add-rows relation base (ordered-rows tuples)))))) sources relations))
 
 (defn ^Boolean text-relation-needle-valid?! [^String relation needle]
@@ -698,7 +698,7 @@
   (if (query-evaluation-context-open? context) (recur (rest remaining) (if (some? matched) (conj results matched) results)) results)))))
 
 (defn- relation-results-indexed! [db sources ^Literal literal subst ^QueryEvaluationContext context]
-  (let [^String relation (literal-relation literal)
+  (let [relation (literal-relation literal)
    arguments (literal-arguments literal)
    source (get sources relation)]
   (if (literal-negated literal) (cond
@@ -792,8 +792,8 @@
 
 (defn- ^Boolean binary-store-rule-shape? [^Rule value]
   (let [body (rule-body value)]
-  (if (not (= 2 (count body))) false (let [^Literal first-literal (nth body 0)
-   ^Literal second-literal (nth body 1)
+  (if (not (= 2 (count body))) false (let [first-literal (nth body 0)
+   second-literal (nth body 1)
    first-arguments (literal-arguments first-literal)
    second-arguments (literal-arguments second-literal)
    first-variables (variable-names first-arguments)
@@ -805,8 +805,8 @@
 (defn- derive-store-binary-rule! [^StoreCandidateSource source ^Rule value ^QueryEvaluationContext context]
   (let [root (storecandidatesource-root source)
    body (rule-body value)
-   ^Literal first-literal (nth body 0)
-   ^Literal second-literal (nth body 1)
+   first-literal (nth body 0)
+   second-literal (nth body 1)
    first-arguments (literal-arguments first-literal)
    second-arguments (literal-arguments second-literal)
    first-template (literal-handle-template root first-arguments)

@@ -34,8 +34,8 @@
   (loop [remaining intents
    writes []
    idempotent []]
-  (if (empty? remaining) {:writes writes :idempotent idempotent} (let [^CommitIntent intent (first remaining)
-   ^String pred (:pred intent)]
+  (if (empty? remaining) {:writes writes :idempotent idempotent} (let [intent (first remaining)
+   pred (:pred intent)]
   (cond
   (version-conflict? (:single intent) (:base-version intent) (:expected-version intent)) {:reject :conflict :version head-version :at (:index intent) :pred pred}
   (:cycle intent) {:reject [(str pred " cycle")] :version head-version :at (:index intent) :pred pred}
@@ -61,9 +61,9 @@
   (loop [remaining items
    index 0
    groups []]
-  (if (empty? remaining) groups (let [^GroupBatchItem item (first remaining)
+  (if (empty? remaining) groups (let [item (first remaining)
    group-index (group-index groups (:path item))]
-  (if (nil? group-index) (recur (vec (rest remaining)) (inc index) (conj groups (->GroupBatch (:path item) [index]))) (let [^GroupBatch group (nth groups group-index)]
+  (if (nil? group-index) (recur (vec (rest remaining)) (inc index) (conj groups (->GroupBatch (:path item) [index]))) (let [group (nth groups group-index)]
   (recur (vec (rest remaining)) (inc index) (assoc groups group-index (->GroupBatch (:path group) (conj (:indices group) index))))))))))
 
 (defrecord LeaseSnapshot [holder exp epoch])
@@ -187,7 +187,7 @@
   {:valid valid :max-tx max-tx}))
 
 (defn tail-keyed-latest [single-preds lines]
-  (reduce (fn [latest line] (let [^String pred (:p line)
+  (reduce (fn [latest line] (let [pred (:p line)
    key (if (contains? single-preds pred) [(:l line) pred] [(:l line) pred (:r line)])
    previous (get latest key)
    previous-tx (if (nil? previous) nil (:tx previous))
@@ -205,13 +205,13 @@
 (defn tailpredicateplan-value-kind [r] (:value-kind r))
 
 (defn tail-predicate-plan [domain card-only single-preds declared-preds current-cardinality link-preds]
-  (into [] (concat (map (fn [^String pred] (let [^String want (if (contains? single-preds pred) "single" "multi")
+  (into [] (concat (map (fn [^String pred] (let [want (if (contains? single-preds pred) "single" "multi")
    action (cond
   (not (contains? declared-preds pred)) :define
   (not= want (get current-cardinality pred)) :update
   :else :keep)
-   ^String value-kind (if (contains? link-preds pred) "ref" "literal")]
-  (->TailPredicatePlan pred action want value-kind))) domain) (map (fn [^String pred] (let [^String want (if (contains? single-preds pred) "single" "multi")
+   value-kind (if (contains? link-preds pred) "ref" "literal")]
+  (->TailPredicatePlan pred action want value-kind))) domain) (map (fn [^String pred] (let [want (if (contains? single-preds pred) "single" "multi")
    action (if (not= want (get current-cardinality pred)) :define :keep)]
   (->TailPredicatePlan pred action want "literal"))) card-only))))
 

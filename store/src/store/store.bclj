@@ -616,7 +616,7 @@
             atoms (Vec t/AtomRow) (store-atoms store)
             prefix-known Int (if (nil? (store-prefix store))
                                -1
-                               (packed/find-atom-position
+                               (packed/find-atom-position!
                                 (store-prefix store) term))
             tail-known Int (find-atom-position
                             atoms (store-atom-slots store)
@@ -676,7 +676,7 @@
           atoms (Vec t/AtomRow) (store-atoms store)
           prefix-known Int (if (nil? (store-prefix store))
                              -1
-                             (packed/find-atom-position
+                             (packed/find-atom-position!
                               (store-prefix store) value))
           tail-known Int (find-atom-position
                           atoms (store-atom-slots store)
@@ -762,7 +762,7 @@
           nil))
       (let [prefix-known Int (if (nil? (store-prefix store))
                                -1
-                               (packed/find-atom-position
+                               (packed/find-atom-position!
                                 (store-prefix store) term))
             tail-known Int (find-atom-position
                             (store-atoms store) (store-atom-slots store)

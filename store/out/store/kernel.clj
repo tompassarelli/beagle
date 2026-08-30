@@ -54,7 +54,7 @@
 
 (defn- ^Boolean namespaced-vocabulary? [value]
   (if (keyword? value) (let [keyword-value value
-   ^String spelling (str keyword-value)]
+   spelling (str keyword-value)]
   (and (str/includes? spelling "/") (not (str/starts-with? spelling kernel-vocabulary-prefix)))) false))
 
 (defn- ^Boolean vocabulary-member? [triples term]
@@ -80,11 +80,11 @@
   (and (t/atom? row-id) (and (not (= space-id row-id)) (and (row-has-field? triples row-id "relation" :relation) (and (row-has-field? triples row-id "subject" :subject) (and (row-has-field? triples row-id "slot" :slot) (row-has-field? triples row-id "value" :value)))))))
 
 (defn- ^Boolean closed-fact-relation? [relation]
-  (let [^String spelling (str relation)]
+  (let [spelling (str relation)]
   (or (= profile-anchor relation) (or (= profile-includes relation) (or (= vocabulary-membership relation) (or (str/starts-with? spelling kernel-vocabulary-prefix) (str/starts-with? spelling rpc-vocabulary-prefix)))))))
 
 (defn- ^Boolean domain-namespaced-relation? [relation]
-  (let [^String spelling (str relation)]
+  (let [spelling (str relation)]
   (and (or (keyword? relation) (string? relation)) (and (str/includes? spelling "/") (not (closed-fact-relation? relation))))))
 
 (defn fact-normal-form-admission-errors [triples ^String space-id proposition]
@@ -96,10 +96,10 @@
   (let [t1 (t/triple-t1 proposition)
    t2 (t/triple-t2 proposition)
    t3 (t/triple-t3 proposition)
-   ^Boolean r1 (and (t/atom? t1) (and (t/atom? t2) (t/atom? t3)))
-   ^Boolean r2 (or (keyword? t1) (and (string? t1) (not (= "" t1))))
-   ^Boolean r3 (or (keyword? t2) (and (string? t2) (not (= "" t2))))
-   ^Boolean r4 (t/atom? t3)
+   r1 (and (t/atom? t1) (and (t/atom? t2) (t/atom? t3)))
+   r2 (or (keyword? t1) (and (string? t1) (not (= "" t1))))
+   r3 (or (keyword? t2) (and (string? t2) (not (= "" t2))))
+   r4 (t/atom? t3)
    errors0 []
    errors1 (if r1 errors0 (conj errors0 "R1"))
    errors2 (if r2 errors1 (conj errors1 "R2"))
@@ -107,9 +107,9 @@
   (if r4 errors3 (conj errors3 "R4"))))
 
 (defn lint-declared-profile [triples ^String space-id]
-  (let [^Boolean relational? (declared-relational-profile? triples space-id)
-   ^Boolean fact-normal-form? (declared-fact-normal-form-profile? triples space-id)]
-  (if (not (or relational? fact-normal-form?)) [] (let [^Boolean vocabulary? (declared-vocabulary-rule? triples space-id)]
+  (let [relational? (declared-relational-profile? triples space-id)
+   fact-normal-form? (declared-fact-normal-form-profile? triples space-id)]
+  (if (not (or relational? fact-normal-form?)) [] (let [vocabulary? (declared-vocabulary-rule? triples space-id)]
   (reduce (fn [violations proposition] (if (profile-anchor? proposition) violations (let [relational (if relational? (relational-lint-errors proposition) [])
    vocabulary (if vocabulary? (into relational (vocabulary-lint-errors triples proposition)) relational)
    rules (if fact-normal-form? (into vocabulary (fact-normal-form-admission-errors triples space-id proposition)) vocabulary)]

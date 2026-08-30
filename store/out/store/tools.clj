@@ -87,14 +87,14 @@
   (vec (concat e1 (concat e2 (concat e3 (concat e4 (concat e5 (concat e6 (concat e7 (concat e8 (concat e9 (concat e10 e11)))))))))))))
 
 (defn call! [ctx cat ^String tool-name args]
-  (let [^String tool tool-name
+  (let [tool tool-name
    spec (spec-by-name cat tool)
    session (schema/session! ctx)
    propositions (rotation/propositions (rotation/all-occurrences (schema/view session)))]
   (if (nil? spec) {:error [(str "unknown tool '" tool "' — call `tools` for the catalog")]} (let [op (:op spec)
    miss (missing-req op args)]
   (if (not (empty? miss)) {:error miss} (let [subj (:subject args)
-   ^String pred (canonical-predicate session (str (:predicate args)))
+   pred (canonical-predicate session (str (:predicate args)))
    te (at subj)]
   (cond
   (= op :tell) {:write {:op "assert" :l te :p pred :r (ref-value session pred (:object args))}}

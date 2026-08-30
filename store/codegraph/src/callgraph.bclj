@@ -35,6 +35,8 @@
 
 (require [resolve :as rsv])
 
+(declare-extern cheshire.core/generate-string (Fn [Any] String))
+
 (defn parse-corpus! [path String] (Vec (Map Keyword Any))
   (let [skips (Atom Int) (atom 0)
         lines (Vec String) (str/split-lines (slurp path))

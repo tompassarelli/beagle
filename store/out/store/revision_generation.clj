@@ -21,7 +21,7 @@
   (and (= (revisionset-source expected) (revisionset-source actual)) (= (revisionset-program expected) (revisionset-program actual)) (= (revisionset-state expected) (revisionset-state actual))))
 
 (defn hydrate-generation [^RevisionSet expected ^RevisionSet actual ^String state-bytes]
-  (let [^RevisionGeneration candidate (->RevisionGeneration actual (str state-bytes ""))]
+  (let [candidate (->RevisionGeneration actual (str state-bytes ""))]
   (if (revisions-match? expected actual) candidate nil)))
 
 (defn ^String generation-source-revision [^RevisionGeneration generation]

@@ -200,12 +200,15 @@
                   coordinate adapter/monotonic-now-ns!)
         pipe-input (java.io.PipedInputStream. 1)
         pipe-output (java.io.PipedOutputStream. pipe-input)
-        closed? (atom false)
-        socket
-        (proxy [java.net.Socket] []
-          (close []
-            (reset! closed? true)
-            (try (.close pipe-output) (catch Throwable _ nil))))
+        socket (java.net.Socket.)
+        socket-close-forwarder
+        (future
+          (loop []
+            (if (.isClosed socket)
+              (try (.close pipe-output) (catch Throwable _ nil))
+              (do
+                (Thread/sleep 1)
+                (recur)))))
         connection (adapter/new-connection registry socket pipe-output)
         request (wire/rpc-request!
                  "blocked-space" :rpc/subscribe nil nil nil
@@ -223,12 +226,15 @@
         retirement
         (subscription/session-retirement
          (adapter/connection-session connection))
-        active (subscription/active-generation-count! registry)]
+        active (subscription/active-generation-count! registry)
+        socket-closed (.isClosed socket)]
+    (try (.close socket) (catch Throwable _ nil))
+    (deref socket-close-forwarder 1000 nil)
     (try (.close pipe-input) (catch Throwable _ nil))
     (try (.close pipe-output) (catch Throwable _ nil))
     {:result result
      :elapsed-ms elapsed-ms
-     :socket-closed @closed?
+     :socket-closed socket-closed
      :retirement retirement
      :active active}))
 

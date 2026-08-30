@@ -233,6 +233,10 @@
       (make-union [(make-app "Vec" [(make-var "A")]) NIL-TYPE])
       (make-app "Vec" [(make-var "A")]))
     nil))
+(def PROMOTE-POLY Any
+  (make-poly ["A"]
+    (make-fn [(make-var "A")] nil (make-var "A"))
+    nil))
 
 ;; JavaScript atoms use the same invariant element contract as the host cell:
 ;; construction captures A, deref reads A, and every mutation must write A
@@ -1121,6 +1125,8 @@
    "/"        (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY)
    "quot"     (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE)
    "mod"      (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE)
+   "bit-and"  (make-fn [INT-TYPE INT-TYPE] INT-TYPE INT-TYPE)
+   "bit-shift-left" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE)
    "max"      (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE)
    "min"      (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE)
    "inc"      (make-fn [NUMBER-TYPE] nil INT-TYPE)
@@ -1133,6 +1139,7 @@
    "monotonic-nanoseconds" (make-fn [] nil (make-prim "Int"))
    ["qualified-ref" "bgl" "sha256-utf8" nil]
                (make-fn [(make-prim "String")] nil (make-prim "String"))
+   ["qualified-ref" "bgl" "promote" nil] PROMOTE-POLY
    "str"      (make-fn [] ANY (make-prim "String"))
    "get"      (make-fn [ANY ANY] ANY ANY)
    "get-in"   (make-fn [ANY ANY] ANY ANY)
@@ -1279,6 +1286,23 @@
 (def BUFFER-FLOAT-TYPE Any
   (make-app "Buffer" [FLOAT-TYPE]))
 
+;; JVM primitive arrays retain their element type, but their length is always
+;; an Int. Keep this target-scoped: JavaScript's array surface is different and
+;; Core owns its Buffer contract below.
+(def CLJ-STDLIB Any
+  (reference-map-assoc
+    (reference-map-assoc
+      {"alength" (make-poly ["A"]
+                   (make-fn [(make-app "Arr" [(make-var "A")])] nil INT-TYPE)
+                   nil)
+       "aget" (make-poly ["A"]
+                (make-fn [(make-app "Arr" [(make-var "A")]) INT-TYPE]
+                  nil (make-var "A"))
+                nil)
+       ".position" (make-fn [ANY] INT-TYPE INT-TYPE)}
+      "System/nanoTime" (make-fn [] nil INT-TYPE))
+    "System/currentTimeMillis" (make-fn [] nil INT-TYPE)))
+
 (def CORE-STDLIB Any
   (reference-map-assoc
     (reference-map-assoc
@@ -1348,7 +1372,7 @@
     (= target "core") (merge STDLIB CORE-STDLIB)
     (= target "js") (merge STDLIB JS-ATOM-STDLIB)
     (= target "nix") (merge STDLIB NIX-STDLIB)
-    :else STDLIB))
+    :else (merge STDLIB CLJ-STDLIB)))
 
 ;; Clojure 1.12 Class/method instance-position calls carry the receiver as the
 ;; first surface element, while declare-extern describes only the Java method
@@ -2623,9 +2647,23 @@
 (defn narrow-env-for-condition
   [env Any
    cond-expr Any] Any
-  (let [tn (test-narrowings cond-expr env)]
-    {"then" (merge env (get tn "then"))
-     "else" (merge env (get tn "else"))}))
+  (let [tn (test-narrowings cond-expr env)
+        aliases (get env BINDING-ALIASES-KEY {})
+        project-aliases (fn
+                          [narrowed Any] Any
+                          (reduce
+                            (fn
+                              [out Any
+                               name String] Any
+                              (let [id (get aliases name)]
+                                (if (and (string? id) (contains? narrowed id))
+                                  (assoc out name (get narrowed id))
+                                  out)))
+                            narrowed (ordered-keys aliases)))
+        then-narrowed (project-aliases (get tn "then"))
+        else-narrowed (project-aliases (get tn "else"))]
+    {"then" (merge env then-narrowed)
+     "else" (merge env else-narrowed)}))
 
 ;; --- match arm narrowing -----------------------------------------------------
 
@@ -3185,9 +3223,10 @@
    env Any] Bool
   (cond
     (union-type? expected)
-    (boolean (some (fn [alt Any] Bool
-                     (fresh-value-compatible?! value alt env))
-               (get expected "members")))
+    (or (type-compatible? (infer-expr! value env) expected)
+        (boolean (some (fn [alt Any] Bool
+                         (fresh-value-compatible?! value alt env))
+                   (get expected "members"))))
 
     (and (app-type? expected) (= (get expected "name") "HVec")
          (not (nil? value)) (= (get value "node") "vec"))
@@ -5441,7 +5480,7 @@
                 (purity-set-origin-status after-rest owner-origins "dead") {})
             :else (purity-result after-rest owner-origins)))
       :else
-        (let [marked (if (and (not lexical)
+        (let [marked (if (and (not qualified?) (not lexical)
                            (or (bang-name? name) (= true (get (get state "known") name))))
                        (purity-note state display)
                        state)
@@ -7001,6 +7040,13 @@
                     {})]
       (and (boolean (some (fn [m Any] Bool (= m "reset!")) markers))
            (boolean (some (fn [m Any] Bool (= m "set!")) markers)))))
+  (expect! "purity: imported bang calls do not become module-local effects"
+    (= 0 (count
+           (collect-markers
+             [{"node" "call"
+               "fn" (make-qualified-ref "packed" "atom-row-at!" nil)
+               "args" []}]
+             {}))))
   (expect! "purity: nested let/if/do/fn forms are traversed"
     (let [nested (make-let-node
                    [(make-let-binding "x" nil (make-lit "number" 1))]
@@ -7447,6 +7493,62 @@
                                   (make-call "alength" []))])
                  "target" "core")]
       (> (get (type-check! prog) "count") 0)))
+  (expect! "clj array primitive: alength returns Int across a dynamic boundary"
+    (let [prog (assoc
+                 (make-prog
+                   [(make-defn-node "array-length"
+                      [(make-param "bytes" ANY)]
+                      INT-TYPE
+                      [(make-call "alength" [(make-ref "bytes")])])])
+                 "target" "clj")]
+      (= (get (type-check! prog) "count") 0)))
+  (expect! "clj array primitive: aget retains its element type"
+    (let [prog (assoc
+                 (make-prog
+                   [(make-defn-node "byte-at"
+                      [(make-param "bytes" (make-app "Arr" [(make-prim "I8")]))]
+                      (make-prim "I8")
+                      [(make-call "aget"
+                         [(make-ref "bytes") (make-lit "number" 0)])])])
+                 "target" "clj")]
+      (= (get (type-check! prog) "count") 0)))
+  (expect! "portable integer bit operations return Int"
+    (let [prog (assoc
+                 (make-prog
+                   [(make-defn-node "masked-byte"
+                      [(make-param "value" INT-TYPE)]
+                      INT-TYPE
+                      [(make-call "bit-shift-left"
+                         [(make-call "bit-and"
+                            [(make-lit "number" 255) (make-ref "value")])
+                          (make-lit "number" 8)])])])
+                 "target" "clj")]
+      (= (get (type-check! prog) "count") 0)))
+  (expect! "clj JVM numeric boundaries return Int"
+    (let [position-call {"node" "method-call"
+                         "method" ".position"
+                         "target" (make-ref "buffer")
+                         "args" []}
+          prog (assoc
+                 (make-prog
+                   [(make-defn-node "deadline-from-position"
+                      [(make-param "buffer" (make-prim "ByteBuffer"))]
+                      INT-TYPE
+                      [(make-call "+"
+                         [position-call
+                          (make-static-call "System" "nanoTime" [])])])])
+                 "target" "clj")]
+      (= (get (type-check! prog) "count") 0)))
+  (expect! "clj System/currentTimeMillis supports numeric elapsed time"
+    (let [prog (assoc
+                 (make-prog
+                   [(make-defn-node "elapsed"
+                      [] INT-TYPE
+                      [(make-call "-"
+                         [(make-static-call "System" "currentTimeMillis" [])
+                          (make-static-call "System" "currentTimeMillis" [])])])])
+                 "target" "clj")]
+      (= (get (type-check! prog) "count") 0)))
   (expect! "buffer primitive: aget wrong arity"
     (let [prog (assoc (make-prog [(make-def-node "r" nil
                                   (make-call "aget" [(make-ref "missing")]))])
@@ -7629,6 +7731,7 @@
           else-env (get (narrow-env-for-condition inner condition) "else")
           narrowed (reference-map-ref else-env stale-ref nil)]
       (and (= "NativeId" (get narrowed "name"))
+           (= "NativeId" (get (get else-env "expected") "name"))
            (= "SourceStageV1" (get (get else-env outer-id) "name")))))
   (expect! "narrowing: (and (some? x) ...) compounds into then-branch"
     (let [env {"n" (make-union [(make-prim "Int") (make-prim "Nil")])}
@@ -8061,6 +8164,15 @@
       (and (fn-type? signature)
            (= [(make-prim "String")] (get signature "params"))
            (= (make-prim "String") (get signature "ret")))))
+
+  (expect! "stdlib: bgl/promote preserves its argument type"
+    (let [signature (reference-map-ref
+                      (target-stdlib "clj")
+                      (make-qualified-ref "bgl" "promote" nil)
+                      nil)
+          resolved (resolve-poly-call! signature [(make-lit "string" "value")] {})]
+      (and (poly-type? signature)
+           (= (make-prim "String") (get resolved "ret")))))
 
   ;; --- E021 free dotted-name (nix target) ---
   (expect! "nix-only operator contracts check without extern declarations"

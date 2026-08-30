@@ -356,10 +356,10 @@
   (if (and (triple? source) (instant? at)) (triple source recorded-at-predicate at) (throw (ex-info "store: recorded-at requires a triple source and Instant" {:type :invalid-recorded-at}))))
 
 (defn ^Boolean occurrence-before? [^Triple left ^Triple right]
-  (if (and (occurrence-coordinate? left) (occurrence-coordinate? right)) (let [^Triple left-tx (triple-t1 left)
-   ^Triple right-tx (triple-t1 right)
-   ^String left-space (triple-t1 left-tx)
-   ^String right-space (triple-t1 right-tx)
+  (if (and (occurrence-coordinate? left) (occurrence-coordinate? right)) (let [left-tx (triple-t1 left)
+   right-tx (triple-t1 right)
+   left-space (triple-t1 left-tx)
+   right-space (triple-t1 right-tx)
    left-seq (triple-t3 left-tx)
    right-seq (triple-t3 right-tx)
    left-ordinal (triple-t3 left)
@@ -376,8 +376,8 @@
   (and (operation-occurrence? value) (and (occurrence-coordinate? (operationoccurrence-coordinate value)) (and (= retract-action (operationoccurrence-action value)) (and (triple? (operationoccurrence-proposition value)) (term? (operationoccurrence-proposition value)))))))
 
 (defn ^Withdrawal withdrawal [^OperationOccurrence retraction ^OperationOccurrence assertion]
-  (let [^Triple retraction-coordinate (operationoccurrence-coordinate retraction)
-   ^Triple assertion-coordinate (operationoccurrence-coordinate assertion)]
-  (if (and (retraction-occurrence? retraction) (assertion-occurrence? assertion)) (let [^Triple retraction-transaction (triple-t1 retraction-coordinate)
-   ^Triple assertion-transaction (triple-t1 assertion-coordinate)]
+  (let [retraction-coordinate (operationoccurrence-coordinate retraction)
+   assertion-coordinate (operationoccurrence-coordinate assertion)]
+  (if (and (retraction-occurrence? retraction) (assertion-occurrence? assertion)) (let [retraction-transaction (triple-t1 retraction-coordinate)
+   assertion-transaction (triple-t1 assertion-coordinate)]
   (if (and (= (operationoccurrence-proposition retraction) (operationoccurrence-proposition assertion)) (and (= (triple-t1 retraction-transaction) (triple-t1 assertion-transaction)) (occurrence-before? assertion-coordinate retraction-coordinate))) (->Withdrawal retraction assertion) (throw (ex-info "store: withdrawal requires a later retraction of the same asserted proposition" {:type :invalid-withdrawal})))) (throw (ex-info "store: withdrawal requires a later retraction of the same asserted proposition" {:type :invalid-withdrawal})))))

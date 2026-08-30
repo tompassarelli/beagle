@@ -173,7 +173,7 @@
   (doseq [err errors]
   (selfhost.rt/eprint (str "beagle [check]: " err "\n")))
   (selfhost.rt/exit 1)
-  nil) (let [surface {"datums" (get snapshot "datums") "type-aliases" (p/module-type-aliases-with-imports! (get snapshot "datums") "" nil imported-aliases) "record-contracts" (c/export-checked-record-contracts! prog) "callable-synchronization" (c/export-checked-callable-synchronization! prog)}]
+  nil) (let [surface {"datums" (get snapshot "datums") "imported-nominal-type-names" (get snapshot "imported-nominal-type-names") "type-aliases" (p/module-type-aliases-with-imports! (get snapshot "datums") "" nil imported-aliases) "record-contracts" (c/export-checked-record-contracts! prog) "callable-synchronization" (c/export-checked-callable-synchronization! prog)}]
   (swap! MODULE-SURFACE-CACHE assoc cache-key surface)
   (swap! MODULE-LOAD-STACK dissoc cache-key)
   surface)))))))
@@ -216,7 +216,7 @@
   (surface-type-aliases surfaces))
 
 (defn- import-nominal-type-names! [surfaces]
-  (reduce (fn [names surface] (into names (p/module-nominal-type-names! (get surface "datums") (get surface "prefix") (get surface "refer")))) {} surfaces))
+  (reduce (fn [names surface] (into names (p/module-nominal-type-names-with-imports! (get surface "datums") (get surface "prefix") (get surface "refer") (get surface "imported-nominal-type-names" {})))) {} surfaces))
 
 (defn- resolve-imports! [prog surfaces]
   (let [own-externs (get prog "externs")
@@ -245,7 +245,7 @@
    perrs (p/parse-errors)]
   (if (> (count perrs) 0) (do
   (selfhost.rt/exit 1)
-  prog) {"program" prog "datums" datums "source-text" source-text "source-sha256" (get source-snapshot "sourceSha256") "source-id" source-id})))
+  prog) {"program" prog "datums" datums "imported-nominal-type-names" imported-nominal-type-names "source-text" source-text "source-sha256" (get source-snapshot "sourceSha256") "source-id" source-id})))
 
 (defn- imported-record-field-order [prog]
   (reduce (fn [out contract] (assoc out (get contract "name") (mapv (fn [^String field] (if (str/starts-with? field ":") (subs field 1) field)) (get contract "field-order")))) {} (get prog IMPORTED-RECORD-CONTRACTS-KEY [])))

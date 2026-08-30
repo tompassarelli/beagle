@@ -38,9 +38,7 @@
 (def ^String repo-root (or (System/getenv "BEAGLE_STORE_HOME") (System/getProperty "user.dir")))
 
 (defn- rpc [port ^String line]
-  (with-open [s (java.net.Socket.)]
-  (.connect s (java.net.InetSocketAddress. "127.0.0.1" (int port)) 3000)
-  (let [w (io/writer (.getOutputStream s))
+  (with-open [s (java.net.Socket.)] (.connect s (java.net.InetSocketAddress. "127.0.0.1" (int port)) 3000) (let [w (io/writer (.getOutputStream s))
    r (io/reader (.getInputStream s))]
   (.write w (str line "\n"))
   (.flush w)
@@ -58,8 +56,7 @@
   (catch Exception _
     false)))
 
-(defn ^Boolean ensure-sidecar-with-state!
-  "Ping the warm checker; if down and *autostart?*, launch bin/beagle-store-defcheck and\n  block (≤30s) until it announces ready. Idempotent. Returns true when up." [^DefcheckState state]
+(defn ^Boolean ensure-sidecar-with-state! [^DefcheckState state]
   (or (sidecar-up-with-state? state) (if (:autostart? state) (do
   (let [launcher (str repo-root "/bin/beagle-store-defcheck")]
   (let [pb (ProcessBuilder. ["setsid" launcher (str (:sidecar-port state))])]
@@ -83,13 +80,11 @@
 (defn ^String edn-path-with-state [^DefcheckState state ^String module]
   (str (gwdir-with-state state) "/.edn/" module ".edn"))
 
-(defn live-modules-with-state
-  "The live module set. Uses *modules-fn* if bound (in-process); else reads the\n  stable :srcs the server attaches to a render-miss (`:index` is A1's WIP)." [^DefcheckState state]
+(defn live-modules-with-state [^DefcheckState state]
   (if (:modules-fn state) (vec ((:modules-fn state))) (let [r (server-with-state state {:op :render :module "__nonexistent__"})]
   (vec (or (:srcs r) [])))))
 
-(defn ^String render-edn-with-state!
-  "Render module -> triples string, written to edn-path. Returns the path. Uses\n  *render-fn* if bound (the server's in-process render), else server :render." [^DefcheckState state ^String module]
+(defn ^String render-edn-with-state! [^DefcheckState state ^String module]
   (let [edn (if (:render-fn state) ((:render-fn state) module) (let [resp (server-with-state state {:op :render :module module})]
   (if (:error resp) (do
   (throw (ex-info (str "render failed for " module ": " (:error resp)) {:module module}))))
@@ -101,8 +96,7 @@
   (spit p edn)
   p)))
 
-(defn ^String refresh-sibling-with-state!
-  "Render `module` fresh (server :render) to its EDN, and warm EDN->text via the\n  sidecar to <gwdir>/<module>.bclj — so OTHER modules resolve this module's\n  CURRENT signatures on their next check. Returns the EDN path. The .bclj write\n  is best-effort (a stale sibling only weakens cross-module fidelity, never\n  corrupts a check)." [^DefcheckState state ^String module]
+(defn ^String refresh-sibling-with-state! [^DefcheckState state ^String module]
   (let [epath (render-edn-with-state! state module)]
   (io/make-parents (io/file (src-path-with-state state module)))
   (try
@@ -111,8 +105,7 @@
     nil))
   epath))
 
-(defn ^String prime-gwdir-with-state!
-  "Populate <gwdir> with a .bclj for every live module (warm, via the sidecar).\n  Idempotent + cheap to repeat. Call once when an arena's server comes up\n  (and internally by whole-tree-check, so cross-refs resolve current text)." [^DefcheckState state]
+(defn ^String prime-gwdir-with-state! [^DefcheckState state]
   (ensure-sidecar-with-state! state)
   (doseq [m (live-modules-with-state state)]
   (try
@@ -148,12 +141,10 @@
    e5 (if kind (assoc e4 :kind kind) e4)]
   (if (:error-code diag) (assoc e5 :error-code (:error-code diag)) e5))))
 
-(defn- pick-primary
-  "The error to surface as the single return value: prefer one on the def just\n  written, else the first. Full list travels in :errors." [name errs]
+(defn- pick-primary [name errs]
   (or (first (filter (fn [e] (= name (get-in e [:at :def]))) errs)) (first errs)))
 
-(defn check-module-errors-with-state!
-  "Render `module` fresh and type-check it against the primed sibling gwdir.\n  Returns a vector of ERROR-shape maps (empty when clean). Refreshes this\n  module's own sibling text so later cross-module checks see it." [^DefcheckState state ^String module]
+(defn check-module-errors-with-state! [^DefcheckState state ^String module]
   (let [epath (refresh-sibling-with-state! state module)
    resp (sidecar-with-state state (str "check " epath " " (src-path-with-state state module)))]
   (if (:ok resp) (mapv (fn [e] (diag->error module e)) (:errors resp)) [{:ok false :stage :type :at {:module module} :message (str "def-check infra error: " (:error resp))}])))
@@ -168,13 +159,11 @@
   (= mode "untyped") true
   :else (not (beagle-source? src)))))
 
-(defn ^String module-src-text-with-state!
-  "Refresh `module`'s sibling .bclj (warm EDN->text) and return its text." [^DefcheckState state ^String module]
+(defn ^String module-src-text-with-state! [^DefcheckState state ^String module]
   (refresh-sibling-with-state! state module)
   (slurp (src-path-with-state state module)))
 
-(defn- read-forms
-  "Read every top-level form from `src`. Returns {:forms [...] :read-error msg?}.\n  Permissive: reader conditionals allowed (:clj branch), unknown tagged literals\n  pass their value through, read-eval disabled. A mid-stream read failure stops\n  and reports (the target def, if unreadable, is a real check-1 failure)." [^String src]
+(defn- read-forms [^String src]
   (let [rdr (java.io.PushbackReader. (java.io.StringReader. (str src)))
    opts {:read-cond :allow :features #{:clj} :eof :store.defcheck/eof}]
   (binding [*read-eval* false
@@ -216,8 +205,7 @@
 (defn- arglist-locals [params]
   (set (mapcat pattern-locals (remove (fn [x] (= x '&)) params))))
 
-(defn- fn-arities
-  "Given a defn/fn tail (after the name), return {:fixed #{n…} :variadic min|nil}." [tail]
+(defn- fn-arities [tail]
   (let [tail (if (string? (first tail)) (drop 1 tail) tail)
    tail (if (map? (first tail)) (drop 1 tail) tail)
    bodies (cond
@@ -229,8 +217,7 @@
    fixed (if (neg? amp) (count params) amp)]
   (if (neg? amp) (update acc :fixed conj fixed) (update acc :variadic (fnil min fixed) fixed)))) {:fixed #{} :variadic nil} bodies)))))
 
-(defn- collect-defs
-  "Walk top-level forms → {:names #{sym…} :arities {sym {:fixed.. :variadic..}}}.\n  Names cover def/defn/deftype/defrecord (+ ->Ctor/map->Ctor/Ctor.), defprotocol\n  method names, declare, defmulti. Arities only for fn-shaped defs." [forms]
+(defn- collect-defs [forms]
   (reduce (fn [acc form] (if (and (seq? form) (symbol? (first form))) (let [h (first form)
    nm (if (>= (count form) 2) (do
   (first (rest form))))
@@ -258,8 +245,7 @@
   (if (sequential? (:refer opts)) (update a3 :refers into (:refer opts)) a3)))
   :else acc))
 
-(defn- parse-ns-env
-  "Extract {:aliases #{} :refers #{} :ns-names #{} :imports #{class-syms}\n  :refer-all? bool} from the module's forms (ns form + top-level require/use/import)." [forms]
+(defn- parse-ns-env [forms]
   (let [empty' {:aliases #{} :refers #{} :ns-names #{} :imports #{} :refer-all? false}
    add-import (fn [acc spec] (cond
   (symbol? spec) (update acc :imports conj (symbol (peek (str/split (name spec) DOT-RE))))
@@ -280,8 +266,8 @@
   :else acc)) acc)) empty' forms)))
 
 (defn- lev [a b]
-  (let [^String a (str a)
-   ^String b (str b)
+  (let [a (str a)
+   b (str b)
    m (count a)
    n (count b)]
   (if (or (zero? m) (zero? n)) (max m n) (loop [i 1
@@ -320,8 +306,7 @@
   {:nearest [(str f)] :stage :type :suggestion (str "call `" f "` with " (str/join " or " (sort fixed)) " argument(s)") :got (str n) :ok false :kind "arity-mismatch" :at (if def-name {:module module :def def-name} {:module module}) :expected (str/join "/" (sort fixed)) :message (str "arity mismatch: `" f "` called with " n " arg(s), but is defined for " (str/join "/" (sort fixed)) (if variadic (do
   (str " (or " variadic "+)"))))}))
 
-(defn- walk-fn-tail
-  "Walk a fn/defn tail (`([params] body…)` or `(([p] b)…)`), seeding each arity's\n  params as locals. `rec` recurses a subform, `ls0` is the enclosing scope." [rec ls0 tail]
+(defn- walk-fn-tail [rec ls0 tail]
   (let [tail (if (string? (first tail)) (rest tail) tail)
    tail (if (map? (first tail)) (rest tail) tail)]
   (cond
@@ -334,8 +319,7 @@
   (doseq [b (rest a)]
   (rec b ls)))))))
 
-(defn walk-body-with-state!
-  "Analyze `form` for free-symbol + arity errors, threading lexical `locals`.\n  Appends ERROR maps to the `errs` atom. Conservative: unknown binding forms\n  over-collect locals (suppress, never false-flag)." [^Boolean arity-check? ^String module def-name env defs errs form locals]
+(defn walk-body-with-state! [^Boolean arity-check? ^String module def-name env defs errs form locals]
   (let [rec (fn [f ls] (walk-body-with-state! arity-check? module def-name env defs errs f ls))
    rec-no-arity (fn [f ls] (walk-body-with-state! false module def-name env defs errs f ls))
    emit (fn [e] (swap! errs conj e))
@@ -455,8 +439,7 @@
   (and (seq? nm) (symbol? (second nm))) (symbol (name (second nm)))
   :else nil)))))
 
-(defn analyze-untyped-module-with-state!
-  "In-process untyped def-check for `module` from rendered Clojure `src`.\n  Returns a vector of ERROR-shape maps (empty when clean)." [^Boolean arity-check? ^String module ^String src]
+(defn analyze-untyped-module-with-state! [^Boolean arity-check? ^String module ^String src]
   (let [{:keys [forms read-error]} (read-forms src)]
   (if read-error [{:ok false :stage :parse :at {:module module} :message (str "module did not read as Clojure: " read-error) :kind "read-error" :suggestion "fix the malformed form so the module parses"}] (let [env (parse-ns-env forms)
    defs (collect-defs forms)
@@ -466,13 +449,11 @@
   (walk-body-with-state! arity-check? module (def-target-name form) env defs errs form #{}))
   (clojure.core/deref errs)))))
 
-(defn check-module-errors-any-with-state!
-  "Render `module` to text once; route a `#lang beagle...` source to the typed\n  sidecar and other Clojure source to the in-process analyzer, unless the env\n  explicitly forces a mode. Returns a vector of ERROR-shape maps." [^DefcheckState state ^String module]
+(defn check-module-errors-any-with-state! [^DefcheckState state ^String module]
   (let [src (module-src-text-with-state! state module)]
   (if (untyped-mode? src) (analyze-untyped-module-with-state! (:arity-check? state) module src) (check-module-errors-with-state! state module))))
 
-(defn check-def-with-state!
-  "Incremental def-level type check. Returns nil when `module` type-checks\n  against its cached sibling environment, else the adapter-v2 ERROR shape for\n  the offending def (preferring `name`), with the full diagnostic list under\n  :errors. Never throws for a type error — only for infra faults (server or\n  sidecar unreachable), which surface as {:ok false :stage :type :message …}.\n\n  AUTHORITY: catches errors IN `module` (the edited def + its use of siblings).\n  A sibling in ANOTHER module that calls a now-broken `name` is NOT re-checked\n  here — that is whole-tree-check's job (adapter-v2 spec gap 3, deliverable 4b)." [^String module name ensure-sidecar-fn check-errors-fn]
+(defn check-def-with-state! [^String module name ensure-sidecar-fn check-errors-fn]
   (try
   (ensure-sidecar-fn)
   (let [errs (check-errors-fn module)]
@@ -481,8 +462,7 @@
   (catch Exception e
     {:ok false :stage :type :at {:module module :def name} :message (str "def-check unavailable: " (.getMessage e))})))
 
-(defn whole-tree-check-with-state!
-  "Type-check EVERY live module against the whole (refreshed) tree and aggregate.\n  nil when the tree is clean, else {:ok false :stage :gate …} with the first\n  offending diagnostic promoted to the top level and ALL diagnostics under\n  :errors (each tagged :stage :gate). This is where a def that checks alone but\n  breaks a caller in another module is caught — the authoritative pre-promotion\n  gate the S-profile `check {}` verb calls. Still warm (N × ~50ms), because it\n  reuses the persistent checker; the harness's build-all remains the final\n  byte-level acceptance oracle at commit." [ensure-sidecar-fn prime-gwdir-fn live-modules-fn check-errors-fn]
+(defn whole-tree-check-with-state! [ensure-sidecar-fn prime-gwdir-fn live-modules-fn check-errors-fn]
   (try
   (ensure-sidecar-fn)
   (prime-gwdir-fn)

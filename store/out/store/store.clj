@@ -403,7 +403,7 @@
   (triple-handle position)))) (let [value (atom-row term)
    store (deref ctx)
    atoms (store-atoms store)
-   prefix-known (if (nil? (store-prefix store)) -1 (packed/find-atom-position (store-prefix store) term))
+   prefix-known (if (nil? (store-prefix store)) -1 (packed/find-atom-position! (store-prefix store) term))
    tail-known (find-atom-position atoms (store-atom-slots store) (prefix-atom-count store) value)
    known (if (>= prefix-known 0) prefix-known tail-known)]
   (if (>= known 0) (atom-handle known) (let [position (total-atom-count store)
@@ -430,7 +430,7 @@
   (if (or (t/triple? value) (not (t/term? value))) (throw (ex-info "store: value outside Atom" {:type :invalid-atom})) (let [row (atom-row value)
    store (deref ctx)
    atoms (store-atoms store)
-   prefix-known (if (nil? (store-prefix store)) -1 (packed/find-atom-position (store-prefix store) value))
+   prefix-known (if (nil? (store-prefix store)) -1 (packed/find-atom-position! (store-prefix store) value))
    tail-known (find-atom-position atoms (store-atom-slots store) (prefix-atom-count store) row)
    known (if (>= prefix-known 0) prefix-known tail-known)]
   (if (>= known 0) (atom-handle known) (let [position (total-atom-count store)
@@ -474,7 +474,7 @@
    tail-known (find-triple-position (store-triples store) (store-triple-slots store) (prefix-triple-count store) (t/->TripleRow h1 h2 h3))
    position (if (>= prefix-known 0) prefix-known tail-known)]
   (if (>= position 0) (do
-  (triple-handle position)))) nil)) (let [prefix-known (if (nil? (store-prefix store)) -1 (packed/find-atom-position (store-prefix store) term))
+  (triple-handle position)))) nil)) (let [prefix-known (if (nil? (store-prefix store)) -1 (packed/find-atom-position! (store-prefix store) term))
    tail-known (find-atom-position (store-atoms store) (store-atom-slots store) (prefix-atom-count store) (atom-row term))
    position (if (>= prefix-known 0) prefix-known tail-known)]
   (if (>= position 0) (do
@@ -500,15 +500,15 @@
 (declare find-active-bucket-position)
 
 (defn- collect-new-term-demand! [store term seen]
-  (if (or (contains? seen term) (some? (known-term-handle store term))) (->TailDemand seen 0 0) (if (t/triple? term) (let [^TailDemand first-demand (collect-new-term-demand! store (t/triple-t1 term) seen)
-   ^TailDemand second-demand (collect-new-term-demand! store (t/triple-t2 term) (taildemand-seen first-demand))
-   ^TailDemand third-demand (collect-new-term-demand! store (t/triple-t3 term) (taildemand-seen second-demand))]
+  (if (or (contains? seen term) (some? (known-term-handle store term))) (->TailDemand seen 0 0) (if (t/triple? term) (let [first-demand (collect-new-term-demand! store (t/triple-t1 term) seen)
+   second-demand (collect-new-term-demand! store (t/triple-t2 term) (taildemand-seen first-demand))
+   third-demand (collect-new-term-demand! store (t/triple-t3 term) (taildemand-seen second-demand))]
   (->TailDemand (conj (taildemand-seen third-demand) term) (+ 6 (+ (taildemand-rows first-demand) (+ (taildemand-rows second-demand) (taildemand-rows third-demand)))) (+ triple-tail-bytes (+ (taildemand-bytes first-demand) (+ (taildemand-bytes second-demand) (taildemand-bytes third-demand)))))) (->TailDemand (conj seen term) 2 (+ slot-entry-tail-bytes (+ atom-tail-overhead-bytes (packed/term-byte-count! term)))))))
 
 (defn- transaction-tail-demand! [store operations]
-  (let [^TailDemand terms (loop [position 0
-   ^TailDemand demand (->TailDemand #{} 0 0)]
-  (if (>= position (count operations)) demand (let [^TailDemand next (collect-new-term-demand! store (t/commitoperation-proposition (nth operations position)) (taildemand-seen demand))]
+  (let [terms (loop [position 0
+   demand (->TailDemand #{} 0 0)]
+  (if (>= position (count operations)) demand (let [next (collect-new-term-demand! store (t/commitoperation-proposition (nth operations position)) (taildemand-seen demand))]
   (recur (inc position) (->TailDemand (taildemand-seen next) (+ (taildemand-rows demand) (taildemand-rows next)) (+ (taildemand-bytes demand) (taildemand-bytes next)))))))
    overlay (loop [position 0
    seen #{}
@@ -532,7 +532,7 @@
 
 (defn intern-term! [ctx term]
   (let [store (deref ctx)
-   ^TailDemand demand (collect-new-term-demand! store term #{})
+   demand (collect-new-term-demand! store term #{})
    _ (ensure-tail-room! store (taildemand-rows demand) (taildemand-bytes demand))
    handle (intern-handle! ctx term)]
   (resolve-handle (deref ctx) handle)))
@@ -920,7 +920,7 @@
 
 (defn- exact-occurrence-position [store coordinate]
   (if (not (t/occurrence-coordinate? coordinate)) -1 (let [transaction (t/triple-t1 coordinate)
-   ^String space (t/triple-t1 transaction)
+   space (t/triple-t1 transaction)
    sequence (t/triple-t3 transaction)
    ordinal (t/triple-t3 coordinate)
    position (first-transaction-after store (dec sequence))]
@@ -1187,7 +1187,7 @@
    rows (t/termstoredump-triples data)
    transactions (t/termstoredump-transactions data)
    operations (t/termstoredump-operations data)
-   ^String dump-space (t/termstoredump-space-id data)
+   dump-space (t/termstoredump-space-id data)
    next-sequence-value (t/termstoredump-next-sequence data)]
   (if (not (and (valid-space-id? dump-space) (and (>= next-sequence-value 1) (and (canonical-term-rows? atoms rows) (valid-history-rows? transactions operations (count rows) next-sequence-value))))) (term-store-load-error :invalid-term-store-dump "store: invalid TermStore dump") (if (not (= (space-id ctx) dump-space)) (term-store-load-error :space-mismatch "store: TermStore dump belongs to a different space") (let [loaded (t/->TermStore dump-space (atom next-sequence-value) (atom atoms) (atom rows) (atom transactions) (atom operations) (atom empty-ids) (atom empty-active-buckets) (atom empty-active-cells) (atom false) (atom (build-atom-term-slots! atoms (term-slots-width-for (count atoms)) 0)) (atom (build-triple-term-slots! rows (term-slots-width-for (count rows)) 0)) (atom (build-triple-query-slots! rows (term-slots-width-for (count rows)) 0 triple-index-t1)) (atom (build-triple-query-slots! rows (term-slots-width-for (count rows)) 0 triple-index-t12)) (atom (build-triple-query-slots! rows (term-slots-width-for (count rows)) 0 triple-index-t2)) (atom (build-triple-query-slots! rows (term-slots-width-for (count rows)) 0 triple-index-t3)) (atom (slots/fresh-slots initial-slots)) nil default-tail-row-limit default-tail-byte-limit (atom 0) (atom 0))]
   (reset! ctx (rebuild-operation-state! loaded))
@@ -1203,7 +1203,7 @@
   (if (or (some? (store-prefix store)) (and (valid-space-id? (t/termstore-space-id store)) (and (>= next-sequence-value 1) (and (canonical-term-rows? atoms rows) (valid-history-rows? transactions operations (count rows) next-sequence-value))))) ctx (throw (ex-info "store: invalid TermStore dump" {:type :invalid-term-store-dump})))))
 
 (defn load-term-store! [ctx data]
-  (let [^TermStoreLoadResult result (load-term-store-result! ctx data)]
+  (let [result (load-term-store-result! ctx data)]
   (if (termstoreloadresult-ok result) ctx (let [code (termstoreloadresult-code result)
    message (termstoreloadresult-message result)]
   (throw (ex-info (if message message "store: TermStore load failed") {:type (if code code :invalid-term-store-dump)}))))))

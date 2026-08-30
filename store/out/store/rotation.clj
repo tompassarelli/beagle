@@ -226,7 +226,7 @@
   (recur (inc position) (if (and (= t/assert-action (t/operationoccurrence-action op)) (= occurrence (occurrence-of op))) op found))))))]
   (if (nil? candidate) nil (let [present candidate
    live (by-proposition rotation (proposition-of present))
-   ^Boolean survives (loop [position 0]
+   survives (loop [position 0]
   (if (>= position (count live)) false (if (= occurrence (occurrence-of (nth live position))) true (recur (inc position)))))]
   (if survives present nil)))))
 
@@ -347,14 +347,14 @@
   (assoc rotation :pending (pending-with-record (rotation-pending rotation) space-id (t/->TransactionRecord sequence operations))))
 
 (defn ^Rotation refresh! [^Rotation rotation ctx]
-  (let [^String space (store/space-id ctx)
+  (let [space (store/space-id ctx)
    target (store/current-sequence ctx)
    pinned (rotation-version rotation)]
   (if (not (= space (rotation-space-id rotation))) (throw (ex-info "store: rotation belongs to a different space" {:type :rotation-space-mismatch})) (if (> pinned target) (throw (ex-info "store: rotation is ahead of the store it projects" {:type :rotation-ahead-of-store})) (if (= pinned target) rotation (let [records (store/transaction-records-between (deref ctx) pinned target)
    pending (loop [built (rotation-pending rotation)
    position 0]
   (if (>= position (count records)) built (recur (pending-with-record built space (nth records position)) (inc position))))
-   ^Rotation advanced (->Rotation (rotation-space-id rotation) target (rotation-events rotation) (rotation-by-occurrence rotation) (rotation-spo rotation) (rotation-pos rotation) (rotation-osp rotation) pending)]
+   advanced (->Rotation (rotation-space-id rotation) target (rotation-events rotation) (rotation-by-occurrence rotation) (rotation-spo rotation) (rotation-pos rotation) (rotation-osp rotation) pending)]
   (if (> (count pending) pending-fold-cap) (projected! space target (all-occurrences advanced)) advanced)))))))
 
 (defn ^Boolean pinned? [^Rotation rotation ctx]

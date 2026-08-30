@@ -21,6 +21,10 @@
 ;; map exists only at the host, so its symbol and var sides stay dynamic.
 (declare-extern clojure.core/ns-publics (Fn [Any] (Map Any Any)))
 
+;; Cheshire is an irreducible JVM JSON boundary. Keep its decoded value
+;; dynamic only at ingress; callers immediately consume the expected map shape.
+(declare-extern cheshire.core/parse-string (Fn [String Bool] Any))
+
 
 (def BEAGLE-MESSAGE-RE Any (re-pattern "^beagle:\\s*"))
 

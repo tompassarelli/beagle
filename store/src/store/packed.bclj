@@ -129,14 +129,14 @@
     [:else (fail! :invalid-packed-checkpoint
                   "packed Store atom payload decoded outside Atom")]))
 
-(defn- encode-term [value Any] Any
+(defn- encode-term! [value Any] Any
   (let [out ByteArrayOutputStream (ByteArrayOutputStream.)]
     (rpc/write-term-codec-v1! out value max-term-bytes max-term-nodes
                               max-term-depth)
     (.toByteArray out)))
 
 (defn term-byte-count! [value Any] Int
-  (alength (encode-term value)))
+  (alength (encode-term! value)))
 
 (defn- hex [bytes Any] String
   (apply str
@@ -289,7 +289,7 @@
                            entries Any []]
                       (if (>= position total)
                         entries
-                        (let [bytes Any (encode-term
+                        (let [bytes Any (encode-term!
                                          (atom-value!
                                           (merged-atom-at! prefix tail position)))]
                           (aset-long offsets position (.size payload))
@@ -1337,10 +1337,10 @@
           (recur (+ position 1))
           false)))))
 
-(defn find-atom-position
+(defn find-atom-position!
   [prefix PackedPrefix
    value Any] Int
-  (let [bytes Any (encode-term value)
+  (let [bytes Any (encode-term! value)
         wanted Int (hash64 bytes)
         index ByteBuffer (buffer prefix atom-lookup-section)
         total Int (atom-count prefix)

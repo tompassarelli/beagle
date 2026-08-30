@@ -125,6 +125,8 @@
 
 (def CONCAT-POLY (make-poly ["A"] (make-fn [(make-app "Vec" [(make-var "A")])] (make-union [(make-app "Vec" [(make-var "A")]) NIL-TYPE]) (make-app "Vec" [(make-var "A")])) nil))
 
+(def PROMOTE-POLY (make-poly ["A"] (make-fn [(make-var "A")] nil (make-var "A")) nil))
+
 (def JS-ATOM-POLY (make-poly ["A"] (make-fn [(make-var "A")] nil (make-app "Atom" [(make-var "A")])) nil))
 
 (def JS-DEREF-POLY (make-poly ["A"] (make-fn [(make-app "Atom" [(make-var "A")])] nil (make-var "A")) nil))
@@ -484,7 +486,7 @@
 
 (def JS-BUILTIN-MEMBER-CONTRACTS {"Math" {"sqrt" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "pow" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil FLOAT-TYPE) "exp" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "atan" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "atan2" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil FLOAT-TYPE) "floor" (make-fn [NUMBER-TYPE] nil INT-TYPE) "ceil" (make-fn [NUMBER-TYPE] nil INT-TYPE) "min" (make-poly ["A"] (make-fn [] (make-var "A") (make-var "A")) {"A" NUMBER-TYPE}) "max" (make-poly ["A"] (make-fn [] (make-var "A") (make-var "A")) {"A" NUMBER-TYPE}) "PI" FLOAT-TYPE "round" (make-fn [NUMBER-TYPE] nil INT-TYPE) "sin" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "cos" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "tan" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "abs" (make-poly ["A"] (make-fn [(make-var "A")] nil (make-var "A")) {"A" NUMBER-TYPE})} "String" {"indexOf" (make-fn [(make-prim "String")] nil INT-TYPE) "trim" (make-fn [] nil (make-prim "String")) "slice" (make-fn [] NUMBER-TYPE (make-prim "String"))} "Date" {"now" (make-fn [] nil INT-TYPE)} "performance" {"now" (make-fn [] nil FLOAT-TYPE)} "Map" {"size" INT-TYPE "get" (make-fn [(make-var "K")] nil (make-union [(make-var "V") NIL-TYPE])) "set" (make-fn [(make-var "K") (make-var "V")] nil (make-app "JsMap" [(make-var "K") (make-var "V")]))} "Canvas" {"getBoundingClientRect" (make-fn [] nil (make-prim "JsDomRect"))} "PointerEvent" {"clientX" FLOAT-TYPE "clientY" FLOAT-TYPE} "DOMRect" {"left" FLOAT-TYPE "top" FLOAT-TYPE "width" FLOAT-TYPE "height" FLOAT-TYPE}})
 
-(def STDLIB {"true" (make-prim "Bool") "false" (make-prim "Bool") "int?" (make-fn [ANY] nil (make-prim "Bool")) "nil?" (make-fn [ANY] nil (make-prim "Bool")) "some?" (make-fn [ANY] nil (make-prim "Bool")) "string?" (make-fn [ANY] nil (make-prim "Bool")) "number?" (make-fn [ANY] nil (make-prim "Bool")) "integer?" (make-fn [ANY] nil (make-prim "Bool")) "keyword?" (make-fn [ANY] nil (make-prim "Bool")) "symbol?" (make-fn [ANY] nil (make-prim "Bool")) "boolean?" (make-fn [ANY] nil (make-prim "Bool")) "float?" (make-fn [ANY] nil (make-prim "Bool")) "map?" (make-fn [ANY] nil (make-prim "Bool")) "vector?" (make-fn [ANY] nil (make-prim "Bool")) "empty?" (make-fn [ANY] nil (make-prim "Bool")) "not" (make-fn [ANY] nil (make-prim "Bool")) "=" (make-fn [ANY] ANY (make-prim "Bool")) "not=" (make-fn [ANY] ANY (make-prim "Bool")) ">" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) ">=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<=" (make-fn [NUMBER-TYPE NUMBER-TYPE] NUMBER-TYPE (make-prim "Bool")) "and" (make-fn [] ANY ANY) "or" (make-fn [] ANY ANY) "+" (make-fn [] NUMBER-TYPE ANY) "-" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "*" (make-fn [] NUMBER-TYPE ANY) "/" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "quot" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "mod" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "max" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "min" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "inc" (make-fn [NUMBER-TYPE] nil INT-TYPE) "dec" (make-fn [NUMBER-TYPE] nil INT-TYPE) "count" (make-fn [ANY] nil (make-prim "Int")) "long" (make-fn [ANY] nil (make-prim "Int")) "int" (make-fn [ANY] nil (make-prim "Int")) "bigint" (make-fn [ANY] nil (make-prim "Int")) "double" (make-fn [ANY] nil (make-prim "Float")) "monotonic-nanoseconds" (make-fn [] nil (make-prim "Int")) ["qualified-ref" "bgl" "sha256-utf8" nil] (make-fn [(make-prim "String")] nil (make-prim "String")) "str" (make-fn [] ANY (make-prim "String")) "get" (make-fn [ANY ANY] ANY ANY) "get-in" (make-fn [ANY ANY] ANY ANY) "assoc" (make-fn [ANY ANY ANY] ANY ANY) "assoc-in" (make-fn [ANY ANY ANY] nil ANY) "update" (make-fn [ANY ANY ANY] ANY ANY) "dissoc" (make-fn [ANY ANY] ANY ANY) "conj" (make-fn [ANY] ANY ANY) "cons" (make-fn [ANY ANY] nil ANY) "concat" CONCAT-POLY "into" (make-fn [ANY ANY] ANY ANY) "vec" (make-fn [ANY] nil ANY) "vals" (make-fn [ANY] nil ANY) "keys" (make-fn [ANY] nil ANY) "first" VEC-ACCESS-POLY "second" VEC-ACCESS-POLY "rest" (make-fn [ANY] nil ANY) "nth" NTH-POLY "reduce" (make-fn [ANY ANY] ANY ANY) "map" (make-fn [ANY] ANY ANY) "mapv" MAPV-POLY "filter" (make-fn [ANY ANY] nil ANY) "filterv" FILTERV-POLY "remove" (make-fn [ANY ANY] nil ANY) "some" (make-fn [ANY ANY] nil ANY) "every?" (make-fn [ANY ANY] nil (make-prim "Bool")) "range" (make-fn [] INT-TYPE (make-app "List" [INT-TYPE]))})
+(def STDLIB {"true" (make-prim "Bool") "false" (make-prim "Bool") "int?" (make-fn [ANY] nil (make-prim "Bool")) "nil?" (make-fn [ANY] nil (make-prim "Bool")) "some?" (make-fn [ANY] nil (make-prim "Bool")) "string?" (make-fn [ANY] nil (make-prim "Bool")) "number?" (make-fn [ANY] nil (make-prim "Bool")) "integer?" (make-fn [ANY] nil (make-prim "Bool")) "keyword?" (make-fn [ANY] nil (make-prim "Bool")) "symbol?" (make-fn [ANY] nil (make-prim "Bool")) "boolean?" (make-fn [ANY] nil (make-prim "Bool")) "float?" (make-fn [ANY] nil (make-prim "Bool")) "map?" (make-fn [ANY] nil (make-prim "Bool")) "vector?" (make-fn [ANY] nil (make-prim "Bool")) "empty?" (make-fn [ANY] nil (make-prim "Bool")) "not" (make-fn [ANY] nil (make-prim "Bool")) "=" (make-fn [ANY] ANY (make-prim "Bool")) "not=" (make-fn [ANY] ANY (make-prim "Bool")) ">" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) ">=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<=" (make-fn [NUMBER-TYPE NUMBER-TYPE] NUMBER-TYPE (make-prim "Bool")) "and" (make-fn [] ANY ANY) "or" (make-fn [] ANY ANY) "+" (make-fn [] NUMBER-TYPE ANY) "-" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "*" (make-fn [] NUMBER-TYPE ANY) "/" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "quot" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "mod" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "bit-and" (make-fn [INT-TYPE INT-TYPE] INT-TYPE INT-TYPE) "bit-shift-left" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "max" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "min" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "inc" (make-fn [NUMBER-TYPE] nil INT-TYPE) "dec" (make-fn [NUMBER-TYPE] nil INT-TYPE) "count" (make-fn [ANY] nil (make-prim "Int")) "long" (make-fn [ANY] nil (make-prim "Int")) "int" (make-fn [ANY] nil (make-prim "Int")) "bigint" (make-fn [ANY] nil (make-prim "Int")) "double" (make-fn [ANY] nil (make-prim "Float")) "monotonic-nanoseconds" (make-fn [] nil (make-prim "Int")) ["qualified-ref" "bgl" "sha256-utf8" nil] (make-fn [(make-prim "String")] nil (make-prim "String")) ["qualified-ref" "bgl" "promote" nil] PROMOTE-POLY "str" (make-fn [] ANY (make-prim "String")) "get" (make-fn [ANY ANY] ANY ANY) "get-in" (make-fn [ANY ANY] ANY ANY) "assoc" (make-fn [ANY ANY ANY] ANY ANY) "assoc-in" (make-fn [ANY ANY ANY] nil ANY) "update" (make-fn [ANY ANY ANY] ANY ANY) "dissoc" (make-fn [ANY ANY] ANY ANY) "conj" (make-fn [ANY] ANY ANY) "cons" (make-fn [ANY ANY] nil ANY) "concat" CONCAT-POLY "into" (make-fn [ANY ANY] ANY ANY) "vec" (make-fn [ANY] nil ANY) "vals" (make-fn [ANY] nil ANY) "keys" (make-fn [ANY] nil ANY) "first" VEC-ACCESS-POLY "second" VEC-ACCESS-POLY "rest" (make-fn [ANY] nil ANY) "nth" NTH-POLY "reduce" (make-fn [ANY ANY] ANY ANY) "map" (make-fn [ANY] ANY ANY) "mapv" MAPV-POLY "filter" (make-fn [ANY ANY] nil ANY) "filterv" FILTERV-POLY "remove" (make-fn [ANY ANY] nil ANY) "some" (make-fn [ANY ANY] nil ANY) "every?" (make-fn [ANY ANY] nil (make-prim "Bool")) "range" (make-fn [] INT-TYPE (make-app "List" [INT-TYPE]))})
 
 (def NIX-STDLIB {"==" (make-fn [ANY ANY] nil BOOL-TYPE) "!=" (make-fn [ANY ANY] nil BOOL-TYPE) "++" (make-poly ["A"] (let [items (make-app "Vec" [(make-var "A")])]
   (make-fn [items] items items)) nil) "//" (let [attrs (make-app "Map" [ANY ANY])]
@@ -512,6 +514,8 @@
 
 (def BUFFER-FLOAT-TYPE (make-app "Buffer" [FLOAT-TYPE]))
 
+(def CLJ-STDLIB (reference-map-assoc (reference-map-assoc {"alength" (make-poly ["A"] (make-fn [(make-app "Arr" [(make-var "A")])] nil INT-TYPE) nil) "aget" (make-poly ["A"] (make-fn [(make-app "Arr" [(make-var "A")]) INT-TYPE] nil (make-var "A")) nil) ".position" (make-fn [ANY] INT-TYPE INT-TYPE)} "System/nanoTime" (make-fn [] nil INT-TYPE)) "System/currentTimeMillis" (make-fn [] nil INT-TYPE)))
+
 (def CORE-STDLIB (reference-map-assoc (reference-map-assoc (reference-map-assoc (reference-map-assoc {"double-array" (make-fn [INT-TYPE] nil BUFFER-FLOAT-TYPE) "alength" (make-fn [BUFFER-FLOAT-TYPE] nil INT-TYPE) "aget" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE] nil FLOAT-TYPE) "aset-double!" (make-fn [BUFFER-FLOAT-TYPE INT-TYPE FLOAT-TYPE] nil FLOAT-TYPE)} "host.fs/mtime-nanoseconds" (make-fn [(make-prim "String")] nil (make-prim "host.fs/MtimeNanosecondsResult"))) "host.fs/create-temporary-sibling" (make-fn [(make-prim "String")] nil (make-prim "host.fs/CreateTemporarySiblingResult"))) "host.fs/rename-file" (make-fn [(make-prim "String") (make-prim "String")] nil (make-prim "host.fs/RenameFileResult"))) "host.fs/remove-file" (make-fn [(make-prim "String")] nil (make-prim "host.fs/RemoveFileResult"))))
 
 (defn install-core-result-union! [^String union-name variants]
@@ -535,7 +539,7 @@
   (= target "core") (merge STDLIB CORE-STDLIB)
   (= target "js") (merge STDLIB JS-ATOM-STDLIB)
   (= target "nix") (merge STDLIB NIX-STDLIB)
-  :else STDLIB))
+  :else (merge STDLIB CLJ-STDLIB)))
 
 (def JVM-INSTANCE-POSITION-METHODS {["Socket" "connect"] true ["java.net.Socket" "connect"] true})
 
@@ -1052,8 +1056,13 @@
   (if (get info "negated") {"then" neg "else" pos} {"then" pos "else" neg})))))))))
 
 (defn narrow-env-for-condition [env cond-expr]
-  (let [tn (test-narrowings cond-expr env)]
-  {"then" (merge env (get tn "then")) "else" (merge env (get tn "else"))}))
+  (let [tn (test-narrowings cond-expr env)
+   aliases (get env BINDING-ALIASES-KEY {})
+   project-aliases (fn [narrowed] (reduce (fn [out ^String name] (let [id (get aliases name)]
+  (if (and (string? id) (contains? narrowed id)) (assoc out name (get narrowed id)) out))) narrowed (ordered-keys aliases)))
+   then-narrowed (project-aliases (get tn "then"))
+   else-narrowed (project-aliases (get tn "else"))]
+  {"then" (merge env then-narrowed) "else" (merge env else-narrowed)}))
 
 (defn narrow-env-for-match [clause target-type env scrutinee]
   (let [pat (get clause "pattern")]
@@ -1316,7 +1325,7 @@
 
 (defn ^Boolean fresh-value-compatible?! [value expected env]
   (cond
-  (union-type? expected) (boolean (some (fn [alt] (fresh-value-compatible?! value alt env)) (get expected "members")))
+  (union-type? expected) (or (type-compatible? (infer-expr! value env) expected) (boolean (some (fn [alt] (fresh-value-compatible?! value alt env)) (get expected "members"))))
   (and (app-type? expected) (= (get expected "name") "HVec") (not (nil? value)) (= (get value "node") "vec")) (let [items (get value "items")
    elems (get expected "args")
    indices (vec (range (count items)))]
@@ -2416,7 +2425,7 @@
   (not valid) (purity-result (purity-escape-origins after-rest owner-origins call) {})
   (= name "persistent!") (purity-result (purity-set-origin-status after-rest owner-origins "dead") {})
   :else (purity-result after-rest owner-origins)))
-  :else (let [marked (if (and (not lexical) (or (bang-name? name) (= true (get (get state "known") name)))) (purity-note state display) state)
+  :else (let [marked (if (and (not qualified?) (not lexical) (or (bang-name? name) (= true (get (get state "known") name)))) (purity-note state display) state)
    fn-expr (get call "fn")
    after-callee (if (and (string? name) (not lexical)) marked (purity-analyze-and-escape fn-expr marked call))
    after-args (reduce (fn [next arg] (purity-analyze-and-escape arg next call)) after-callee args)]
@@ -3027,6 +3036,7 @@
   (expect! "purity: warn escalates at profile 3" (and (= (purity-severity-for "warn" "2") "warn") (= (purity-severity-for "warn" "3") "error")))
   (expect! "purity: direct bang call and set! are markers" (let [markers (collect-markers [(make-call "reset!" [(make-ref "cell") (make-lit "number" 1)]) (make-set!-node (make-ref "slot") (make-lit "number" 2))] {})]
   (and (boolean (some (fn [m] (= m "reset!")) markers)) (boolean (some (fn [m] (= m "set!")) markers)))))
+  (expect! "purity: imported bang calls do not become module-local effects" (= 0 (count (collect-markers [{"node" "call" "fn" (make-qualified-ref "packed" "atom-row-at!" nil) "args" []}] {}))))
   (expect! "purity: nested let/if/do/fn forms are traversed" (let [nested (make-let-node [(make-let-binding "x" nil (make-lit "number" 1))] [(make-if-node (make-lit "bool" true) {"node" "do" "body" [{"node" "fn" "params" [] "rest" false "ret" ANY "body" [(make-call "swap!" [(make-ref "cell")])]}]} (make-lit "nil" nil))])]
   (boolean (some (fn [m] (= m "swap!")) (collect-markers [nested] {})))))
   (expect! "purity: rescue/doto and future node children cannot hide markers" (let [wrapped {"node" "future-node" "payload" {"node" "rescue" "expr" {"node" "doto" "target" (make-ref "cell") "forms" [(make-call "reset!" [])]} "fallback" (make-lit "nil" nil) "err" false}}]
@@ -3159,6 +3169,17 @@
   (> (get (type-check! prog) "count") 0)))
   (expect! "buffer primitive: alength wrong arity" (let [prog (assoc (make-prog [(make-def-node "r" nil (make-call "alength" []))]) "target" "core")]
   (> (get (type-check! prog) "count") 0)))
+  (expect! "clj array primitive: alength returns Int across a dynamic boundary" (let [prog (assoc (make-prog [(make-defn-node "array-length" [(make-param "bytes" ANY)] INT-TYPE [(make-call "alength" [(make-ref "bytes")])])]) "target" "clj")]
+  (= (get (type-check! prog) "count") 0)))
+  (expect! "clj array primitive: aget retains its element type" (let [prog (assoc (make-prog [(make-defn-node "byte-at" [(make-param "bytes" (make-app "Arr" [(make-prim "I8")]))] (make-prim "I8") [(make-call "aget" [(make-ref "bytes") (make-lit "number" 0)])])]) "target" "clj")]
+  (= (get (type-check! prog) "count") 0)))
+  (expect! "portable integer bit operations return Int" (let [prog (assoc (make-prog [(make-defn-node "masked-byte" [(make-param "value" INT-TYPE)] INT-TYPE [(make-call "bit-shift-left" [(make-call "bit-and" [(make-lit "number" 255) (make-ref "value")]) (make-lit "number" 8)])])]) "target" "clj")]
+  (= (get (type-check! prog) "count") 0)))
+  (expect! "clj JVM numeric boundaries return Int" (let [position-call {"node" "method-call" "method" ".position" "target" (make-ref "buffer") "args" []}
+   prog (assoc (make-prog [(make-defn-node "deadline-from-position" [(make-param "buffer" (make-prim "ByteBuffer"))] INT-TYPE [(make-call "+" [position-call (make-static-call "System" "nanoTime" [])])])]) "target" "clj")]
+  (= (get (type-check! prog) "count") 0)))
+  (expect! "clj System/currentTimeMillis supports numeric elapsed time" (let [prog (assoc (make-prog [(make-defn-node "elapsed" [] INT-TYPE [(make-call "-" [(make-static-call "System" "currentTimeMillis" []) (make-static-call "System" "currentTimeMillis" [])])])]) "target" "clj")]
+  (= (get (type-check! prog) "count") 0)))
   (expect! "buffer primitive: aget wrong arity" (let [prog (assoc (make-prog [(make-def-node "r" nil (make-call "aget" [(make-ref "missing")]))]) "target" "core")]
   (> (get (type-check! prog) "count") 0)))
   (expect! "buffer primitive: aset-double! wrong arity" (let [prog (assoc (make-prog [(make-def-node "r" nil (make-call "aset-double!" [(make-ref "missing") (make-lit "number" 0)]))]) "target" "core")]
@@ -3226,7 +3247,7 @@
    condition (make-call "nil?" [stale-ref])
    else-env (get (narrow-env-for-condition inner condition) "else")
    narrowed (reference-map-ref else-env stale-ref nil)]
-  (and (= "NativeId" (get narrowed "name")) (= "SourceStageV1" (get (get else-env outer-id) "name")))))
+  (and (= "NativeId" (get narrowed "name")) (= "NativeId" (get (get else-env "expected") "name")) (= "SourceStageV1" (get (get else-env outer-id) "name")))))
   (expect! "narrowing: (and (some? x) ...) compounds into then-branch" (let [env {"n" (make-union [(make-prim "Int") (make-prim "Nil")])}
    ce (make-call "and" [(make-call "some?" [(make-ref "n")]) (make-call ">" [(make-ref "n") (make-lit "number" 0)])])
    then-env (get (narrow-env-for-condition env ce) "then")]
@@ -3397,6 +3418,9 @@
   (and (diagnostics-include? constant-diagnostics "Core requires a closed monomorphic Native ABI") (= (get identity-result "count") 0) (fn-type? identity-type) (= (get (nth (get identity-type "params") 0) "name") "Int"))))
   (expect! "stdlib: bgl/sha256-utf8 has one typed String boundary" (let [signature (reference-map-ref (target-stdlib "core") (make-qualified-ref "bgl" "sha256-utf8" nil) nil)]
   (and (fn-type? signature) (= [(make-prim "String")] (get signature "params")) (= (make-prim "String") (get signature "ret")))))
+  (expect! "stdlib: bgl/promote preserves its argument type" (let [signature (reference-map-ref (target-stdlib "clj") (make-qualified-ref "bgl" "promote" nil) nil)
+   resolved (resolve-poly-call! signature [(make-lit "string" "value")] {})]
+  (and (poly-type? signature) (= (make-prim "String") (get resolved "ret")))))
   (expect! "nix-only operator contracts check without extern declarations" (let [one (make-lit "number" 1)
    two (make-lit "number" 2)
    left (make-vec-node [one])

@@ -700,6 +700,7 @@
   (cond
   (and (= fn-key "#%meta") (= 2 (count args))) (str "^" (emit-expr* (nth args 0)) " " (emit-expr* (nth args 1)))
   (and (= 1 (count args)) (or (contains? (deref scalar-fns) fn-key) (qualified-reference=? fn-expr "bgl" "promote"))) (emit-expr* (nth args 0))
+  (and (= fn-key "monotonic-nanoseconds") (= 0 (count args)) (not (contains? (deref local-names) fn-key))) "(System/nanoTime)"
   (and (= fn-key "sha256-bytes") (= 1 (count args)) (not (contains? (deref local-names) fn-key))) (str "(" CLJ-SHA256-BYTES-CALL " " (emit-expr* (nth args 0)) ")")
   (and (qualified-reference=? fn-expr "bgl" "sha256-utf8") (= 1 (count args))) (str "(" CLJ-SHA256-UTF8-CALL " " (emit-expr* (nth args 0)) ")")
   :else (str "(" (reference->clj fn-expr) (emit-args args) ")"))) (str "(" (emit-expr* fn-expr) (emit-args args) ")")))
@@ -864,6 +865,12 @@
   (expect! "reference: qualified call keeps structural callee identity" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "qualifier" "str" "name" "upper-case" "providerId" nil} "args" [{"node" "ref" "name" "value"}]}) "(str/upper-case value)"))
   (expect! "reference: qualified static call renders class and method" (= (emit-expr! {"node" "static-call" "qualifier" "Math" "name" "abs" "providerId" nil "args" [{"node" "literal" "kind" "number" "value" -1}]}) "(Math/abs -1)"))
   (expect! "reference: structural bgl/promote erases" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "qualifier" "bgl" "name" "promote" "providerId" nil} "args" [{"node" "ref" "name" "value"}]}) "value"))
+  (expect! "intrinsic: monotonic clock lowers to the JVM clock" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "monotonic-nanoseconds"} "args" []}) "(System/nanoTime)"))
+  (expect! "intrinsic: local monotonic clock shadows the portable intrinsic" (do
+  (reset! local-names {"monotonic-nanoseconds" true})
+  (let [output (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "monotonic-nanoseconds"} "args" []})]
+  (reset! local-names {})
+  (= output "(monotonic-nanoseconds)"))))
   (expect! "intrinsic: sha256-bytes injects its Clojure runtime call" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "sha256-bytes"} "args" [{"node" "ref" "name" "values"}]}) (str "(" CLJ-SHA256-BYTES-CALL " values)")))
   (expect! "intrinsic: structural bgl/sha256-utf8 injects its Clojure runtime call" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "qualifier" "bgl" "name" "sha256-utf8" "providerId" nil} "args" [{"node" "ref" "name" "text"}]}) (str "(" CLJ-SHA256-UTF8-CALL " text)")))
   (expect! "intrinsic: local sha256-bytes shadows the portable intrinsic" (do

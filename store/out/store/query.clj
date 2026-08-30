@@ -170,7 +170,7 @@
   (not (empty? (findspec-aggregates find))))
 
 (def max-results (let [raw (System/getenv "BEAGLE_STORE_MAX_RESULTS")
-   parsed (if (and (string? raw) (not (= raw ""))) (let [^String text raw]
+   parsed (if (and (string? raw) (not (= raw ""))) (let [text raw]
   (parse-long text)) nil)]
   (if (and (some? parsed) (> parsed 0)) parsed 100000)))
 
@@ -598,16 +598,16 @@
    right-rank (term-rank right)
    rank-order (int-compare left-rank right-rank)]
   (if (not (zero? rank-order)) rank-order (cond
-  (and (boolean? left) (boolean? right)) (let [^Boolean left-bool left
-   ^Boolean right-bool right]
+  (and (boolean? left) (boolean? right)) (let [left-bool left
+   right-bool right]
   (bool-compare left-bool right-bool))
   (and (number? left) (number? right)) (if (and (integer? left) (integer? right)) (let [left-int left
    right-int right]
   (int-compare left-int right-int)) (let [left-float (double left)
    right-float (double right)]
   (float-compare left-float right-float)))
-  (and (string? left) (string? right)) (let [^String left-string left
-   ^String right-string right]
+  (and (string? left) (string? right)) (let [left-string left
+   right-string right]
   (compare left-string right-string))
   (and (keyword? left) (keyword? right)) (let [left-keyword left
    right-keyword right]
@@ -666,7 +666,7 @@
   (number? value) (if (integer? value) (let [integer-value value]
   integer-value) (let [float-value (double value)]
   float-value))
-  (string? value) (let [^String text value
+  (string? value) (let [text value
    integer-result (parse-long text)]
   (if (some? integer-result) (let [integer-value integer-result
    numeric-value integer-value]
@@ -699,7 +699,7 @@
   (loop [index 0]
   (if (>= index (count specs)) nil (let [spec (nth specs index)]
   (if (contains? numeric-aggregate-operators (aggregatespec-operator spec)) (let [position (or (aggregatespec-argument spec) 0)
-   ^Boolean bad (nonnumeric-row? rows position)]
+   bad (nonnumeric-row? rows position)]
   (if bad (query-error :query-nonnumeric-aggregate (str "aggregate position " position " contains a non-numeric Term")) (recur (inc index)))) (recur (inc index))))))))
 
 (defn- ^AggregateGroups group-rows [rows grouping]
@@ -707,8 +707,8 @@
    key-text (row-key key)
    groups (aggregategroups-by-key acc)
    current (get groups key-text)]
-  (if (some? current) (let [^AggregateGroup group current
-   ^AggregateGroup updated (->AggregateGroup (aggregategroup-key group) (conj (aggregategroup-members group) row))]
+  (if (some? current) (let [group current
+   updated (->AggregateGroup (aggregategroup-key group) (conj (aggregategroup-members group) row))]
   (->AggregateGroups (assoc groups key-text updated) (aggregategroups-order acc))) (->AggregateGroups (assoc groups key-text (->AggregateGroup key [row])) (conj (aggregategroups-order acc) key-text))))) (->AggregateGroups {} []) rows))
 
 (defn- ^Boolean all-integers? [rows position]
@@ -768,7 +768,7 @@
   (if (empty? rows) (success-result []) (let [numeric-error (numeric-column-error rows find)]
   (if (some? numeric-error) (failure-result [numeric-error]) (let [groups (group-rows rows (findspec-grouping find))
    aggregated (reduce (fn [acc ^String group-key] (let [group-value (get (aggregategroups-by-key groups) group-key)
-   ^AggregateGroup group (if (some? group-value) (let [^AggregateGroup present group-value]
+   group (if (some? group-value) (let [present group-value]
   present) (->AggregateGroup [] []))
    key (aggregategroup-key group)
    members (aggregategroup-members group)
@@ -790,7 +790,7 @@
   (->QueryExecutionResult result nil)))))))
 
 (defn ^QueryExecutionResult run-plan-with-history-result! [propositions occurrences withdrawals ^QueryPlan plan control]
-  (let [^ProjectionResult projection-result (project-with-history-result! propositions occurrences withdrawals)
+  (let [projection-result (project-with-history-result! propositions occurrences withdrawals)
    projection-value (projection-result-projection projection-result)
    error-value (projection-result-error projection-result)]
   (cond

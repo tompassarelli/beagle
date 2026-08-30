@@ -209,10 +209,13 @@
   (selfhost.rt/eprint (str "warning [capitalized-binding-name] `" (str name) "` bound as a " where " name — possible missing `(name Type)` wrapper?\n")))))))
   nil)
 
+(defn- ^Boolean jvm-qualified-class-name? [^String name]
+  (some? (re-matches #".*\.[A-Z][A-Za-z0-9_]*$" name)))
+
 (defn- ^Boolean type-expression-datum? [datum]
   (cond
   (and (int? datum) (>= datum 0)) true
-  (string? datum) (or (some? (re-matches #".*\\.[A-Z][A-Za-z0-9_]*$" datum)) (let [parts (str/split datum #"/")
+  (string? datum) (or (jvm-qualified-class-name? datum) (let [parts (str/split datum #"/")
    leaf (nth parts (- (count parts) 1))
    head (subs leaf 0 (min 1 (count leaf)))]
   (and (> (count head) 0) (not (= head (str/lower-case head))))))
@@ -298,9 +301,6 @@
   (let [parsed (parse-type* t)]
   (reset! CURRENT-TYPE-VARS before)
   parsed)))
-
-(defn- ^Boolean jvm-qualified-class-name? [^String name]
-  (some? (re-matches #".*\\.[A-Z][A-Za-z0-9_]*$" name)))
 
 (defn parse-type! [t]
   (cond
@@ -2392,13 +2392,16 @@
   (if (string? member-name) (assoc out member-name true) out))) with-union members))
   :else names)) names))) {} datums))
 
-(defn module-nominal-type-names! [datums ^String prefix refer-syms]
+(defn module-nominal-type-names-with-imports! [datums ^String prefix refer-syms imported-nominal-type-names]
   (let [local-names (module-local-type-names datums)
    provider-ns (module-namespace datums)
    refer-set (if (some? refer-syms) (reduce (fn [out name] (assoc out name true)) {} refer-syms) {})]
   (reduce (fn [out name] (let [with-prefix (if (= prefix "") out (assoc out (str prefix "/" name) true))
    with-provider (assoc with-prefix (str provider-ns "/" name) true)]
-  (if (= true (get refer-set name)) (assoc with-provider name true) with-provider))) {} (vec (keys local-names)))))
+  (if (= true (get refer-set name)) (assoc with-provider name true) with-provider))) imported-nominal-type-names (vec (keys local-names)))))
+
+(defn module-nominal-type-names! [datums ^String prefix refer-syms]
+  (module-nominal-type-names-with-imports! datums prefix refer-syms {}))
 
 (defn- qualify-provider-type [t ^String provider-ns local-type-names]
   (if (not (map? t)) t (let [kind (get t "kind")
@@ -2965,10 +2968,15 @@
   (parse-type! ["if" true false])
   (= (nth (parse-errors) 0) "bad type expression: '(if true false)")))
   (expect! "parse-type! admits an uppercase nominal" (= (parse-type! "Widget") {"kind" "prim" "name" "Widget"}))
+  (expect! "parse-type! admits a dotted JVM class nominal" (= (parse-type! "clojure.lang.ExceptionInfo") {"kind" "prim" "name" "clojure.lang.ExceptionInfo"}))
+  (expect! "parse-params! treats a dotted JVM class as a flat type" (let [parsed (parse-params! [BRACKET-TAG "file" "java.io.File" "label" "Any"])
+   params (get parsed "params")]
+  (and (= (count params) 2) (= (get (get (nth params 0) "ann") "name") "java.io.File") (= (get (get (nth params 1) "ann") "name") "Any"))))
   (expect! "parse-type! admits an exact registered qualified nominal" (let [prog (parse-program-with-imports! [["defn" "identity-widget" [BRACKET-TAG] "api/Widget" "nil"]] {} {} {"api/Widget" true})
    errors (parse-errors)
    form (nth (get prog "forms") 0)]
   (and (= (count errors) 0) (= (get form "ret") {"kind" "prim" "name" "api/Widget"}))))
+  (expect! "module nominal surface retains transitive qualified names" (= true (get (module-nominal-type-names-with-imports! [["ns" "api.outer"] ["defrecord" "Outer" [BRACKET-TAG ["value" "Int"]]]] "outer" nil {"inner/Inner" true}) "inner/Inner")))
   (expect! "parse-type! admits an active lowercase forall variable" (let [parsed (parse-type! ["forall" [BRACKET-TAG "item"] ["Fn" [BRACKET-TAG "item"] "item"]])]
   (and (= (get parsed "kind") "poly") (= (get-in parsed ["body" "params" 0]) {"kind" "var" "name" "item"}) (= (get-in parsed ["body" "ret"]) {"kind" "var" "name" "item"}))))
   (expect! "parse-type! nullable" (let [t (parse-type! "String?")]

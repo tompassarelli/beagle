@@ -2,7 +2,8 @@
 # Recompile Beagle Store's hosted runtime into out/ from its sources.
 #
 # You do NOT need this to run Beagle Store — out/ is committed and runs on babashka
-# (bin/beagle store). Rebuilding needs Beagle at $BEAGLE_HOME, entered via direnv.
+# (bin/beagle store). Rebuilding uses this checkout's public `beagle build` route,
+# the same hosted compiler surface used by release packaging.
 #
 # Every typed production module is hosted `.bclj` and compiles through the
 # ordinary `beagle` route. The separate `.bgl` closure belongs only to the
@@ -38,7 +39,7 @@ for fragment in "${fragments[@]}"; do
     mkdir -p "$(dirname "$destination_path")"
     case "$kind" in
       beagle)
-        BEAGLE_EMIT_SRCLOC=0 direnv exec "$BEAGLE" "$BEAGLE/bin/beagle-build" \
+        BEAGLE_EMIT_SRCLOC=0 "$BEAGLE/bin/beagle" build \
           --module-root "store/src=$HERE/src" \
           --module-root "store/codegraph/src=$HERE/codegraph/src" \
           --module-root "store/build/interfaces=$HERE/build/interfaces" \

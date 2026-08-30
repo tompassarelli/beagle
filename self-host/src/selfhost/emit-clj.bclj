@@ -1491,6 +1491,10 @@
                   (or (contains? (deref scalar-fns) fn-key)
                     (qualified-reference=? fn-expr "bgl" "promote")))
                   (emit-expr* (nth args 0))
+                (and (= fn-key "monotonic-nanoseconds")
+                  (= 0 (count args))
+                  (not (contains? (deref local-names) fn-key)))
+                  "(System/nanoTime)"
                 (and (= fn-key "sha256-bytes")
                   (= 1 (count args))
                   (not (contains? (deref local-names) fn-key)))
@@ -1851,6 +1855,21 @@
                 "providerId" nil}
           "args" [{"node" "ref" "name" "value"}]})
        "value"))
+  (expect! "intrinsic: monotonic clock lowers to the JVM clock"
+    (= (emit-expr!
+         {"node" "call"
+          "fn" {"node" "ref" "name" "monotonic-nanoseconds"}
+          "args" []})
+       "(System/nanoTime)"))
+  (expect! "intrinsic: local monotonic clock shadows the portable intrinsic"
+    (do
+      (reset! local-names {"monotonic-nanoseconds" true})
+      (let [output (emit-expr!
+                     {"node" "call"
+                      "fn" {"node" "ref" "name" "monotonic-nanoseconds"}
+                      "args" []})]
+        (reset! local-names {})
+        (= output "(monotonic-nanoseconds)"))))
   (expect! "intrinsic: sha256-bytes injects its Clojure runtime call"
     (= (emit-expr!
          {"node" "call"

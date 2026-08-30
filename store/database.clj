@@ -21,7 +21,7 @@
            [java.util Arrays]
            [java.util.zip CRC32]))
 
-(let [^File source-file (.getCanonicalFile (File. (str *file*)))
+(let [source-file (.getCanonicalFile (File. (str *file*)))
    parent (.getParentFile source-file)]
   (if parent (clojure.core/load-file (.getPath (File. parent "writer_authority.clj"))) (throw (ex-info "database source has no parent directory" {:source (.getPath source-file)}))))
 
@@ -86,9 +86,7 @@
   (if (not (string? s)) (do
   (fail! :invalid-text (str label " must be a String") {:label label :value s})))
   (try
-  (let [encoder (doto (.newEncoder StandardCharsets/UTF_8)
-  (.onMalformedInput CodingErrorAction/REPORT)
-  (.onUnmappableCharacter CodingErrorAction/REPORT))
+  (let [encoder (doto (.newEncoder StandardCharsets/UTF_8) (.onMalformedInput CodingErrorAction/REPORT) (.onUnmappableCharacter CodingErrorAction/REPORT))
    buffer (.encode encoder (CharBuffer/wrap s))
    bytes (byte-array (.remaining buffer))]
   (.get buffer bytes)
@@ -98,9 +96,7 @@
 
 (defn- strict-utf8-string! [bytes label]
   (try
-  (let [decoder (doto (.newDecoder StandardCharsets/UTF_8)
-  (.onMalformedInput CodingErrorAction/REPORT)
-  (.onUnmappableCharacter CodingErrorAction/REPORT))]
+  (let [decoder (doto (.newDecoder StandardCharsets/UTF_8) (.onMalformedInput CodingErrorAction/REPORT) (.onUnmappableCharacter CodingErrorAction/REPORT))]
   (str (.decode decoder (ByteBuffer/wrap bytes))))
   (catch java.nio.charset.CharacterCodingException e
     (fail! :invalid-utf8 (str label " is not valid UTF-8") {:label label :cause (.getMessage e)}))))
@@ -122,15 +118,15 @@
     :term-codec-unsupported-term (fail! :unsupported-term "Store transaction log encountered a value outside Term" {:value value :class (some-> value class str)})
     (throw e))))))
 
-(defn- ensure-remaining! [^ByteBuffer buffer n ^String context]
+(defn- ensure-remaining! [buffer n ^String context]
   (if (< (.remaining buffer) n) (do
   (fail! :corrupt-triple-log "Store transaction log payload ended inside a value" {:context context :needed n :remaining (.remaining buffer)}))))
 
-(defn- read-u32! [^ByteBuffer buffer ^String context]
+(defn- read-u32! [buffer ^String context]
   (ensure-remaining! buffer 4 context)
   (Integer/toUnsignedLong (.getInt buffer)))
 
-(defn- read-term! [^ByteBuffer buffer depth]
+(defn- read-term! [buffer depth]
   (if (not (zero? depth)) (do
   (fail! :corrupt-triple-log "Store transaction log Term decoding must begin at depth zero" {:depth depth})))
   (try
@@ -155,16 +151,14 @@
 
 (defn- deflate-bytes [bytes]
   (let [out (java.io.ByteArrayOutputStream. (alength bytes))]
-  (with-open [gz (java.util.zip.GZIPOutputStream. out)]
-  (.write gz bytes))
+  (with-open [gz (java.util.zip.GZIPOutputStream. out)] (.write gz bytes))
   (.toByteArray out)))
 
 (defn- inflate-bytes! [bytes path offset]
   (try
   (let [out (java.io.ByteArrayOutputStream. (* 4 (alength bytes)))
    buffer (byte-array 8192)]
-  (with-open [gz (java.util.zip.GZIPInputStream. (java.io.ByteArrayInputStream. bytes))]
-  (loop []
+  (with-open [gz (java.util.zip.GZIPInputStream. (java.io.ByteArrayInputStream. bytes))] (loop []
   (let [n (.read gz buffer)]
   (if (pos? n) (do
   (.write out buffer 0 n)
@@ -186,15 +180,13 @@
   (write-triple! payload (:triple operation) 0))
   (let [bytes (let [raw (.toByteArray payload)]
   (if deflate? (deflate-bytes raw) raw))
-   crc (doto (java.util.zip.CRC32.)
-  (.update bytes))]
+   crc (doto (java.util.zip.CRC32.) (.update bytes))]
   (write-u32-le! out (alength bytes))
   (.write out bytes)
   (write-u32-le! out (.getValue crc)))))
 
 (defn- decode-transaction-payload! [payload record-offset]
-  (let [^ByteBuffer buffer (doto (ByteBuffer/wrap payload)
-  (.order ByteOrder/LITTLE_ENDIAN))]
+  (let [buffer (doto (ByteBuffer/wrap payload) (.order ByteOrder/LITTLE_ENDIAN))]
   (ensure-remaining! buffer 12 "transaction header")
   (let [sequence (.getLong buffer)
    operation-count (read-u32! buffer "operation count")]
@@ -224,8 +216,7 @@
   ([bytes path allow-continuation?]
     (if (not (bytes-prefix? bytes triple-log-magic)) (do
   (fail! :corrupt-triple-log "Store transaction log magic does not match" {:path path})))
-    (let [^ByteBuffer buffer (doto (ByteBuffer/wrap bytes)
-  (.order ByteOrder/LITTLE_ENDIAN))]
+    (let [buffer (doto (ByteBuffer/wrap bytes) (.order ByteOrder/LITTLE_ENDIAN))]
   (.position buffer (alength triple-log-magic))
   (try
   (ensure-remaining! buffer 8 "Store transaction log header")
@@ -257,8 +248,7 @@
   (if (< (.remaining buffer) (+ payload-length 4)) {:space-id space-id :records records :continuation? continuation? :valid-bytes valid-bytes :header-bytes header-bytes :prefix-ends prefix-ends :torn-tail {:offset offset :bytes (- (alength bytes) offset) :reason :torn-transaction-record}} (let [payload (byte-array (int payload-length))
    _ (.get buffer payload)
    stored-crc (read-u32! buffer "record CRC")
-   actual-crc (.getValue (doto (java.util.zip.CRC32.)
-  (.update payload)))]
+   actual-crc (.getValue (doto (java.util.zip.CRC32.) (.update payload)))]
   (if (not (= stored-crc actual-crc)) (do
   (fail! :corrupt-triple-log "Store transaction log record CRC does not match" {:path path :offset offset :stored stored-crc :actual actual-crc})))
   (let [record (decode-transaction-payload! (if deflate? (inflate-bytes! payload path offset) payload) offset)
@@ -267,33 +257,32 @@
   (catch Throwable error
     (if (instance? clojure.lang.ExceptionInfo error) (throw error) (fail! :corrupt-triple-log "Store transaction log header is truncated" {:path path :cause (.getMessage error)})))))))
 
-(defn- ^String stream-hex [^bytes content]
+(defn- ^String stream-hex [content]
   (apply str (map (fn [value] (format "%02x" (bit-and (int value) 255))) content)))
 
-(defn- ^"[B" read-file-exact! [^RandomAccessFile input amount digest]
-  (let [^bytes bytes (byte-array amount)]
+(defn- read-file-exact! [input amount digest]
+  (let [bytes (byte-array amount)]
   (.readFully input bytes 0 amount)
   (if digest (do
   (.update digest bytes 0 (alength bytes))))
   bytes))
 
-(defn- bytes-u16-le [^bytes bytes]
+(defn- bytes-u16-le [bytes]
   (+ (bit-and 255 (int (aget bytes 0))) (bit-shift-left (bit-and 255 (int (aget bytes 1))) 8)))
 
-(defn- bytes-u32-le [^bytes bytes]
-  (Integer/toUnsignedLong (.getInt (doto (ByteBuffer/wrap bytes)
-  (.order ByteOrder/LITTLE_ENDIAN)))))
+(defn- bytes-u32-le [bytes]
+  (Integer/toUnsignedLong (.getInt (doto (ByteBuffer/wrap bytes) (.order ByteOrder/LITTLE_ENDIAN)))))
 
-(defn- read-file-u16! [^RandomAccessFile input digest]
+(defn- read-file-u16! [input digest]
   (bytes-u16-le (read-file-exact! input 2 digest)))
 
-(defn- read-file-u32! [^RandomAccessFile input digest]
+(defn- read-file-u32! [input digest]
   (bytes-u32-le (read-file-exact! input 4 digest)))
 
-(defn- read-triple-log-header! [^RandomAccessFile input ^String path ^Boolean allow-continuation? digest]
+(defn- read-triple-log-header! [input ^String path ^Boolean allow-continuation? digest]
   (try
   (.seek input 0)
-  (let [^bytes magic (read-file-exact! input (alength triple-log-magic) digest)]
+  (let [magic (read-file-exact! input (alength triple-log-magic) digest)]
   (if (not (Arrays/equals triple-log-magic magic)) (do
   (fail! :corrupt-triple-log "Store transaction log magic does not match" {:path path}))))
   (let [version (read-file-u16! input digest)
@@ -303,22 +292,21 @@
   (fail! :unsupported-log-version "Store transaction log version or flags are unsupported" {:path path :version version :flags flags})))
   (if (or (zero? space-length) (> space-length Integer/MAX_VALUE)) (do
   (fail! :corrupt-triple-log "Store transaction log SpaceId length is invalid" {:path path :length space-length})))
-  (let [^String space-id (strict-utf8-string! (read-file-exact! input space-length digest) "SpaceId")]
+  (let [space-id (strict-utf8-string! (read-file-exact! input space-length digest) "SpaceId")]
   {:space-id space-id :deflate? (pos? (bit-and deflate-flag flags)) :continuation? (pos? (bit-and continuation-flag flags)) :header-bytes (.getFilePointer input)}))
   (catch Throwable error
     (if (instance? clojure.lang.ExceptionInfo error) (throw error) (fail! :corrupt-triple-log "Store transaction log header is truncated" {:path path :cause (.getMessage error)})))))
 
-(defn- prefix-source-result [header sequence valid-bytes ^MessageDigest digest]
+(defn- prefix-source-result [header sequence valid-bytes digest]
   {:space-id (:space-id header) :sequence sequence :valid-bytes valid-bytes :fingerprint (stream-hex (.digest digest))})
 
 (defn- scan-triple-log-prefix! [path upper-inclusive expected-valid-bytes]
   (if (not (and (integer? upper-inclusive) (<= 0 upper-inclusive Long/MAX_VALUE))) (do
   (fail! :invalid-prefix-revision "Store transaction log prefix revision is invalid" {:revision upper-inclusive})))
-  (let [^File file (.getCanonicalFile (File. (str path)))]
+  (let [file (.getCanonicalFile (File. (str path)))]
   (if (not (.isFile file)) (do
   (fail! :triple-log-missing "Store transaction log source is missing" {:path (.getPath file)})))
-  (with-open [input (RandomAccessFile. file "r")]
-  (let [^MessageDigest digest (MessageDigest/getInstance "SHA-256")
+  (with-open [input (RandomAccessFile. file "r")] (let [digest (MessageDigest/getInstance "SHA-256")
    header (read-triple-log-header! input (.getPath file) false digest)
    file-length (.length input)]
   (loop [sequence 0]
@@ -330,18 +318,17 @@
   (prefix-source-result header sequence offset digest))
   (= offset file-length) (if (some? expected-valid-bytes) (fail! :packed-source-mismatch "packed checkpoint revision is beyond the STORELOG" {:path (.getPath file) :revision upper-inclusive :available sequence}) (prefix-source-result header sequence offset digest))
   (< (- file-length offset) 4) (fail! :corrupt-triple-log "Store transaction log prefix ends inside a record length" {:path (.getPath file) :offset offset})
-  :else (let [^bytes length-bytes (read-file-exact! input 4 nil)
+  :else (let [length-bytes (read-file-exact! input 4 nil)
    payload-length (bytes-u32-le length-bytes)
    after-length (.getFilePointer input)]
   (if (> payload-length Integer/MAX_VALUE) (do
   (fail! :corrupt-triple-log "Store transaction log record exceeds JVM bounds" {:path (.getPath file) :offset offset :length payload-length})))
   (if (< (- file-length after-length) (+ payload-length 4)) (do
   (fail! :corrupt-triple-log "Store transaction log prefix ends inside a transaction record" {:path (.getPath file) :offset offset :length payload-length})))
-  (let [^bytes payload (read-file-exact! input payload-length nil)
-   ^bytes stored-crc-bytes (read-file-exact! input 4 nil)
+  (let [payload (read-file-exact! input payload-length nil)
+   stored-crc-bytes (read-file-exact! input 4 nil)
    stored-crc (bytes-u32-le stored-crc-bytes)
-   actual-crc (.getValue (doto (CRC32.)
-  (.update payload)))
+   actual-crc (.getValue (doto (CRC32.) (.update payload)))
    record (decode-transaction-payload! (if (:deflate? header) (inflate-bytes! payload (.getPath file) offset) payload) offset)
    candidate (:tx-seq record)
    end (.getFilePointer input)]
@@ -358,7 +345,7 @@
   (.update digest stored-crc-bytes)
   (recur candidate))))))))))))
 
-(defn- read-triple-log-records! [^RandomAccessFile input ^String path header start-offset]
+(defn- read-triple-log-records! [input ^String path header start-offset]
   (let [file-length (.length input)]
   (if (not (and (integer? start-offset) (<= (:header-bytes header) start-offset file-length))) (do
   (fail! :corrupt-triple-log "Store transaction log decode offset is invalid" {:path path :offset start-offset :length file-length})))
@@ -375,10 +362,9 @@
    after-length (.getFilePointer input)]
   (if (> payload-length Integer/MAX_VALUE) (do
   (fail! :corrupt-triple-log "Store transaction log record exceeds JVM bounds" {:path path :offset offset :length payload-length})))
-  (if (< (- file-length after-length) (+ payload-length 4)) (merge header {:records records :valid-bytes valid-bytes :prefix-ends prefix-ends :decoded-from-byte start-offset :decoded-record-count (count records) :torn-tail {:offset offset :bytes (- file-length offset) :reason :torn-transaction-record}}) (let [^bytes payload (read-file-exact! input payload-length nil)
+  (if (< (- file-length after-length) (+ payload-length 4)) (merge header {:records records :valid-bytes valid-bytes :prefix-ends prefix-ends :decoded-from-byte start-offset :decoded-record-count (count records) :torn-tail {:offset offset :bytes (- file-length offset) :reason :torn-transaction-record}}) (let [payload (read-file-exact! input payload-length nil)
    stored-crc (read-file-u32! input nil)
-   actual-crc (.getValue (doto (CRC32.)
-  (.update payload)))]
+   actual-crc (.getValue (doto (CRC32.) (.update payload)))]
   (if (not (= stored-crc actual-crc)) (do
   (fail! :corrupt-triple-log "Store transaction log record CRC does not match" {:path path :offset offset :stored stored-crc :actual actual-crc})))
   (let [record (decode-transaction-payload! (if (:deflate? header) (inflate-bytes! payload path offset) payload) offset)
@@ -386,39 +372,33 @@
   (recur (conj records record) end (assoc prefix-ends (:tx-seq record) end)))))))))))
 
 (defn read-triple-log!
-  "Read and validate a Store transaction log generation without accepting any legacy shape."
   ([path]
     (read-triple-log! path false))
   ([path allow-continuation?]
-    (let [^File file (.getCanonicalFile (File. (str path)))]
+    (let [file (.getCanonicalFile (File. (str path)))]
   (if (not (.isFile file)) (do
   (fail! :triple-log-missing "Store transaction log source is missing" {:path (.getPath file)})))
-  (with-open [input (RandomAccessFile. file "r")]
-  (let [header (read-triple-log-header! input (.getPath file) allow-continuation? nil)]
+  (with-open [input (RandomAccessFile. file "r")] (let [header (read-triple-log-header! input (.getPath file) allow-continuation? nil)]
   (read-triple-log-records! input (.getPath file) header (:header-bytes header)))))))
 
-(defn require-triple-log-header!
-  "Return the immutable SpaceId of a validated Store transaction log generation." [path]
-  (let [^File file (.getCanonicalFile (File. (str path)))]
+(defn require-triple-log-header! [path]
+  (let [file (.getCanonicalFile (File. (str path)))]
   (if (not (.isFile file)) (do
   (fail! :triple-log-missing "Store transaction log source is missing" {:path (.getPath file)})))
-  (with-open [input (RandomAccessFile. file "r")]
-  (:space-id (read-triple-log-header! input (.getPath file) false nil)))))
+  (with-open [input (RandomAccessFile. file "r")] (:space-id (read-triple-log-header! input (.getPath file) false nil)))))
 
-(defn triple-log-prefix-source!
-  "Bind an inclusive transaction-sequence prefix to its exact canonical bytes." [path upper-inclusive]
+(defn triple-log-prefix-source! [path upper-inclusive]
   (scan-triple-log-prefix! path upper-inclusive nil))
 
 (defn- triple-log-prefix-source-at! [path revision valid-bytes]
   (scan-triple-log-prefix! path revision valid-bytes))
 
 (defn- read-triple-log-suffix! [path source]
-  (let [^File file (.getCanonicalFile (File. (str path)))]
+  (let [file (.getCanonicalFile (File. (str path)))]
   (if (not (.isFile file)) (do
   (fail! :triple-log-missing "Store transaction log source is missing" {:path (.getPath file)})))
-  (with-open [input (RandomAccessFile. file "r")]
-  (let [header (read-triple-log-header! input (.getPath file) false nil)
-   ^String expected-space (packed/checkpointsource-space-id source)]
+  (with-open [input (RandomAccessFile. file "r")] (let [header (read-triple-log-header! input (.getPath file) false nil)
+   expected-space (packed/checkpointsource-space-id source)]
   (if (not (= expected-space (:space-id header))) (do
   (fail! :packed-source-mismatch "packed checkpoint SpaceId does not match STORELOG header" {:path (.getPath file) :expected expected-space :actual (:space-id header)})))
   (read-triple-log-records! input (.getPath file) header (packed/checkpointsource-log-valid-bytes source))))))
@@ -437,7 +417,6 @@
   (.write out space-bytes))))
 
 (defn create-triple-log!
-  "Atomically create a header-only Store transaction log generation for SPACE-ID.\n   {:deflate? true} creates a generation whose records are Deflate-compressed."
   ([path space-id]
     (create-triple-log! path space-id {}))
   ([path space-id {:keys [deflate? continuation?] :or {deflate? false continuation? false}}]
@@ -449,30 +428,18 @@
   (fail! :triple-log-exists "Store transaction log target already exists" {:path (.getPath target)})))
   (let [tmp (Files/createTempFile (.toPath parent) ".storelog-header-" ".tmp" (make-array java.nio.file.attribute.FileAttribute 0))]
   (try
-  (with-open [file-out (java.io.FileOutputStream. (.toFile tmp))
-   out (java.io.BufferedOutputStream. file-out)]
-  (write-header! out space-id (bit-or (if deflate? deflate-flag triple-log-flags) (if continuation? continuation-flag triple-log-flags)))
-  (.flush out)
-  (.force (.getChannel file-out) true))
+  (with-open [file-out (java.io.FileOutputStream. (.toFile tmp)) out (java.io.BufferedOutputStream. file-out)] (write-header! out space-id (bit-or (if deflate? deflate-flag triple-log-flags) (if continuation? continuation-flag triple-log-flags))) (.flush out) (.force (.getChannel file-out) true))
   (Files/move tmp (.toPath target) (into-array java.nio.file.CopyOption [StandardCopyOption/ATOMIC_MOVE]))
   (.getPath target)
   (finally
     (Files/deleteIfExists tmp)))))))
 
 (defn- append-record-durable! [path record deflate?]
-  (with-open [file-out (java.io.FileOutputStream. (str path) true)
-   out (java.io.BufferedOutputStream. file-out)]
-  (write-transaction-record! out record deflate?)
-  (.flush out)
-  (.force (.getChannel file-out) true)))
+  (with-open [file-out (java.io.FileOutputStream. (str path) true) out (java.io.BufferedOutputStream. file-out)] (write-transaction-record! out record deflate?) (.flush out) (.force (.getChannel file-out) true)))
 
 (defn- append-record-cohort-durable! [path records deflate?]
-  (with-open [file-out (java.io.FileOutputStream. (str path) true)
-   out (java.io.BufferedOutputStream. file-out)]
-  (doseq [record records]
-  (write-transaction-record! out record deflate?))
-  (.flush out)
-  (.force (.getChannel file-out) true)))
+  (with-open [file-out (java.io.FileOutputStream. (str path) true) out (java.io.BufferedOutputStream. file-out)] (doseq [record records]
+  (write-transaction-record! out record deflate?)) (.flush out) (.force (.getChannel file-out) true)))
 
 (def ^:dynamic *deferred-records* nil)
 
@@ -493,28 +460,26 @@
   (let [revision (packed/checkpointmanifest-revision manifest)
    expected-valid-bytes (packed/checkpointmanifest-log-valid-bytes manifest)
    source (triple-log-prefix-source-at! canonical revision expected-valid-bytes)
-   ^String space-id (:space-id source)
+   space-id (:space-id source)
    sequence (:sequence source)
    valid-bytes (:valid-bytes source)
-   ^String fingerprint (:fingerprint source)]
+   fingerprint (:fingerprint source)]
   (if (not (= sequence revision)) (do
   (fail! :packed-source-mismatch "packed checkpoint revision is not a STORELOG boundary" {:manifest (packed/checkpointmanifest-path manifest) :revision revision :storelog-sequence sequence})))
   (packed/checkpoint-source! space-id revision valid-bytes fingerprint)))
 
 (defn- checkpoint-source-for-revision! [^String canonical revision]
   (let [source (triple-log-prefix-source! canonical revision)
-   ^String space-id (:space-id source)
+   space-id (:space-id source)
    sequence (:sequence source)
    valid-bytes (:valid-bytes source)
-   ^String fingerprint (:fingerprint source)]
+   fingerprint (:fingerprint source)]
   (if (not (= sequence revision)) (do
   (fail! :packed-source-mismatch "live Store revision is not a STORELOG boundary" {:revision revision :storelog-sequence sequence})))
   (packed/checkpoint-source! space-id revision valid-bytes fingerprint)))
 
 (defn- truncate-log! [path length]
-  (with-open [file (java.io.RandomAccessFile. (str path) "rw")]
-  (.setLength file length)
-  (.force (.getChannel file) true)))
+  (with-open [file (java.io.RandomAccessFile. (str path) "rw")] (.setLength file length) (.force (.getChannel file) true)))
 
 (def ^String fork-marker-suffix ".fork")
 
@@ -553,19 +518,18 @@
   (fail! :reseal-incomplete "a reseal of this store was interrupted and has not been completed" {:path (str store) :marker (reseal-marker-path store)}))))
 
 (defn open-database!
-  "Open a Store transaction log-backed TermStore. A passive reader reports a torn trailing\n   record and refuses later writes. An authority-holding caller may pass\n   {:repair-torn? true}; only the last incomplete record is truncated."
   ([path]
     (open-database! path nil {}))
   ([path expected-space]
     (open-database! path expected-space {}))
   ([path expected-space {:keys [repair-torn? tail-row-limit tail-byte-limit] :or {repair-torn? false tail-row-limit term-store/default-tail-row-limit tail-byte-limit term-store/default-tail-byte-limit}}]
-    (let [^String canonical (.getPath (.getCanonicalFile (java.io.File. (str path))))
+    (let [canonical (.getPath (.getCanonicalFile (java.io.File. (str path))))
    _ (require-no-pending-fork! canonical)
    selected (checkpoint/select-boot! (packed-checkpoint-directory canonical) (fn [manifest] (checkpoint-source-for-manifest! canonical manifest)) tail-row-limit tail-byte-limit)
    packed-context (:context selected)
    source-record (:source-record selected)
    parsed (if packed-context (read-triple-log-suffix! canonical source-record) (read-triple-log! canonical))
-   ^String space-id (:space-id parsed)
+   space-id (:space-id parsed)
    context (or packed-context (term-store/new-term-store-with-tail-limits space-id tail-row-limit tail-byte-limit))]
   (if (and expected-space (not= expected-space space-id)) (do
   (fail! :space-mismatch "Store transaction log belongs to a different SpaceId" {:expected expected-space :actual space-id :path canonical})))
@@ -593,20 +557,12 @@
 (defn- write-text-durable! [path text]
   (let [content (strict-utf8-bytes! text "branch ref")
    temporary (str path ".tmp")]
-  (with-open [file-out (java.io.FileOutputStream. (str temporary))
-   out (java.io.BufferedOutputStream. file-out)]
-  (.write out content)
-  (.flush out)
-  (.force (.getChannel file-out) true))
+  (with-open [file-out (java.io.FileOutputStream. (str temporary)) out (java.io.BufferedOutputStream. file-out)] (.write out content) (.flush out) (.force (.getChannel file-out) true))
   (move-atomically! temporary path)))
 
 (defn- write-bytes-durable! [path content]
   (let [temporary (str path ".tmp")]
-  (with-open [file-out (java.io.FileOutputStream. (str temporary))
-   out (java.io.BufferedOutputStream. file-out)]
-  (.write out content)
-  (.flush out)
-  (.force (.getChannel file-out) true))
+  (with-open [file-out (java.io.FileOutputStream. (str temporary)) out (java.io.BufferedOutputStream. file-out)] (.write out content) (.flush out) (.force (.getChannel file-out) true))
   (move-atomically! temporary path)))
 
 (defn- branch-control-path [store]
@@ -710,20 +666,17 @@
   (Thread/sleep 1)
   (recur))))))))
 
-(defn read-branch-ref!
-  "Read a branch ref, or nil when the branch has no sealed chain on disk." [store-path branch]
+(defn read-branch-ref! [store-path branch]
   (let [file (java.io.File. (str (branch/ref-path! (str store-path) branch)))]
   (if (.isFile file) (do
   (branch/parse-ref (strict-utf8-string! (Files/readAllBytes (.toPath file)) "branch ref"))))))
 
-(defn branch-ref-identity!
-  "Name the exact canonical bytes of a branch's current ref document." [store-path branch-name]
+(defn branch-ref-identity! [store-path branch-name]
   (let [document (read-branch-ref! store-path branch-name)]
   (if document (do
   (branch/ref-identity document)))))
 
-(defn branch-transitions-since!
-  "Read durable ref transitions after CURSOR. A missing journal is anchored at\n   the current ref; a prepared transition becomes visible only after its ref is\n   durable. The returned cursor may be supplied unchanged to resume without a\n   gap or duplicate." [store-path branch-name cursor]
+(defn branch-transitions-since! [store-path branch-name cursor]
   (if (not (and (integer? cursor) (<= 0 cursor) (<= cursor Long/MAX_VALUE))) (do
   (fail! :invalid-watch-cursor "branch watch cursor must be non-negative" {:cursor cursor})))
   (let [store (.getPath (.getCanonicalFile (java.io.File. (str store-path))))
@@ -742,8 +695,7 @@
   (finally
     (writer-authority/release! held)))))
 
-(defn watch-branch!
-  "Wait up to TIMEOUT-MS for at least one durable transition after CURSOR." [store-path branch-name cursor timeout-ms]
+(defn watch-branch! [store-path branch-name cursor timeout-ms]
   (if (not (and (integer? timeout-ms) (<= 0 timeout-ms) (<= timeout-ms 60000))) (do
   (fail! :invalid-watch-timeout "branch watch timeout must be between zero and 60000 milliseconds" {:timeout-ms timeout-ms})))
   (let [deadline (+ (System/nanoTime) (* (long timeout-ms) 1000000))]
@@ -756,8 +708,7 @@
 (defn- chain-member [parsed byte-count]
   (branch/->ChainMember (long (or (:tx-seq (first (:records parsed))) 0)) (long (or (:tx-seq (last (:records parsed))) 0)) (long byte-count) (boolean (:continuation? parsed)) (:space-id parsed) (some? (:torn-tail parsed))))
 
-(defn branch-chain-fault
-  "Validate hosted branch metadata through the canonical Native Core rules." [document members tail]
+(defn branch-chain-fault [document members tail]
   (if (not= (count (branch/refdocument-segments document)) (count members)) "Store transaction log branch ref does not name the segments that were read" (loop [index 0
    expected-next 1]
   (if (>= index (count members)) (chain-rules/tail-member-fault (count members) (branch/refdocument-space-id document) (branch/chainmember-space-id tail) (branch/chainmember-start-sequence tail) (branch/chainmember-continuation tail) expected-next) (let [segment (nth (branch/refdocument-segments document) index)
@@ -803,7 +754,7 @@
   {:sealed sealed :tail tail}))
 
 (defn- history-sha256 [sources]
-  (let [^MessageDigest digest (MessageDigest/getInstance "SHA-256")]
+  (let [digest (MessageDigest/getInstance "SHA-256")]
   (doseq [source sources]
   (let [parsed (:parsed source)
    start (int (:header-bytes parsed))
@@ -811,8 +762,7 @@
   (.update digest (:bytes source) start (- end start))))
   (bytes-hex (.digest digest))))
 
-(defn compare-and-set-branch-ref!
-  "Replace one branch ref only when EXPECTED-IDENTITY still names its exact\n   canonical bytes. CANDIDATE is verified against every content-addressed\n   segment and the branch's current tail before the durable ref replacement." [store-path branch-name expected-identity candidate]
+(defn compare-and-set-branch-ref! [store-path branch-name expected-identity candidate]
   (let [store (.getPath (.getCanonicalFile (java.io.File. (str store-path))))
    selected (branch/require-branch-name! branch-name)
    held (acquire-branch-control! store)]
@@ -835,7 +785,6 @@
     (writer-authority/release! held)))))
 
 (defn branch-revision!
-  "Name one exact committed point on a branch from durable history. The branch\n   name is routing, not identity: equal sealed chains and tail prefixes have the\n   same revision even when reached through different refs."
   ([store-path]
     (branch-revision! store-path branch/default-branch))
   ([store-path branch-name]
@@ -866,7 +815,6 @@
   (branch/branch-revision! (branch/refdocument-space-id document) (history-sha256 (conj (mapv second sealed) tail)) sequence)))))))
 
 (defn open-branch!
-  "Open one branch of a store: fold its sealed segment chain in ref order, then\n   its tail. A store with no ref for the default branch boots exactly as an\n   unforked Store transaction log does."
   ([store-path branch]
     (open-branch! store-path branch nil {}))
   ([store-path branch expected-space]
@@ -992,7 +940,7 @@
   (fail! :invalid-retention-layout (str label " contains a non-document entry") {:path (.getPath entry)}))))
   (vec (sort-by (fn [%1] (.getName %1)) entries))))
 
-(defn- read-ref-document-file! [^File file label]
+(defn- read-ref-document-file! [file label]
   (branch/parse-ref (strict-utf8-string! (Files/readAllBytes (.toPath file)) label)))
 
 (defn- require-sealed-document! [store store-space source document]
@@ -1027,8 +975,7 @@
     (doseq [handle held]
   (writer-authority/release! handle))))))
 
-(defn retain-branch-root!
-  "Durably retain every sealed segment named by DOCUMENT as a pin, checkpoint,\n   or active session root. The root stores canonical store-ref/v1 facts rather\n   than a pointer to mutable branch routing." [store-path kind root-name document]
+(defn retain-branch-root! [store-path kind root-name document]
   (let [store (.getPath (.getCanonicalFile (java.io.File. (str store-path))))
    selected-kind (keyword kind)
    selected-name (require-retention-root-name! root-name)]
@@ -1041,8 +988,7 @@
   (write-text-durable! root-path (branch/print-ref verified))
   {:kind selected-kind :name selected-name :ref-identity (branch/ref-identity verified) :segments (mapv branch/segmentrecord-sha256 (branch/refdocument-segments verified))})))))
 
-(defn release-branch-root!
-  "Release one named durable pin, checkpoint, or active session root. Segments\n   become reclaimable only after a later reachability collection proves that no\n   remaining root names them." [store-path kind root-name]
+(defn release-branch-root! [store-path kind root-name]
   (let [store (.getPath (.getCanonicalFile (java.io.File. (str store-path))))
    selected-kind (keyword kind)
    selected-name (require-retention-root-name! root-name)]
@@ -1061,8 +1007,7 @@
   (into heads (mapcat (fn [[kind directory]] (mapv (fn [file] (require-retention-root-name! (.getName file))
   [(.getPath file) (read-ref-document-file! file (str (name kind) " retention root"))]) (regular-document-files! (str roots-directory "/" directory) (str (name kind) " retention roots directory")))) (sort-by (comp str key) retention-root-kinds)))))
 
-(defn collect-unreachable-segments!
-  "Delete content-addressed segment objects unreachable from every current\n   branch head, durable pin, checkpoint, and active session root. Every root\n   document and every segment it names is parsed and verified before the first\n   deletion. Files outside the 64-hex segment namespace are never collected." [store-path]
+(defn collect-unreachable-segments! [store-path]
   (let [store (.getPath (.getCanonicalFile (java.io.File. (str store-path))))]
   (with-retention-authority! store (fn [] (require-no-pending-fork! store)
   (let [store-space (store-space-id! store)
@@ -1130,7 +1075,6 @@
     (writer-authority/release! held-control)))))
 
 (defn reseal-branch!
-  "Compact one branch's complete committed history into one content-addressed\n   base segment and a fresh continuation tail. Runs offline under store and\n   tail writer authority; the v2 branch revision is unchanged."
   ([store-path]
     (reseal-branch! store-path branch/default-branch))
   ([store-path branch-name]
@@ -1145,7 +1089,6 @@
   (writer-authority/release! handle)))))))
 
 (defn fork-store!
-  "Seal the parent branch's tail into the shared segment chain and give parent\n   and child fresh continuation tails that both begin at the next sequence.\n   Offline: fork holds writer authority over the store and both tails for its\n   whole run, and refuses rather than rename a log a writer still holds."
   ([store-path child-branch]
     (fork-store! store-path branch/default-branch child-branch))
   ([store-path parent-branch child-branch]
@@ -1215,8 +1158,7 @@
     (doseq [handle held]
   (writer-authority/release! handle))))))))
 
-(defn new-database
-  "Create an in-memory authoritative database for one immutable SpaceId." [space-id]
+(defn new-database [space-id]
   {:term-store (term-store/new-term-store space-id) :space-id space-id :log nil :lock (Object.) :mutation-state (atom {:status :ready}) :torn-tail nil :recovered-tail nil})
 
 (defn database-recovery-state [db]
@@ -1248,15 +1190,13 @@
 (defn ^String database-space [db]
   (:space-id db))
 
-(defn store-view
-  "Read-only database over an immutable TermStore root: every read accessor\n   below works against the pinned root instead of the live store." [db root]
+(defn store-view [db root]
   (assoc db :term-store (atom root)))
 
 (defn current-transaction! [db]
   (t/transaction-coordinate (database-space db) (term-store/current-sequence (database-store! db))))
 
-(defn checkpoint-packed!
-  "Publish and install a manifest-last packed checkpoint for the exact durable\n   STORELOG prefix currently represented by DB. STORELOG remains authoritative." [db]
+(defn checkpoint-packed! [db]
   (locking (:lock db) (require-readable! db) (if (not (:log db)) (do
   (fail! :packed-checkpoint-unavailable "packed checkpoints require an authoritative STORELOG" {}))) (checkpoint/publish! (database-store! db) (packed-checkpoint-directory (:log db)) (fn [revision] (checkpoint-source-for-revision! (:log db) revision)))))
 
@@ -1281,7 +1221,7 @@
   (assoc (term-store/storage-diagnostics context) :boot-source (:storage-source db) :selected-manifest (:packed-manifest db) :prefix-records (:packed-prefix-records db) :suffix-records (:packed-suffix-records db) :decoded-from-byte (:packed-decoded-from-byte db) :decoded-record-count (:packed-decoded-record-count db) :rejections (:packed-rejections db)))) :readable readable? :mutation-ready (= :ready status) :recovery recovery})))
 
 (defn instant-now []
-  (let [^Instant now (Instant/now)]
+  (let [now (Instant/now)]
   (t/instant (.getEpochSecond now) (.getNano now))))
 
 (defn occurrences! [db]
@@ -1415,8 +1355,7 @@
 (defn- propagate-ambiguous-commit! [recovery error]
   (if (= :corrupt (:status recovery)) (throw (ex-info "durable history is corrupt after a commit failure" {:type :database-corrupt :store/code :database-corrupt :recovery recovery} error)) (throw (ex-info "commit outcome is durability-ambiguous; restart is required" {:type :durability-ambiguous :store/code :durability-ambiguous :recovery recovery} error))))
 
-(defn commit!
-  "Commit one ordered transaction. REQUEST contains :operations and may contain\n   :base, :actor, and typed :recorded-at. The response exposes transaction and\n   occurrence coordinates; no physical row handle is public." [db {:keys [operations base] :as request}]
+(defn commit! [db {:keys [operations base] :as request}]
   (locking (:lock db) (require-mutation-ready! db) (validate-base! db base) (let [current (current-transaction! db)]
   (if (and base (not= base current)) {:reject :conflict :expected base :current current} (do
   (if (not (and (vector? operations) (seq operations))) (do
@@ -1442,8 +1381,7 @@
   (catch Throwable error
     (propagate-ambiguous-commit! (fence-and-reconcile! db before-store error) error)))))))))
 
-(defn commit-cohort!
-  "Run mutation functions in FIFO order against a private store root, append\n   every resulting Store transaction log record under one durability barrier, and publish the\n   root atomically. Individual pre-append failures are returned without\n   aborting later functions; a barrier failure fences the whole database." [db mutation-functions]
+(defn commit-cohort! [db mutation-functions]
   (locking (:lock db) (require-mutation-ready! db) (let [context (database-store! db)
    before-store (deref context)
    scratch (assoc db :term-store (term-store/fork-store context) :mutation-state (atom (deref (:mutation-state db))))
@@ -1480,8 +1418,7 @@
   ([db proposition options]
     (commit! db (assoc options :operations [{:action :retract :proposition proposition :source-record (:source-record options)}]))))
 
-(defn withdraw-occurrence!
-  "Withdraw one exact currently-effective occurrence. TermStore's physical\n   retraction targets the most recent equal live proposition; rejecting any\n   other coordinate keeps the public target exact." [db target options]
+(defn withdraw-occurrence! [db target options]
   (locking (:lock db) (let [event (occurrence! db target)
    effective (into #{} (map t/operationoccurrence-coordinate) (live-occurrences! db))]
   (cond
@@ -1493,8 +1430,7 @@
    current (some-> matching peek t/operationoccurrence-coordinate)]
   (if (not= target current) {:reject :withdrawal-target-not-current :occurrence target :current current} (retract! db proposition options)))))))
 
-(defn supersede!
-  "Assert REPLACEMENT while relating its new occurrence to exact TARGET." [db target replacement options]
+(defn supersede! [db target replacement options]
   (locking (:lock db) (if (some #{target} (map t/operationoccurrence-coordinate (live-occurrences! db))) (assert! db replacement (assoc options :supersedes target)) {:reject :occurrence-not-live :occurrence target})))
 
 (defn view-select! [db view target options]

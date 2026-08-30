@@ -32,7 +32,7 @@
 (defn ^String load-edn! [ctx file->nodes next-offset ^String path]
   (let [lines (str/split-lines (slurp path))
    heads (filterv (fn [^String l] (str/starts-with? l "@file")) lines)
-   ^String src (subs (nth heads 0) 6)
+   src (subs (nth heads 0) 6)
    loaded (load-lines (deref next-offset) lines)]
   (swap! file->nodes assoc src (vec (:nodes loaded)))
   (reset! next-offset (inc (int (:top loaded))))
@@ -88,9 +88,9 @@
 (defn -main [& $beagle$rest$host]
   (let [args (vec $beagle$rest$host)]
   (let [argv (vec args)
-   ^String old-name (str (nth argv 0))
-   ^String new-name (str (nth argv 1))
-   ^String target-substr (str (nth argv 2))
+   old-name (str (nth argv 0))
+   new-name (str (nth argv 1))
+   target-substr (str (nth argv 2))
    edn-files (vec (drop 3 argv))
    ctx (c/new-term-store space-id)
    file->nodes (atom {})

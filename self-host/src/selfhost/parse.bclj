@@ -320,6 +320,12 @@
                               " name — possible missing `(name Type)` wrapper?\n")))))
   nil)
 
+;; JVM fully-qualified class names use a dotted path ending in a capitalized
+;; class segment. This predicate is shared by parameter-style selection and
+;; type parsing so both surfaces recognize exactly the same names.
+(defn- jvm-qualified-class-name? [name String] Bool
+  (some? (re-matches #".*\.[A-Z][A-Za-z0-9_]*$" name)))
+
 ;; A parameter vector is wholly inferred unless its second declaration is a
 ;; type-shaped datum. This preserves `[x y]` while making `[x Int y]` a typed
 ;; vector whose trailing `y` receives the missing-type diagnostic.
@@ -327,7 +333,7 @@
   (cond
     (and (int? datum) (>= datum 0)) true
     (string? datum)
-      (or (some? (re-matches #".*\\.[A-Z][A-Za-z0-9_]*$" datum))
+      (or (jvm-qualified-class-name? datum)
           (let [parts (str/split datum #"/")
                 leaf (nth parts (- (count parts) 1))
                 head (subs leaf 0 (min 1 (count leaf)))]
@@ -487,9 +493,6 @@
     (let [parsed (parse-type* t)]
       (reset! CURRENT-TYPE-VARS before)
       parsed)))
-
-(defn- jvm-qualified-class-name? [name String] Bool
-  (some? (re-matches #".*\\.[A-Z][A-Za-z0-9_]*$" name)))
 
 (defn parse-type! [t Any] Any
   (cond
@@ -4879,10 +4882,11 @@
     {}
     datums))
 
-(defn module-nominal-type-names!
+(defn module-nominal-type-names-with-imports!
   [datums Any
    prefix String
-   refer-syms Any] (Map String Bool)
+   refer-syms Any
+   imported-nominal-type-names (Map String Bool)] (Map String Bool)
   (let [local-names (module-local-type-names datums)
         provider-ns (module-namespace datums)
         refer-set (if (some? refer-syms)
@@ -4905,8 +4909,14 @@
           (if (= true (get refer-set name))
             (assoc with-provider name true)
             with-provider)))
-      {}
+      imported-nominal-type-names
       (vec (keys local-names)))))
+
+(defn module-nominal-type-names!
+  [datums Any
+   prefix String
+   refer-syms Any] (Map String Bool)
+  (module-nominal-type-names-with-imports! datums prefix refer-syms {}))
 
 (defn- qualify-provider-type
   [t Any
@@ -6203,6 +6213,16 @@
         "bad type expression: '(if true false)")))
   (expect! "parse-type! admits an uppercase nominal"
     (= (parse-type! "Widget") {"kind" "prim" "name" "Widget"}))
+  (expect! "parse-type! admits a dotted JVM class nominal"
+    (= (parse-type! "clojure.lang.ExceptionInfo")
+      {"kind" "prim" "name" "clojure.lang.ExceptionInfo"}))
+  (expect! "parse-params! treats a dotted JVM class as a flat type"
+    (let [parsed (parse-params!
+                   [BRACKET-TAG "file" "java.io.File" "label" "Any"])
+          params (get parsed "params")]
+      (and (= (count params) 2)
+        (= (get (get (nth params 0) "ann") "name") "java.io.File")
+        (= (get (get (nth params 1) "ann") "name") "Any"))))
   (expect! "parse-type! admits an exact registered qualified nominal"
     (let [prog (parse-program-with-imports!
                  [["defn" "identity-widget" [BRACKET-TAG]
@@ -6214,6 +6234,14 @@
           form (nth (get prog "forms") 0)]
       (and (= (count errors) 0)
         (= (get form "ret") {"kind" "prim" "name" "api/Widget"}))))
+  (expect! "module nominal surface retains transitive qualified names"
+    (= true
+      (get
+        (module-nominal-type-names-with-imports!
+          [["ns" "api.outer"]
+           ["defrecord" "Outer" [BRACKET-TAG ["value" "Int"]]]]
+          "outer" nil {"inner/Inner" true})
+        "inner/Inner")))
   (expect! "parse-type! admits an active lowercase forall variable"
     (let [parsed (parse-type!
                    ["forall" [BRACKET-TAG "item"]
