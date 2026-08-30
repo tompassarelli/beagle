@@ -1414,6 +1414,10 @@
       (= fn-sym "number?") (if (= n 1) (str "(typeof " a0 " === 'number')") nil)
       (= fn-sym "keyword?") (if (= n 1) (str "(typeof " a0 " === 'string')") nil)
       (= fn-sym "fn?") (if (= n 1) (str "(typeof " a0 " === 'function')") nil)
+      (= fn-sym "throw")
+        (if (and (= n 1) (not (bound? fn-sym)))
+          (iife (str "throw " a0 ";") false)
+          nil)
       (= fn-sym "integer?") (if (= n 1) (str "Number.isInteger(" a0 ")") nil)
       (= fn-sym "vector?") (if (= n 1) (str "Array.isArray(" a0 ")") nil)
       (= fn-sym "map?")
@@ -3263,6 +3267,20 @@
           "providerId" nil
           "args" [{"node" "ref" "name" "problem"}]})
       "(() => { throw problem; })()"))
+  (expect! "bare throw emits an expression-safe primitive"
+    (= (emit-expr!
+         {"node" "call"
+          "fn" {"node" "ref" "name" "throw"}
+          "args" [{"node" "ref" "name" "problem"}]})
+      "(() => { throw problem; })()"))
+  (expect! "a lexical throw binding remains an ordinary mangled call"
+    (= (with-bound! ["throw"]
+         (fn [] String
+           (emit-expr!
+             {"node" "call"
+              "fn" {"node" "ref" "name" "throw"}
+              "args" [{"node" "ref" "name" "problem"}]})))
+      "throw$(problem)"))
   (expect! "atom: reset! notifies watches and returns the installed value"
     (= (emit-expr!
          {"node" "call" "fn" {"node" "ref" "name" "reset!"}

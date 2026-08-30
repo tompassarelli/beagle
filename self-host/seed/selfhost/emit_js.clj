@@ -806,6 +806,7 @@
   (= fn-sym "number?") (if (= n 1) (str "(typeof " a0 " === 'number')") nil)
   (= fn-sym "keyword?") (if (= n 1) (str "(typeof " a0 " === 'string')") nil)
   (= fn-sym "fn?") (if (= n 1) (str "(typeof " a0 " === 'function')") nil)
+  (= fn-sym "throw") (if (and (= n 1) (not (bound? fn-sym))) (iife (str "throw " a0 ";") false) nil)
   (= fn-sym "integer?") (if (= n 1) (str "Number.isInteger(" a0 ")") nil)
   (= fn-sym "vector?") (if (= n 1) (str "Array.isArray(" a0 ")") nil)
   (= fn-sym "map?") (if (= n 1) (str "(() => { const _x = " a0 "; return typeof _x === 'object' && _x !== null && !Array.isArray(_x); })()") nil)
@@ -1771,6 +1772,8 @@
   (and (appears-once? emitted "receiver_bang()") (appears-once? emitted "key_bang()") (appears-before? emitted "receiver_bang()" "key_bang()"))))
   (expect! "js/typeof" (= (emit-expr! {"node" "js-typeof" "expr" {"node" "ref" "name" "obj"}}) "typeof obj"))
   (expect! "js/throw emits an expression-safe primitive" (= (emit-expr! {"node" "static-call" "qualifier" "js" "name" "throw" "providerId" nil "args" [{"node" "ref" "name" "problem"}]}) "(() => { throw problem; })()"))
+  (expect! "bare throw emits an expression-safe primitive" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "throw"} "args" [{"node" "ref" "name" "problem"}]}) "(() => { throw problem; })()"))
+  (expect! "a lexical throw binding remains an ordinary mangled call" (= (with-bound! ["throw"] (fn [] (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "throw"} "args" [{"node" "ref" "name" "problem"}]}))) "throw$(problem)"))
   (expect! "atom: reset! notifies watches and returns the installed value" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "reset!"} "args" [{"node" "ref" "name" "cell"} {"node" "literal" "kind" "number" "value" 2}]}) "(() => { const _a = cell, _v = 2; const _old = _a.value; _a.value = _v; for (const _k in _a.watches) _a.watches[_k](_k, _a, _old, _v); return _v; })()"))
   (expect! "atom: swap! applies the callback, notifies watches, and returns the cell" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "swap!"} "args" [{"node" "ref" "name" "cell"} {"node" "ref" "name" "step"} {"node" "literal" "kind" "number" "value" 3}]}) "(() => { const _a = cell; const _old = _a.value; _a.value = (step)(_old, 3); for (const _k in _a.watches) _a.watches[_k](_k, _a, _old, _a.value); return _a.value; })()"))
   (expect! "atom: reset! evaluates cell then value exactly once" (let [emitted (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "reset!"} "args" [{"node" "call" "fn" {"node" "ref" "name" "cell!"} "args" []} {"node" "call" "fn" {"node" "ref" "name" "value!"} "args" []}]})]
