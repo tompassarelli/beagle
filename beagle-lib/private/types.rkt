@@ -39,7 +39,16 @@
 (define PARAMETRIC-CTORS
   '(Vec TransientVec List Set Map Promise NixType Arr Ptr Atom HVec Regex Dyn Buffer JsMap))   ; G2: Atom (INVARIANT arm); G3: HVec (heterogeneous tuple)
 
-(define BUILTIN-PARAMETRIC-ARITIES
+(define BUILTIN-PARAMETRIC-APPLICATION-ARITIES
+  (hasheq 'Buffer 1
+          'TransientVec 1
+          'Regex 1
+          'JsMap 2))
+
+;; Regex is both the scalar type of an unshaped compiled pattern and a
+;; one-argument constructor carrying its match shape.  The other exact-arity
+;; built-ins are incomplete when written bare.
+(define BUILTIN-REQUIRED-PARAMETRIC-ARITIES
   (hasheq 'Buffer 1
           'TransientVec 1
           'JsMap 2))
@@ -247,7 +256,7 @@
               (hash-has-key? (current-user-parametric-arities) (car t))))
      (define expected-arity
        (or (hash-ref (current-user-parametric-arities) (car t) #f)
-           (hash-ref BUILTIN-PARAMETRIC-ARITIES (car t) #f)))
+           (hash-ref BUILTIN-PARAMETRIC-APPLICATION-ARITIES (car t) #f)))
      (when (and expected-arity
                 (not (= (length (cdr t)) expected-arity)))
        (error 'beagle
@@ -312,7 +321,7 @@
             expected-arity
             (if (= expected-arity 1) "" "s"))]
 
-    [(and (symbol? t) (hash-ref BUILTIN-PARAMETRIC-ARITIES t #f))
+    [(and (symbol? t) (hash-ref BUILTIN-REQUIRED-PARAMETRIC-ARITIES t #f))
      => (lambda (expected-arity)
           (error 'beagle
                  "type ~a expects ~a argument~a, got 0"

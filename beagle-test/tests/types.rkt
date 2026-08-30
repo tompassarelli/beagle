@@ -15,7 +15,8 @@
   (check-eq? (type-prim-name (parse-type 'Keyword)) 'Keyword)
   (check-eq? (type-prim-name (parse-type 'Symbol))  'Symbol)
   (check-eq? (type-prim-name (parse-type 'Nil))     'Nil)
-  (check-eq? (type-prim-name (parse-type 'Any))     'Any))
+  (check-eq? (type-prim-name (parse-type 'Any))     'Any)
+  (check-eq? (type-prim-name (parse-type 'Regex))   'Regex))
 
 (test-case "CLJ-ALIASES resolve to canonical names"
   (check-eq? (type-prim-name (parse-type 'Long))    'Int)
@@ -60,6 +61,17 @@
              (lambda () (parse-type 'TransientVec)))
   (check-exn #rx"type TransientVec expects 1 argument, got 2"
              (lambda () (parse-type '(TransientVec Int String)))))
+
+(test-case "Regex keeps its scalar form and accepts exactly one match shape"
+  (define shaped (parse-type '(Regex (HVec String String))))
+  (check-true (type-app? shaped))
+  (check-eq? (type-app-ctor shaped) 'Regex)
+  (check-equal? (length (type-app-args shaped)) 1)
+  (check-eq? (type-prim-name (parse-type 'Regex)) 'Regex)
+  (check-exn #rx"type Regex expects 1 argument, got 0"
+             (lambda () (parse-type '(Regex))))
+  (check-exn #rx"type Regex expects 1 argument, got 2"
+             (lambda () (parse-type '(Regex String String)))))
 
 (test-case "parse nested parametric / function types"
   (define t (parse-type `(Map String (Fn (,BRACKET-TAG Int) Int))))

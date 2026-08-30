@@ -344,7 +344,10 @@
 ;; --- type constructors ---------------------------------------------------------
 (def PARAMETRIC-CTORS (Vec String)
   ["Vec" "List" "Set" "Map" "Promise" "NixType" "Arr" "Ptr" "Atom" "HVec"
-   "Buffer" "JsMap"])
+   "Regex" "Buffer" "JsMap"])
+
+(def BUILTIN-PARAMETRIC-APPLICATION-ARITIES (Map String Int)
+  {"Regex" 1 "Buffer" 1 "JsMap" 2})
 
 (def CLJ-ALIASES (Map String String)
   {"Long" "Int" "Double" "Float" "Boolean" "Bool" "Integer" "Int"})
@@ -532,10 +535,7 @@
         (some? (get (deref USER-PARAMETRIC-ARITIES) (nth t 0)))))
     (let [name (nth t 0)
           expected (or (get (deref USER-PARAMETRIC-ARITIES) name)
-                     (cond
-                       (= name "Buffer") 1
-                       (= name "JsMap") 2
-                       :else nil))
+                     (get BUILTIN-PARAMETRIC-APPLICATION-ARITIES name))
           actual (- (count t) 1)]
       (if (and (some? expected) (not (= expected actual)))
         (do (type-arity-error! name expected actual) (make-prim "Any"))
@@ -6216,6 +6216,27 @@
   (expect! "parse-type! Vec app"
     (let [t (parse-type! ["Vec" "String"])]
       (and (= (get t "kind") "app") (= (get t "name") "Vec"))))
+  (expect! "parse-type! Regex keeps its scalar form"
+    (= (parse-type! "Regex") {"kind" "prim" "name" "Regex"}))
+  (expect! "parse-type! Regex carries one exact HVec match shape"
+    (do
+      (reset-errors!)
+      (let [t (parse-type! ["Regex" ["HVec" "String" "String"]])]
+        (and (= (count (parse-errors)) 0)
+          (= t
+            {"kind" "app"
+             "name" "Regex"
+             "args" [{"kind" "app"
+                      "name" "HVec"
+                      "args" [{"kind" "prim" "name" "String"}
+                              {"kind" "prim" "name" "String"}]}]})))))
+  (expect! "parse-type! Regex rejects a two-argument application"
+    (do
+      (reset-errors!)
+      (parse-type! ["Regex" "String" "String"])
+      (and (= (count (parse-errors)) 1)
+        (str/includes? (nth (parse-errors) 0)
+          "type Regex expects 1 argument, got 2"))))
   (expect! "parse-type! Dyn preserves ordered alternatives"
     (= (parse-type! ["Dyn" "String" "Int"])
       {"kind" "app"

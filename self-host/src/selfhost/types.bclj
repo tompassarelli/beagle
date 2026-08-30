@@ -55,7 +55,10 @@
 
 (def PARAMETRIC-CTORS (Vec String)
   ["Vec" "List" "Set" "Map" "Promise" "NixType" "Arr" "Ptr" "Atom" "HVec"
-   "Buffer" "JsMap"])
+   "Regex" "Buffer" "JsMap"])
+
+(def BUILTIN-PARAMETRIC-APPLICATION-ARITIES (Map String Int)
+  {"Regex" 1 "Buffer" 1 "JsMap" 2})
 
 ;; --- type constructors (same JSON format as ast-json.rkt) --------------------
 
@@ -432,7 +435,13 @@
          (or (= (nth t 0) "Dyn")
              (>= (index-of2 PARAMETRIC-CTORS (nth t 0)) 0)
              (= (get user-parametric (nth t 0)) true)))
-      (make-app (nth t 0) (mapv parse-type! (subvec t 1)))
+      (let [name (nth t 0)
+            expected (get BUILTIN-PARAMETRIC-APPLICATION-ARITIES name)
+            actual (- (count t) 1)]
+        (if (and (not (nil? expected)) (not (= expected actual)))
+          (invalid-type! (str "type " name " expects " expected " argument"
+                           (if (= expected 1) "" "s") ", got " actual))
+          (make-app name (mapv parse-type! (subvec t 1)))))
 
     ;; Nullable sugar: "String?" -> (U String Nil)
     (and (string? t) (> (count t) 1)
@@ -461,13 +470,13 @@
 (defn infer-literal-type [e Any] Any
   (let [kind (get e "kind")]
     (cond
-      (= kind "string")  (make-prim "String")
-      (= kind "bool")    (make-prim "Bool")
-      (= kind "number")  (make-prim "Int")
-      (= kind "float")   (make-prim "Float")
-      (= kind "nil")     (make-prim "Nil")
+      (= kind "string") (make-prim "String")
+      (= kind "bool") (make-prim "Bool")
+      (= kind "number") (make-prim "Int")
+      (= kind "float") (make-prim "Float")
+      (= kind "nil") (make-prim "Nil")
       (= kind "keyword") (make-prim "Keyword")
-      (= kind "symbol")  (make-prim "Symbol")
+      (= kind "symbol") (make-prim "Symbol")
       :else nil)))
 
 ;; --- polymorphic inference helpers -------------------------------------------
@@ -695,6 +704,15 @@
     (= (parse-type! "String") (make-prim "String")))
   (expect! "pt: app Vec"
     (= (parse-type! ["Vec" "String"]) (make-app "Vec" [(make-prim "String")])))
+  (expect! "pt: shaped Regex app"
+    (= (parse-type! ["Regex" ["HVec" "String" "String"]])
+       (make-app "Regex"
+         [(make-app "HVec" [(make-prim "String") (make-prim "String")])])))
+  (expect! "pt: shaped Regex exact arity"
+    (let [before Int (count (type-parse-errors))
+          invalid Any (parse-type! ["Regex" "String" "String"])]
+      (and (= (get invalid "kind") "invalid")
+           (= (count (type-parse-errors)) (+ before 1)))))
   (expect! "pt: union"
     (= (parse-type! ["U" "String" "Nil"])
        (make-union [(make-prim "String") (make-prim "Nil")])))

@@ -25,7 +25,9 @@
 
 (def CLJ-ALIASES {"Long" "Int" "Double" "Float" "Boolean" "Bool" "Integer" "Int"})
 
-(def PARAMETRIC-CTORS ["Vec" "List" "Set" "Map" "Promise" "NixType" "Arr" "Ptr" "Atom" "HVec" "Buffer" "JsMap"])
+(def PARAMETRIC-CTORS ["Vec" "List" "Set" "Map" "Promise" "NixType" "Arr" "Ptr" "Atom" "HVec" "Regex" "Buffer" "JsMap"])
+
+(def BUILTIN-PARAMETRIC-APPLICATION-ARITIES {"Regex" 1 "Buffer" 1 "JsMap" 2})
 
 (defn make-prim [^String name]
   {"kind" "prim" "name" name})
@@ -189,7 +191,10 @@
    bounds (reduce (fn [acc e] (if (and (vector? e) (= (count e) 3) (= (nth e 1) "<:") (string? (nth e 0))) (assoc acc (nth e 0) (varize-type (parse-type! (nth e 2)) vars)) acc)) {} raw-vars)]
   (if reserved? (invalid-type! "forall type parameter cannot declare `Fn`; Fn is the built-in function type constructor") (make-poly vars (varize-type (parse-type! (nth t 2)) vars) (if (= (count bounds) 0) nil bounds))))
   (and (vector? t) (> (count t) 1) (= (nth t 0) "U")) (make-union (mapv parse-type! (subvec t 1)))
-  (and (vector? t) (> (count t) 0) (string? (nth t 0)) (or (= (nth t 0) "Dyn") (>= (index-of2 PARAMETRIC-CTORS (nth t 0)) 0) (= (get user-parametric (nth t 0)) true))) (make-app (nth t 0) (mapv parse-type! (subvec t 1)))
+  (and (vector? t) (> (count t) 0) (string? (nth t 0)) (or (= (nth t 0) "Dyn") (>= (index-of2 PARAMETRIC-CTORS (nth t 0)) 0) (= (get user-parametric (nth t 0)) true))) (let [name (nth t 0)
+   expected (get BUILTIN-PARAMETRIC-APPLICATION-ARITIES name)
+   actual (- (count t) 1)]
+  (if (and (not (nil? expected)) (not (= expected actual))) (invalid-type! (str "type " name " expects " expected " argument" (if (= expected 1) "" "s") ", got " actual)) (make-app name (mapv parse-type! (subvec t 1)))))
   (and (string? t) (> (count t) 1) (= (char-at t (- (count t) 1)) "?")) (let [base (substring2 t 0 (- (count t) 1))]
   (make-union [(parse-type! base) (make-prim "Nil")]))
   (and (string? t) (= t "Number")) (make-union [(make-prim "Int") (make-prim "Float")])
@@ -308,6 +313,10 @@
   (expect! "tc: poly unwrap" (type-compatible? (make-prim "String") (make-poly ["T"] (make-prim "String") nil)))
   (expect! "pt: prim" (= (parse-type! "String") (make-prim "String")))
   (expect! "pt: app Vec" (= (parse-type! ["Vec" "String"]) (make-app "Vec" [(make-prim "String")])))
+  (expect! "pt: shaped Regex app" (= (parse-type! ["Regex" ["HVec" "String" "String"]]) (make-app "Regex" [(make-app "HVec" [(make-prim "String") (make-prim "String")])])))
+  (expect! "pt: shaped Regex exact arity" (let [before (count (type-parse-errors))
+   invalid (parse-type! ["Regex" "String" "String"])]
+  (and (= (get invalid "kind") "invalid") (= (count (type-parse-errors)) (+ before 1)))))
   (expect! "pt: union" (= (parse-type! ["U" "String" "Nil"]) (make-union [(make-prim "String") (make-prim "Nil")])))
   (expect! "pt: nullable sugar" (= (parse-type! "String?") (make-union [(make-prim "String") (make-prim "Nil")])))
   (expect! "pt: Number alias" (= (parse-type! "Number") (make-union [(make-prim "Int") (make-prim "Float")])))
