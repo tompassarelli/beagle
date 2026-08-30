@@ -91,6 +91,7 @@
      (check-equal? (length edits) 1)
      (check-false (layout-edit-safe? (car edits)))
      (check-equal? (layout-edit-refusal (car edits)) 'comment-reach)
+     (check-equal? (format-signature-files 'check (list path)) 3)
      (check-equal? (format-signature-files 'write (list path)) 2)
      (check-equal? (file->string path) source))))
 
@@ -162,9 +163,15 @@
   (check-equal? actual source)
   (check-equal? edits '()))
 
-(test-case "legacy constraints refuse command-wide writes"
+(test-case "legacy constraints are non-actionable while safe edits converge"
   (define blocked "(defn positive [(x Int positive?)] Int x)\n")
   (define rewritable "(defn add [(x Int) (y Int)] Int (+ x y))\n")
+  (define canonical
+    (string-append
+     "(defn add\n"
+     "  [x Int\n"
+     "   y Int] Int\n"
+     "  (+ x y))\n"))
   (with-source
    blocked
    (lambda (blocked-path)
@@ -176,11 +183,17 @@
         (check-equal? (layout-edit-refusal (car edits))
                       'refinement-not-implemented)
         (check-equal?
+         (format-signature-files 'check (list blocked-path)) 0)
+        (check-equal?
+         (format-signature-files 'write (list blocked-path)) 0)
+        (check-equal?
          (format-signature-files 'check (list blocked-path rewritable-path)) 3)
         (check-equal?
-         (format-signature-files 'write (list blocked-path rewritable-path)) 2)
+         (format-signature-files 'write (list blocked-path rewritable-path)) 0)
         (check-equal? (file->string blocked-path) blocked)
-        (check-equal? (file->string rewritable-path) rewritable))))))
+        (check-equal? (file->string rewritable-path) canonical)
+        (check-equal?
+         (format-signature-files 'check (list blocked-path rewritable-path)) 0))))))
 
 (test-case "signature where clause remains after its return line"
   (define-values (actual edits)

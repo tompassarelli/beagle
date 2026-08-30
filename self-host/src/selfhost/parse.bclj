@@ -5606,6 +5606,22 @@
       (and (= (count (get node "bindings")) 2)
         (= (get (get (nth (get node "bindings") 0) "ann") "name") "Int")
         (= (get (get (nth (get node "bindings") 1) "ann") "name") "Int"))))
+  (expect! "let typed map destructuring accepts an Any initializer"
+    (let [node (parse-expr*
+                 ["let"
+                  [BRACKET-TAG
+                   [MAP-TAG ":keys" [BRACKET-TAG "exit" "output" "report"]]
+                   "Any"
+                   "initializer"]
+                  "report"])
+          binding (nth (get node "bindings") 0)
+          target (get binding "name")]
+      (and (= (get node "node") "let")
+        (= (get target "type") "map-destructure")
+        (= (get target "keys") ["exit" "output" "report"])
+        (= (get (get binding "ann") "name") "Any")
+        (= (get (get binding "value") "name") "initializer")
+        (= (get (nth (get node "body") 0) "name") "report"))))
   (expect! "binding form (dynamic-var rebinding, let-binding shape)"
     (let [node (parse-expr* ["binding" [BRACKET-TAG "*out*" "*err*"] ["println" ["#%string" "x"]]])]
       (and (= (get node "node") "binding")

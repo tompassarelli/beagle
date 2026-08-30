@@ -321,6 +321,11 @@
         (boolean (some (fn [alt Any] Bool (type-compatible? actual alt))
                    (get expected "args"))))
 
+    ;; Match-shape metadata does not change the runtime Regex representation.
+    (and (app-type? actual) (= (get actual "name") "Regex")
+         (prim? expected) (= (get expected "name") "Regex"))
+      true
+
     (and (app-type? actual) (app-type? expected))
       (and (= (get actual "name") (get expected "name"))
            (= (count (get actual "args")) (count (get expected "args")))
@@ -778,6 +783,12 @@
   (expect! "tc: (Vec Int) NOT <: (HVec Int)"
     (not (type-compatible? (make-app "Vec" [(make-prim "Int")])
                            (make-app "HVec" [(make-prim "Int")]))))
+
+  (expect! "tc: shaped Regex is compatible with primitive Regex"
+    (type-compatible?
+      (make-app "Regex"
+        [(make-app "HVec" [(make-prim "String") (make-prim "String")])])
+      (make-prim "Regex")))
 
   ;; --- ML soundness: bounded forall parse + render ---
   (expect! "pt: bounded forall (T <: Number)"

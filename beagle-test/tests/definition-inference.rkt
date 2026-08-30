@@ -129,6 +129,37 @@
    (lambda ()
      (checked "(defn heads [(tail Any)] Any (map first tail))"))))
 
+(test-case "portable not accepts Clojure truthiness"
+  (check-equal?
+   (type->string (hash-ref STDLIB-PORTABLE 'not))
+   "(Fn [Any] Bool)")
+  (check-not-exn
+   (lambda ()
+     (checked "(defn absent? [] Bool (not \"match\"))"))))
+
+(test-case "and and or preserve homogeneous argument types"
+  (define program
+    (checked
+     (string-append
+      "(defn fallback [] Int (or 1 0))\n"
+      "(defn label [(candidate String?)] String (or candidate \"unknown\"))\n"
+      "(defn final-value [] String (and \"ready\" \"done\"))")))
+  (check-equal? (type->string (signature program 'fallback)) "(Fn [] Int)")
+  (check-equal? (type->string (signature program 'label))
+                "(Fn [String?] String)")
+  (check-equal? (type->string (signature program 'final-value))
+                "(Fn [] String)"))
+
+(test-case "concat accepts a nullable trailing vector"
+  (check-not-exn
+   (lambda ()
+     (checked
+      (string-append
+       "(defn append-optional "
+       "  [(head (Vec String)) (tail (U (Vec String) Nil))] "
+       "  (Vec String) "
+       "  (concat head tail))")))))
+
 (test-case "portable vector HOFs preserve a game-shaped polymorphic call chain"
   (check-equal?
    (type->string (hash-ref STDLIB-PORTABLE 'mapv))
@@ -236,6 +267,24 @@
     (checked "(defn first-of [([x y] (HVec Int String))] Int x)"))
   (check-equal? (type->string (signature program 'first-of))
                 "(Fn [(HVec Int String)] Int)"))
+
+(test-case "Regex shape and allocation contracts coexist on one definition"
+  (define program
+    (checked
+     (string-append
+      "(defn board-count-pattern [(label String)] "
+      "  (Regex (HVec String String)) "
+      "  (re-pattern (str \"\\\\b(\\\\d+) \" label \"\\\\b\")))")))
+  (define function (car (program-forms program)))
+  (define contracts (program-semantic-contracts program))
+  (define entry (hash-ref contracts function #f))
+  (check-true (semantic-contract-bundle? entry))
+  (check-true
+   (regex-contract?
+    (semantic-contract-ref contracts function regex-contract?)))
+  (check-true
+   (allocation-contract?
+    (semantic-contract-ref contracts function allocation-contract?))))
 
 (test-case "typed rest aggregate separates body Vec from call element type"
   (define program

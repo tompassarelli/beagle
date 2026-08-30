@@ -30,6 +30,7 @@
 (def SET-TAG String "#%set")
 (def REGEX-TAG String "#%regex")
 (def CHAR-TAG String "#%char")
+(def READING-FN-SHORTHAND (Atom Bool) (atom false))
 
 ;; --- small string helpers (duplicated per module — PoC pattern) --------------
 
@@ -157,6 +158,21 @@
       (let [ch Any (char-at suffix 0)]
         (int (first ch)))
     :else 65533))
+
+(declare read-symbol-text)
+
+(defn read-char-literal
+  [src String
+   pos Int] Any
+  (if (>= pos (count src))
+    (make-result [CHAR-TAG 65533] pos)
+    (let [first-char (char-at src pos)]
+      (if (delimiter? first-char)
+        (make-result [CHAR-TAG (decode-char-lit first-char)] (+ pos 1))
+        (let [suffix-result (read-symbol-text src pos)]
+          (make-result
+            [CHAR-TAG (decode-char-lit (get suffix-result "value"))]
+            (get suffix-result "pos")))))))
 
 (defn read-string-literal
   [src String
@@ -327,6 +343,72 @@
               (recur (skip-ws src (get result "pos"))
                      (conj items (get result "value")))))))))
 
+;; --- #(...) anonymous function shorthand -----------------------------------
+
+(defn- inert-literal-datum? [datum Any] Bool
+  (and (vector? datum)
+       (> (count datum) 0)
+       (some? (get #{STRING-TAG REGEX-TAG CHAR-TAG} (nth datum 0)))))
+
+(defn- fn-placeholder-index [datum Any] Int
+  (cond
+    (= datum "%") 1
+    (and (string? datum) (some? (re-matches #"^%[1-9][0-9]*$" datum)))
+      (let [parsed (parse-long (subs datum 1))]
+        (if (nil? parsed) 0 parsed))
+    :else 0))
+
+(defn- max-fn-placeholder-index [datum Any] Int
+  (if (and (vector? datum) (not (inert-literal-datum? datum)))
+    (reduce
+      (fn [best Int child Any] Int
+        (max best (max-fn-placeholder-index child)))
+      0
+      datum)
+    (fn-placeholder-index datum)))
+
+(defn- fn-rest-placeholder? [datum Any] Bool
+  (if (and (vector? datum) (not (inert-literal-datum? datum)))
+    (reduce
+      (fn [found Bool child Any] Bool
+        (or found (fn-rest-placeholder? child)))
+      false
+      datum)
+    (= datum "%&")))
+
+(defn- rewrite-fn-placeholders [datum Any] Any
+  (cond
+    (= datum "%") "%1"
+    (and (vector? datum) (not (inert-literal-datum? datum)))
+      (mapv (fn [child Any] Any (rewrite-fn-placeholders child)) datum)
+    :else datum))
+
+(defn- fn-shorthand-params
+  [max-index Int
+   rest-used Bool] Any
+  (let [fixed (loop [index Int 1
+                     params Any [BRACKET-TAG]]
+                (if (> index max-index)
+                  params
+                  (recur (+ index 1)
+                    (conj (conj params (str "%" index)) "Any"))))]
+    (if rest-used
+      (into fixed ["&" "%&" "Any"])
+      fixed)))
+
+(defn- fn-shorthand->fn [items Any] Any
+  (let [max-index (max-fn-placeholder-index items)
+        rest-used (fn-rest-placeholder? items)
+        body (rewrite-fn-placeholders items)]
+    ["fn" (fn-shorthand-params max-index rest-used) "Any" body]))
+
+(defn- reject-nested-fn-shorthand! [] Nil
+  (when (deref READING-FN-SHORTHAND)
+    (throw
+      (ex-info
+        "beagle reader: nested #(...) is not supported; use an explicit fn for the inner function"
+        {}))))
+
 ;; --- hash dispatch (#{ #" #r etc.) -------------------------------------------
 
 (defn read-hash-dispatch
@@ -341,6 +423,16 @@
             (let [result (read-delimited src (+ pos 2) "}")]
               (make-result (into [SET-TAG] (get result "value"))
                            (get result "pos")))
+          (= nxt "(")
+            (do
+              (reject-nested-fn-shorthand!)
+              (reset! READING-FN-SHORTHAND true)
+              (let [result (try
+                             (read-delimited src (+ pos 2) ")")
+                             (finally (reset! READING-FN-SHORTHAND false)))]
+                (make-result
+                  (fn-shorthand->fn (get result "value"))
+                  (get result "pos"))))
           (= nxt "'")
             (let [inner (read-datum src (+ pos 2))]
               (if (nil? inner)
@@ -453,10 +545,7 @@
           ;; \formfeed, \backspace, \uXXXX. Decode to canonical code point
           ;; so emit-clj can re-emit via the same rules as the oracle.
           (= ch "\\")
-            (let [sfx-result (read-symbol-text src (+ p 1))
-                  sfx (get sfx-result "value")
-                  code (decode-char-lit sfx)]
-              (make-result [CHAR-TAG code] (get sfx-result "pos")))
+            (read-char-literal src (+ p 1))
 
           :else
             (let [sym-result (read-symbol-text src p)
@@ -533,6 +622,7 @@
             (= ch "[") "bracket"
             (= ch "{") "brace"
             (and (= ch "#") (= (char-at src (+ start 1)) "{")) "set"
+            (and (= ch "#") (= (char-at src (+ start 1)) "(")) "fn-shorthand"
             (and (= ch "#") (= (char-at src (+ start 1)) "'")) "var-quote"
             (= ch "'") "quote"
             (= ch "`") "quasiquote"
@@ -557,6 +647,9 @@
               (ast/make-syntax-list!
                 (into [(syntax-head! SET-TAG span properties)] children)
                 span ast/EMPTY-SCOPE-SET nil properties)
+            (and (= ch "#") (= (char-at src (+ start 1)) "("))
+              (ast/datum->beagle-syntax!
+                value span ast/EMPTY-SCOPE-SET nil properties)
             (and (= ch "#") (= (char-at src (+ start 1)) "'"))
               (ast/make-syntax-list!
                 (into [(syntax-head! "syntax" span properties)] children)
@@ -625,6 +718,19 @@
                   (into [SET-TAG] (get result "value"))
                   (get result "pos"))
                 "syntaxChildren" (get result "syntaxChildren")))
+          (= nxt "(")
+            (do
+              (reject-nested-fn-shorthand!)
+              (reset! READING-FN-SHORTHAND true)
+              (let [result (try
+                             (read-syntax-delimited!
+                               src (+ pos 2) ")" source-id)
+                             (finally (reset! READING-FN-SHORTHAND false)))]
+                (assoc
+                  (make-result
+                    (fn-shorthand->fn (get result "value"))
+                    (get result "pos"))
+                  "syntaxChildren" (get result "syntaxChildren"))))
           (= nxt "'")
             (let [inner (read-syntax-datum! src (+ pos 2) source-id)]
               (if (nil? inner)
@@ -731,9 +837,7 @@
                 (read-number src p)
               (or (= ch ")") (= ch "]") (= ch "}")) nil
               (= ch "\\")
-                (let [sfx-result (read-symbol-text src (+ p 1))
-                      code (decode-char-lit (get sfx-result "value"))]
-                  (make-result [CHAR-TAG code] (get sfx-result "pos")))
+                (read-char-literal src (+ p 1))
               :else
                 (let [sym-result (read-symbol-text src p)]
                   (make-result
@@ -923,6 +1027,43 @@
   (expect! "regex preserves backslash"
     (= (rd1 "#\"\\d+\"") [REGEX-TAG "\\d+"]))
 
+  (expect! "fn shorthand: bare percent"
+    (= (rd1 "#(inc %)")
+       ["fn" [BRACKET-TAG "%1" "Any"] "Any" ["inc" "%1"]]))
+  (expect! "fn shorthand: max positional index defines arity"
+    (= (rd1 "#(str %2)")
+       ["fn" [BRACKET-TAG "%1" "Any" "%2" "Any"]
+        "Any" ["str" "%2"]]))
+  (expect! "fn shorthand: rest placeholder"
+    (= (rd1 "#(apply + %1 %&)")
+       ["fn" [BRACKET-TAG "%1" "Any" "&" "%&" "Any"]
+        "Any" ["apply" "+" "%1" "%&"]]))
+  (expect! "fn shorthand: no placeholders is a thunk"
+    (= (rd1 "#(rand)")
+       ["fn" [BRACKET-TAG] "Any" ["rand"]]))
+  (expect! "fn shorthand: enclosing call retains following arguments"
+    (= (rd1 "(map #(inc %) xs ys)")
+       ["map"
+        ["fn" [BRACKET-TAG "%1" "Any"] "Any" ["inc" "%1"]]
+        "xs" "ys"]))
+  (expect! "fn shorthand: string contents are not placeholders"
+    (= (rd1 "#(str \"%\")")
+       ["fn" [BRACKET-TAG] "Any" ["str" [STRING-TAG "%"]]]))
+  (expect! "fn shorthand: nested form is rejected"
+    (try
+      (do (rd1 "#(map #(inc %) xs)") false)
+      (catch Exception _ true)))
+  (expect! "fn shorthand: syntax path is a rewritten tree with source span"
+    (let [source "#(inc %)"
+          output (read-program-with-syntax! source "shorthand.bclj")
+          syntax (nth (get output "syntaxes") 0)
+          span (ast/beagle-syntax-span syntax)]
+      (and (= (get syntax "variant") "list")
+           (= (ast/beagle-syntax->datum! syntax)
+              ["fn" [BRACKET-TAG "%1" "Any"] "Any" ["inc" "%1"]])
+           (= (get span "start") 0)
+           (= (get span "end") (count source)))))
+
   ;; --- reader macros ---
   (expect! "quote" (= (rd1 "'foo") ["quote" "foo"]))
   (expect! "deref" (= (rd1 "@state") ["deref" "state"]))
@@ -956,6 +1097,12 @@
   (expect! "char: named backspace" (= (rd1 "\\backspace") [CHAR-TAG 8]))
   (expect! "char: single printable A" (= (rd1 "\\A") [CHAR-TAG 65]))
   (expect! "char: single printable z" (= (rd1 "\\z") [CHAR-TAG 122]))
+  (expect! "char: opening parenthesis consumes the delimiter"
+    (= (rd1 "(int \\()") ["int" [CHAR-TAG 40]]))
+  (expect! "char: closing parenthesis consumes the delimiter"
+    (= (rd1 "(int \\))") ["int" [CHAR-TAG 41]]))
+  (expect! "char: semicolon is data rather than a comment"
+    (= (rd1 "(int \\;)") ["int" [CHAR-TAG 59]]))
   (expect! "char: \\uNNNN printable" (= (rd1 "\\u0041") [CHAR-TAG 65]))
   (expect! "char: \\uNNNN non-ascii" (= (rd1 "\\u00e9") [CHAR-TAG 233]))
   (expect! "char: in list" (= (rd1 "(str \\A \\space)")

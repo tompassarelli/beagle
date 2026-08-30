@@ -1023,6 +1023,8 @@
       (define body (defn-form-body form))
       (define return-contract
         (regex-contract-from-type (defn-form-return-type form) form))
+      (when return-contract
+        (store-regex-contract! form return-contract))
       (when (and return-contract (pair? body))
         (define value (last body))
         (when (and (call-form? value)
@@ -4990,6 +4992,11 @@
        [else (type-union remaining)])]
     [else current-type]))
 
+(define (truthy-result-type type)
+  (if (and (type-prim? type) (eq? (type-prim-name type) 'Nil))
+      INFERENCE-BOTTOM
+      (remove-from-union type NIL)))
+
 ;; Predicate leaves only — composition (not/and/or) and bare-symbol
 ;; truthiness live in test-narrowings below. Returns
 ;; (values var narrow-to-type negated?): the var's type IS narrow-to in
@@ -6689,19 +6696,34 @@
     ;; checked under the narrowings established by the previous arguments
     ;; ((and (some? x) (Math/floor x)) sees x non-nil at the second arg;
     ;; (or (nil? x) (f x)) sees x non-nil — arg 2 only runs when arg 1
-    ;; was falsy). Result stays Any (the value is the last truthy/falsy
-    ;; arg, untyped in v0).
+    ;; was falsy). The result is one of the arguments, so retain their type
+    ;; join instead of erasing a homogeneous expression to Any.
     [(and (call-form? e)
           (memq (call-form-fn e) '(and or))
           (symbol? (call-form-fn e)))
      (define and? (eq? (call-form-fn e) 'and))
-     (for/fold ([acc '()]) ([a (in-list (call-form-args e))])
+     (define-values (_narrowings result-types)
+       (for/fold ([acc '()] [types '()])
+                 ([a (in-list (call-form-args e))])
        (define env* (apply-narrowings env acc))
-       (infer-expr a env*)
+       (define argument-type (infer-expr a env*))
        (define-values (th el) (test-narrowings a env*))
-       (for/fold ([acc2 acc]) ([p (in-list (if and? th el))])
-         (alist-set acc2 (car p) (cdr p))))
-     ANY]
+       (define next-acc
+         (for/fold ([acc2 acc]) ([p (in-list (if and? th el))])
+           (alist-set acc2 (car p) (cdr p))))
+       (values next-acc (cons argument-type types))))
+     (define ordered-result-types (reverse result-types))
+     (define joined-result-types
+       (if and?
+           ordered-result-types
+           (for/list ([type (in-list ordered-result-types)]
+                      [index (in-naturals)])
+             (if (= index (sub1 (length ordered-result-types)))
+                 type
+                 (truthy-result-type type)))))
+     (if (null? joined-result-types)
+         (if and? BOOL NIL)
+         (apply merge-types joined-result-types))]
 
     ;; ByteSource is a borrowed native octet view rather than a Vec. Native
     ;; lowering already owns its count/nth operations; preserve that exact

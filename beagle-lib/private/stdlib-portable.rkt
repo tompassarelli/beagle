@@ -63,7 +63,10 @@
    ;; variadic; the extra vecs share the element type.
    'concat     (poly-fn '(A) (list (type-app 'Vec (list (tv 'A))))
                         (type-app 'Vec (list (tv 'A)))
-                        #:rest (type-app 'Vec (list (tv 'A))))
+                        #:rest
+                        (type-union
+                         (list (type-app 'Vec (list (tv 'A)))
+                               (p 'Nil))))
    'reverse    (fn-of '(Any) 'Any)
    'distinct   (poly-fn '(A) (list (type-app 'Vec (list (tv 'A))))
                         (type-app 'Vec (list (tv 'A))))
@@ -183,7 +186,7 @@
    'long       (fn-of '(Any) 'Int)
    'int?       (fn-of '(Any) 'Bool)
    ;; --- boolean ------------------------------------------------------------
-   'not        (fn-of '(Bool) 'Bool)
+   'not        (fn-of '(Any) 'Bool)
    'and        (fn-of '() 'Any #:rest 'Any)
    'or         (fn-of '() 'Any #:rest 'Any)
    'true?      (fn-of '(Any) 'Bool)

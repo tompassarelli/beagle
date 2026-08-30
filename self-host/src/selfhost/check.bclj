@@ -226,6 +226,13 @@
     (make-fn [(make-fn [(make-var "A")] nil ANY) ANY]
              nil (make-app "Vec" [(make-var "A")]))
     nil))
+(def CONCAT-POLY Any
+  (make-poly ["A"]
+    (make-fn
+      [(make-app "Vec" [(make-var "A")])]
+      (make-union [(make-app "Vec" [(make-var "A")]) NIL-TYPE])
+      (make-app "Vec" [(make-var "A")]))
+    nil))
 
 ;; JavaScript atoms use the same invariant element contract as the host cell:
 ;; construction captures A, deref reads A, and every mutation must write A
@@ -715,6 +722,11 @@
         (boolean (some (fn [alt Any] Bool (type-compatible? actual alt))
                    (get expected "args"))))
 
+    ;; Match-shape metadata does not change the runtime Regex representation.
+    (and (app-type? actual) (= (get actual "name") "Regex")
+         (prim? expected) (= (get expected "name") "Regex"))
+      true
+
     (and (app-type? actual) (app-type? expected))
       (and (= (get actual "name") (get expected "name"))
            (= (count (get actual "args")) (count (get expected "args")))
@@ -808,6 +820,11 @@
           (= (count remaining) 1) (nth remaining 0)
           :else (make-union remaining)))
     :else current-type))
+
+(defn truthy-result-type [type Any] Any
+  (if (nil-type? type)
+    INFERENCE-BOTTOM
+    (remove-from-union type NIL-TYPE)))
 
 ;; --- infer-literal-type ------------------------------------------------------
 
@@ -1089,7 +1106,7 @@
    "map?"     (make-fn [ANY] nil (make-prim "Bool"))
    "vector?"  (make-fn [ANY] nil (make-prim "Bool"))
    "empty?"   (make-fn [ANY] nil (make-prim "Bool"))
-   "not"      (make-fn [(make-prim "Bool")] nil (make-prim "Bool"))
+   "not"      (make-fn [ANY] nil (make-prim "Bool"))
    "="        (make-fn [ANY] ANY (make-prim "Bool"))
    "not="     (make-fn [ANY] ANY (make-prim "Bool"))
    ">"        (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool"))
@@ -1124,6 +1141,7 @@
    "dissoc"   (make-fn [ANY ANY] ANY ANY)
    "conj"     (make-fn [ANY] ANY ANY)
    "cons"     (make-fn [ANY ANY] nil ANY)
+   "concat"   CONCAT-POLY
    "into"     (make-fn [ANY ANY] ANY ANY)
    "vec"      (make-fn [ANY] nil ANY)
    "vals"     (make-fn [ANY] nil ANY)
@@ -3954,19 +3972,39 @@
     ;; and/or evaluate left-to-right with short-circuit, per check.rkt: each
     ;; argument is checked under the narrowings established by the previous
     ;; arguments ((and (some? x) (f x)) sees x non-nil at arg 2; (or (nil? x)
-    ;; (f x)) likewise — arg 2 only runs when arg 1 was falsy). Result is Any.
+    ;; (f x)) likewise — arg 2 only runs when arg 1 was falsy). The result is
+    ;; one of the arguments, so retain their type join.
     (and (= (get e "node") "call")
          (or (= (call-fn-name e) "and") (= (call-fn-name e) "or")))
-      (do (reduce (fn
-                    [acc Any
-                     a Any] Any
-                    (let [env* (merge env acc)]
-                      (infer-expr! a env*)
-                      (let [tn (test-narrowings a env*)]
-                        (merge acc (get tn (if (= (call-fn-name e) "and")
-                                             "then" "else"))))))
-                  {} (get e "args"))
-          ANY)
+      (let [and? (= (call-fn-name e) "and")
+            result (reduce
+                     (fn
+                       [state Any
+                        a Any] Any
+                       (let [narrowings (get state "narrowings")
+                             env* (merge env narrowings)
+                             argument-type (infer-expr! a env*)
+                             tn (test-narrowings a env*)]
+                         {"narrowings"
+                          (merge narrowings (get tn (if and? "then" "else")))
+                          "types" (conj (get state "types") argument-type)}))
+                     {"narrowings" {} "types" []}
+                     (get e "args"))
+            result-types (get result "types")
+            joined-result-types
+              (if and?
+                result-types
+                (map-indexed
+                  (fn
+                    [index Int
+                     type Any] Any
+                    (if (= index (- (count result-types) 1))
+                      type
+                      (truthy-result-type type)))
+                  result-types))]
+        (if (= (count joined-result-types) 0)
+          (if and? BOOL-TYPE NIL-TYPE)
+          (merge-types-list joined-result-types)))
 
     ;; (nth t K)/(first t)/(second t) on an (HVec ..) reads the POSITIONAL
     ;; element type, but ONLY when the index is a CONSTANT in-bounds integer. A
@@ -6623,6 +6661,49 @@
         (make-prim "String"))))
   (expect! "infer: ref missing => Any"
     (any-type? (infer-expr! (make-ref "y") {})))
+
+  (expect! "stdlib: <= accepts a third numeric argument"
+    (let [body (make-call "<="
+                 [(make-lit "number" 0)
+                  (make-lit "number" 1)
+                  (make-lit "number" 2)])
+          prog (make-prog
+                 [(make-defn-node "ordered" [] BOOL-TYPE [body])])]
+      (= (count (check-program! prog)) 0)))
+
+  (expect! "stdlib: into accepts its three-argument transducer arity"
+    (let [body (make-call "into"
+                 [(make-vec-node [])
+                  (make-call "map" [(make-ref "inc")])
+                  (make-vec-node [(make-lit "number" 1)])])
+          prog (make-prog
+                 [(make-defn-node "collected" [] ANY [body])])]
+      (= (count (check-program! prog)) 0)))
+
+  (expect! "reader shorthand callback keeps Clojure truthiness and map arguments"
+    (let [callback {"node" "fn"
+                    "params" [(make-param "%1" ANY)]
+                    "rest" false
+                    "ret" ANY
+                    "body" [(make-call "not" [(make-lit "string" "match")])]}
+          body (make-call "map"
+                 [callback
+                  (make-vec-node [(make-lit "number" 1)])
+                  (make-vec-node [(make-lit "number" 2)])])
+          prog (make-prog
+                 [(make-defn-node "paired" [] ANY [body])])]
+      (= (count (check-program! prog)) 0)))
+
+  (expect! "concat accepts a nullable trailing vector"
+    (let [vec-string (make-app "Vec" [(make-prim "String")])
+          maybe-vec (make-union [vec-string NIL-TYPE])
+          body (make-call "concat" [(make-ref "head") (make-ref "tail")])
+          prog (make-prog
+                 [(make-defn-node "append-optional"
+                    [(make-param "head" vec-string)
+                     (make-param "tail" maybe-vec)]
+                    vec-string [body])])]
+      (= (count (check-program! prog)) 0)))
 
   ;; --- JavaScript member contracts ----------------------------------------
   (expect! "js-member: nominal record property is typed"

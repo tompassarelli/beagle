@@ -47,11 +47,18 @@
         selected
         (cons edit selected))))
 
+(define (actionable-layout-edit? edit)
+  ;; A legacy three-slot binding constraint has no semantics-preserving rewrite
+  ;; until refinement types exist. It is accepted source, not format drift.
+  (not (eq? (layout-edit-refusal edit) 'refinement-not-implemented)))
+
 (define (converged-signature-layout path source)
   (let loop ([candidate source]
              [passes '()]
              [seen (hash source #t)])
-    (define edits (signature-layout-edits-for-source path candidate))
+    (define edits
+      (filter actionable-layout-edit?
+              (signature-layout-edits-for-source path candidate)))
     (cond
       [(null? edits)
        (values candidate (apply append (reverse passes)))]
@@ -84,10 +91,6 @@
            (add1 (or (layout-edit-col edit) 0))
            (layout-edit-role edit)
            (case (layout-edit-refusal edit)
-             [(refinement-not-implemented)
-              (string-append
-               " (refinement-not-implemented: automatic rewrite refused; "
-               "legacy binding constraints remain accepted until refinement semantics land)")]
              [(comment-reach)
               " (automatic rewrite refused: comment reach could change)"]
              [else ""])))
