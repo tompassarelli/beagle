@@ -37,9 +37,10 @@
 
 (def checked-program-ref Any (atom false))
 
-;; Clojure binds `& rest` as a seq, while Beagle exposes a Vec to the
-;; constraint and body. Keep the host value compiler-owned and normalize it
-;; once at every callable boundary.
+;; Clojure binds `& rest` as a seq. Beagle ordinarily exposes a Vec to the
+;; constraint and body; associative destructuring instead consumes Clojure's
+;; keyword-rest seq directly. Keep the host value compiler-owned and normalize
+;; it once at every callable boundary.
 (def CLJ-HOST-REST String "$beagle$rest$host")
 
 (def CLJ-SHA256-BYTES-CALL String (str "beagle$sha256" "_bytes_v0"))
@@ -385,6 +386,13 @@
     (contains? binding "value") (get binding "name")
     :else (param-binding-target binding)))
 
+(defn emit-rest-body-value
+  [rest-p Any
+   host-name String] String
+  (if (= (get (binding-target rest-p) "type") "map-destructure")
+    host-name
+    (str "(vec " host-name ")")))
+
 (defn binding-target-label [binding Any] String
   (emit-binding-form (binding-target binding)))
 
@@ -452,7 +460,8 @@
                        (into fixed-raw ["&" CLJ-HOST-REST])))
         rest-normalization (Vec String) (if (or (nil? rest-p) (false? rest-p))
             []
-            [(str (nth raw-names fixed-count) " (vec " CLJ-HOST-REST ")")])
+            [(str (nth raw-names fixed-count) " "
+                  (emit-rest-body-value rest-p CLJ-HOST-REST))])
         predicate-bindings (Vec String) (loop [index Int 0
                                                acc (Vec String) []]
                                           (if (>= index (count all))
@@ -501,7 +510,8 @@
        "body" (if (or (nil? rest-p) (false? rest-p))
                 body-str
                 (str "(let [" (emit-binding-form (binding-target rest-p))
-                     " (vec " CLJ-HOST-REST ")]\n  " body-str ")"))})))
+                     " " (emit-rest-body-value rest-p CLJ-HOST-REST)
+                     "]\n  " body-str ")"))})))
 
 (defn emit-body-with-loop-context!
   [exprs Any
@@ -930,7 +940,8 @@
                     all-indices)
         rest-normalization (Vec String) (if (or (nil? rest-p) (false? rest-p))
             []
-            [(str (nth raw-names fixed-count) " (vec " CLJ-HOST-REST ")")])
+            [(str (nth raw-names fixed-count) " "
+                  (emit-rest-body-value rest-p CLJ-HOST-REST))])
         predicate-bindings (Vec String) (loop [index Int 0
                                                acc (Vec String) []]
                                           (if (>= index (count all))
@@ -2026,7 +2037,7 @@
                   "rest" false}
           "ann" {"kind" "any"}})
        "[x {:keys [y] :or {y 3} :as row}]"))
-  (expect! "typed destructuring rest parameters normalize before projection"
+  (expect! "keyword-rest destructuring preserves Clojure's associative seq"
     (let [output (emit-expr!
                    {"node" "defn"
                     "name" "run"
@@ -2050,7 +2061,7 @@
                     "doc" false})]
       (and (str/includes? output "& $beagle$rest$host")
         (str/includes? output
-          "{:keys [timeout] :or {timeout 4000}} (vec $beagle$rest$host)"))))
+          "{:keys [timeout] :or {timeout 4000}} $beagle$rest$host"))))
   (expect! "Clojure Var reference emits identity-bearing reader surface"
     (= (emit-expr!
          {"node" "clj-var-ref" "qualifier" "north.main"

@@ -197,7 +197,7 @@
   (check-true (seq-destructure? (param-name report-rest)))
   (define emitted (emit-program program))
   (check-regexp-match
-   #rx"\\{:keys \\[timeout in env\\] :or \\{timeout 4000\\}\\} \\(vec \\$beagle\\$rest\\$host\\)"
+   #rx"\\{:keys \\[timeout in env\\] :or \\{timeout 4000\\}\\} \\$beagle\\$rest\\$host"
    emitted)
   (check-regexp-match
    #rx"\\[baseline\\] \\(vec \\$beagle\\$rest\\$host\\)"

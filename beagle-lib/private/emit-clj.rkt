@@ -121,8 +121,9 @@
 (define current-emit-local-names (make-parameter (set)))
 (define current-clj-loop-recur-context (make-parameter #f))
 
-;; Clojure binds `& rest` as a seq, while Beagle's rest binding is the
-;; aggregate `(Vec Element)` seen by the checker, constraints, and body. Keep
+;; Clojure binds `& rest` as a seq. Beagle ordinarily exposes the aggregate
+;; `(Vec Element)` seen by the checker, constraints, and body; associative
+;; destructuring instead consumes Clojure's keyword-rest seq directly. Keep
 ;; the host sequence compiler-owned and normalize it exactly once at every
 ;; callable boundary.
 (define CLJ-HOST-REST "$beagle$rest$host")
@@ -1725,7 +1726,9 @@ CLJ
   (define rest-normalization
     (if rest-p
         (list
-         (format "~a (vec ~a)" (last raw-names) CLJ-HOST-REST))
+         (format "~a ~a"
+                 (last raw-names)
+                 (emit-rest-body-value rest-p CLJ-HOST-REST)))
         '()))
   (define predicate-bindings
     (for/list ([param (in-list all-params)]
@@ -1946,6 +1949,11 @@ CLJ
 (define (callable-has-constraints? params rest-p)
   (bindings-have-constraints? (params+rest params rest-p)))
 
+(define (emit-rest-body-value rest-p host-name)
+  (if (map-destructure? (param-binding-target rest-p))
+      host-name
+      (format "(vec ~a)" host-name)))
+
 (define (param-tag-prefix p)
   ;; Clojure type hints attach only to identifier binders. An annotation on a
   ;; destructuring pattern remains a Beagle checking boundary, not a JVM tag.
@@ -1987,7 +1995,9 @@ CLJ
   (define rest-normalization
     (if rest-p
         (list
-         (format "~a (vec ~a)" (last raw-names) CLJ-HOST-REST))
+         (format "~a ~a"
+                 (last raw-names)
+                 (emit-rest-body-value rest-p CLJ-HOST-REST)))
         '()))
   (define predicate-bindings
     (for/list ([binding (in-list all)]
@@ -2034,9 +2044,9 @@ CLJ
   (values
    params-str
    (if rest-p
-       (format "(let [~a (vec ~a)]\n  ~a)"
+       (format "(let [~a ~a]\n  ~a)"
                (emit-binding-name (param-binding-target rest-p))
-               CLJ-HOST-REST
+               (emit-rest-body-value rest-p CLJ-HOST-REST)
                body-str)
        body-str)))
 

@@ -170,6 +170,9 @@
   (contains? binding "value") (get binding "name")
   :else (param-binding-target binding)))
 
+(defn ^String emit-rest-body-value [rest-p ^String host-name]
+  (if (= (get (binding-target rest-p) "type") "map-destructure") host-name (str "(vec " host-name ")")))
+
 (defn ^String binding-target-label [binding]
   (emit-binding-form (binding-target binding)))
 
@@ -203,7 +206,7 @@
    target (param-binding-target param)]
   (if (and (= (get param "type") "param") (string? target)) (str (clj-tag-prefix (get param "ann")) raw) raw))) fixed-indices)
    params-str (str/join " " (if (or (nil? rest-p) (false? rest-p)) fixed-raw (into fixed-raw ["&" CLJ-HOST-REST])))
-   rest-normalization (if (or (nil? rest-p) (false? rest-p)) [] [(str (nth raw-names fixed-count) " (vec " CLJ-HOST-REST ")")])
+   rest-normalization (if (or (nil? rest-p) (false? rest-p)) [] [(str (nth raw-names fixed-count) " " (emit-rest-body-value rest-p CLJ-HOST-REST))])
    predicate-bindings (loop [index 0
    acc []]
   (if (>= index (count all)) acc (let [binding (nth all index)]
@@ -218,7 +221,7 @@
 (defn emit-callable-signature+body [params rest-p ^String body-str]
   (if (callable-has-constraints? params rest-p) (emit-constrained-callable params rest-p body-str) (let [fixed (emit-params-with-rest params nil)
    params-str (if (or (nil? rest-p) (false? rest-p)) fixed (if (= fixed "") (str "& " CLJ-HOST-REST) (str fixed " & " CLJ-HOST-REST)))]
-  {"params" params-str "body" (if (or (nil? rest-p) (false? rest-p)) body-str (str "(let [" (emit-binding-form (binding-target rest-p)) " (vec " CLJ-HOST-REST ")]\n  " body-str ")"))})))
+  {"params" params-str "body" (if (or (nil? rest-p) (false? rest-p)) body-str (str "(let [" (emit-binding-form (binding-target rest-p)) " " (emit-rest-body-value rest-p CLJ-HOST-REST) "]\n  " body-str ")"))})))
 
 (defn ^String emit-body-with-loop-context! [exprs ^String indent context]
   (let [previous (deref loop-constraint-arity)]
@@ -432,7 +435,7 @@
    fixed-count (count params)
    all-indices (vec (range (count all)))
    raw-names (mapv (fn [index] (callable-raw-name index fixed-count)) all-indices)
-   rest-normalization (if (or (nil? rest-p) (false? rest-p)) [] [(str (nth raw-names fixed-count) " (vec " CLJ-HOST-REST ")")])
+   rest-normalization (if (or (nil? rest-p) (false? rest-p)) [] [(str (nth raw-names fixed-count) " " (emit-rest-body-value rest-p CLJ-HOST-REST))])
    predicate-bindings (loop [index 0
    acc []]
   (if (>= index (count all)) acc (let [param (nth all index)]
@@ -897,8 +900,8 @@
   (expect! "binding-target: map-destructure -> {:keys [id b]}" (= (emit-binding-target! {"type" "map-destructure" "keys" ["id" "b"] "as" false}) "{:keys [id b]}"))
   (expect! "param: typed sequential aggregate unwraps to binding form" (= (emit-param {"type" "param" "name" {"type" "seq-destructure" "names" ["x" "y"] "rest" false} "ann" {"kind" "hvec" "members" [{"kind" "prim" "name" "Int"} {"kind" "prim" "name" "String"}]}}) "[x y]"))
   (expect! "param: nested map defaults and as survive aggregate annotation" (= (emit-param {"type" "param" "name" {"type" "seq-destructure" "names" ["x" {"type" "map-destructure" "keys" ["y"] "or" [{"key" "y" "value" {"node" "literal" "kind" "number" "value" 3}}] "as" "row"}] "rest" false} "ann" {"kind" "any"}}) "[x {:keys [y] :or {y 3} :as row}]"))
-  (expect! "typed destructuring rest parameters normalize before projection" (let [output (emit-expr! {"node" "defn" "name" "run" "params" [{"type" "param" "name" "argv" "ann" {"kind" "prim" "name" "Any"} "constraint" false}] "rest" {"type" "param" "name" {"type" "map-destructure" "keys" ["timeout"] "or" [{"key" "timeout" "value" {"node" "literal" "kind" "number" "value" 4000}}] "as" false} "ann" {"kind" "app" "name" "Vec" "args" [{"kind" "prim" "name" "Any"}]} "constraint" false} "ret" {"kind" "prim" "name" "Any"} "body" [{"node" "ref" "name" "timeout"}] "private" false "doc" false})]
-  (and (str/includes? output "& $beagle$rest$host") (str/includes? output "{:keys [timeout] :or {timeout 4000}} (vec $beagle$rest$host)"))))
+  (expect! "keyword-rest destructuring preserves Clojure's associative seq" (let [output (emit-expr! {"node" "defn" "name" "run" "params" [{"type" "param" "name" "argv" "ann" {"kind" "prim" "name" "Any"} "constraint" false}] "rest" {"type" "param" "name" {"type" "map-destructure" "keys" ["timeout"] "or" [{"key" "timeout" "value" {"node" "literal" "kind" "number" "value" 4000}}] "as" false} "ann" {"kind" "app" "name" "Vec" "args" [{"kind" "prim" "name" "Any"}]} "constraint" false} "ret" {"kind" "prim" "name" "Any"} "body" [{"node" "ref" "name" "timeout"}] "private" false "doc" false})]
+  (and (str/includes? output "& $beagle$rest$host") (str/includes? output "{:keys [timeout] :or {timeout 4000}} $beagle$rest$host"))))
   (expect! "Clojure Var reference emits identity-bearing reader surface" (= (emit-expr! {"node" "clj-var-ref" "qualifier" "north.main" "name" "capture-facts"}) "#'north.main/capture-facts"))
   (expect! "let-bindings: seq-destructure binder (no raw JSON leak)" (= (emit-let-bindings! [{"name" {"type" "seq-destructure" "names" ["a" "b"] "rest" false} "value" {"node" "ref" "name" "p"}}]) "[a b] p"))
   (expect! "let-bindings: map-destructure binder (no raw JSON leak)" (= (emit-let-bindings! [{"name" {"type" "map-destructure" "keys" ["id" "b"] "as" false} "value" {"node" "ref" "name" "m"}}]) "{:keys [id b]} m"))

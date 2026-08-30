@@ -625,9 +625,25 @@
           Bool
           (vector? values))))
      (string-append
-      "(println [(ordinary-rest 1 2) (anonymous-rest) (local-rest) "
+     "(println [(ordinary-rest 1 2) (anonymous-rest) (local-rest) "
       "(multi-rest 1 2) (rest-vector (->RestBox \"r\") 1 2)])")
      "[true true true true true]")
+
+   (check-clj-output "keyword-rest map destructuring matches Clojure calls"
+     (list
+      `(defn keyword-options
+         ,(br '&
+              (mt ':keys (br 'role 'timeout)
+                  ':or (mt 'role "worker" 'timeout 4000))
+              '(Vec Any))
+         String
+         (str role ":" timeout)))
+     (string-append
+      "(println (keyword-options :role \"director\" :timeout 12))\n"
+      "(println (keyword-options :role \"reviewer\"))\n"
+      "(println (keyword-options {:role \"program\" :timeout 30}))\n"
+      "(println (keyword-options))")
+     "director:12\nreviewer:4000\nprogram:30\nworker:4000")
 
    (check-clj-output "constraint and incoming expressions each evaluate once"
      (list
