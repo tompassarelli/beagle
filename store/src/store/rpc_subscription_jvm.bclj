@@ -1,0 +1,223 @@
+#lang beagle/clj
+
+;; Irreducible JVM socket adapter for Store subscriptions.  The typed core
+;; owns every subscription transition; this module owns only socket framing,
+;; the shared output monitor, and the independent writer/expiry futures.
+(ns store.rpc-subscription-jvm
+  (:require [store.rpc :as rpc]
+            [store.rpc-subscription :as subscription]
+            [store.types :as t])
+  (:import [java.io OutputStream]
+           [java.net Socket]
+           [java.util UUID]))
+
+(def expiry-poll-ceiling-ms Int 100)
+(def writer-poll-ms Int 100)
+
+(defrecord SubscriptionJvmConnection
+  [session subscription/SubscriptionSession
+   socket Socket
+   output OutputStream
+   open-request-id (Atom Int?)
+   writer-future (Atom Any)
+   expiry-future (Atom Any)])
+
+(defrecord SubscriptionWriteResult
+  [response t/RpcResponse
+   byte-count Int])
+
+(defn- adapter-fail!
+  [code Keyword
+   message String] Any
+  (throw (ex-info message {:type code :store/code code :code code})))
+
+(defn new-store-incarnation! [] String
+  (str (UUID/randomUUID)))
+
+(defn monotonic-now-ns! [] Int
+  (System/nanoTime))
+
+(defn new-connection
+  [registry subscription/SubscriptionRegistry
+   socket Socket
+   output OutputStream] SubscriptionJvmConnection
+  (->SubscriptionJvmConnection
+   (subscription/new-session registry)
+   socket output (atom nil) (atom nil) (atom nil)))
+
+(defn connection-session [connection SubscriptionJvmConnection] subscription/SubscriptionSession
+  (subscriptionjvmconnection-session connection))
+
+(defn- close-socket! [connection SubscriptionJvmConnection] Nil
+  (try
+    (.close (subscriptionjvmconnection-socket connection))
+    (catch Throwable _ nil))
+  nil)
+
+(defn- open-request-id! [connection SubscriptionJvmConnection] Int
+  (if-let [request-id Int
+           (deref (subscriptionjvmconnection-open-request-id connection))]
+    request-id
+    (adapter-fail! :rpc/subscription-invalid-state
+                   "subscription event has no OPEN request id")))
+
+(defn- write-bytes-under-lock!
+  [connection SubscriptionJvmConnection
+   bytes (Arr I8)] Int
+  (let [output OutputStream (subscriptionjvmconnection-output connection)]
+    (.write output bytes)
+    (.flush output)
+    (alength bytes)))
+
+(defn- write-event-under-lock!
+  [connection SubscriptionJvmConnection
+   notice subscription/SubscriptionNotice] Nil
+  (let [observed subscription/SubscriptionCursor (subscription/subscriptionnotice-observed notice)
+        coordinate subscription/StoreCoordinate (subscription/subscriptioncursor-coordinate observed)
+        response t/RpcResponse (rpc/rpc-response!
+         (subscription/storecoordinate-space coordinate)
+         subscription/subscription-event-operation
+         (subscription/storecoordinate-version coordinate)
+         nil nil (subscription/notice-payload! notice))
+        packet t/StoreRpcPacketV2 (rpc/store-rpc-event-packet (open-request-id! connection) response)
+        bytes (Arr I8) (rpc/store-rpc-encode-packet-v2! packet)]
+    (write-bytes-under-lock! connection bytes)
+    ;; Keep the output monitor through the state transition.  An ACK handler
+    ;; takes the same monitor before consulting the core, so a client cannot
+    ;; race receipt of an EVENT against its delivered bound.
+    (subscription/mark-delivered!
+     (subscriptionjvmconnection-session connection) notice)
+    nil))
+
+(defn- writer-loop! [connection SubscriptionJvmConnection] Nil
+  (let [session subscription/SubscriptionSession (subscriptionjvmconnection-session connection)
+        output OutputStream (subscriptionjvmconnection-output connection)]
+    (try
+      (loop []
+        (when (subscription/session-active? session)
+          (if-let [notice subscription/SubscriptionNotice
+                   (subscription/poll-notice! session writer-poll-ms)]
+            (locking output
+              (when (subscription/session-active? session)
+                (write-event-under-lock! connection notice)))
+            nil)
+          (recur)))
+      (catch InterruptedException _ nil)
+      (catch Throwable _
+        (subscription/retire-session!
+         session subscription/adapter-failed-retirement)
+        (close-socket! connection))))
+  nil)
+
+(defn- start-writer! [connection SubscriptionJvmConnection] Nil
+  (let [future-cell (Atom Any) (subscriptionjvmconnection-writer-future connection)]
+    (when (nil? (deref future-cell))
+      (reset! future-cell
+              (future-call (fn [] Nil (writer-loop! connection))))))
+  nil)
+
+(defn- expiry-sleep-ms [remaining-ns Int] Int
+  (int
+   (max 1
+        (min expiry-poll-ceiling-ms
+             (quot (+ remaining-ns 999999) 1000000)))))
+
+(defn- expiry-loop! [connection SubscriptionJvmConnection] Nil
+  (let [session subscription/SubscriptionSession (subscriptionjvmconnection-session connection)]
+    (try
+      (loop []
+        (let [remaining-ns Int (subscription/lease-remaining-ns! session)]
+          (cond
+            [(subscription/retirement-closes-adapter? session)
+             (close-socket! connection)]
+            [(<= remaining-ns 0)
+             (when (subscription/expire-if-due! session)
+               ;; Socket close deliberately does not take the output monitor:
+               ;; it must interrupt a writer blocked while holding that monitor.
+               (close-socket! connection))]
+            [:else
+             (do
+               (Thread/sleep (expiry-sleep-ms remaining-ns))
+               (recur))])))
+      (catch InterruptedException _ nil)))
+  nil)
+
+(defn- start-expiry! [connection SubscriptionJvmConnection] Nil
+  (let [future-cell (Atom Any) (subscriptionjvmconnection-expiry-future connection)]
+    (when (nil? (deref future-cell))
+      (reset! future-cell
+              (future-call (fn [] Nil (expiry-loop! connection))))))
+  nil)
+
+(defn- successful-open?
+  [connection SubscriptionJvmConnection
+   operation Keyword
+   response t/RpcResponse] Bool
+  (and (= operation :rpc/subscribe)
+       (and (nil? (t/rpcresponse-error response))
+            (subscription/session-opening?
+             (subscriptionjvmconnection-session connection)))))
+
+(defn- write-response-under-lock!
+  [connection SubscriptionJvmConnection
+   request-id Int
+   operation Keyword
+   response t/RpcResponse] SubscriptionWriteResult
+  (let [packet t/StoreRpcPacketV2 (rpc/store-rpc-response-packet request-id response)
+        bytes (Arr I8) (rpc/store-rpc-encode-packet-v2! packet)
+        opening Bool (successful-open? connection operation response)]
+    (when opening
+      (reset! (subscriptionjvmconnection-open-request-id connection)
+              request-id)
+      ;; This worker exists before the first potentially blocking OPEN byte.
+      (start-expiry! connection))
+    (try
+      (let [byte-count Int (write-bytes-under-lock! connection bytes)]
+        (when (and opening
+                   (subscription/activate-open!
+                    (subscriptionjvmconnection-session connection)))
+          (start-writer! connection))
+        (->SubscriptionWriteResult response byte-count))
+      (catch Throwable error
+        (subscription/retire-session!
+         (subscriptionjvmconnection-session connection)
+         subscription/adapter-failed-retirement)
+        (close-socket! connection)
+        (throw error)))))
+
+(defn handle-request-and-write!
+  [connection SubscriptionJvmConnection
+   request-id Int
+   request t/RpcRequest
+   error-response (Fn [String Keyword Any] t/RpcResponse)] SubscriptionWriteResult
+  (let [output OutputStream (subscriptionjvmconnection-output connection)
+        space String (t/rpcrequest-space request)
+        operation Keyword (t/rpcrequest-op request)]
+    (locking output
+      (let [response t/RpcResponse (try
+              (subscription/handle-rpc-request!
+               (subscriptionjvmconnection-session connection) request)
+              (catch Throwable error
+                (error-response space operation error)))]
+        (write-response-under-lock!
+         connection request-id operation response)))))
+
+(defn write-response!
+  [connection SubscriptionJvmConnection
+   request-id Int
+   operation Keyword
+   response t/RpcResponse] SubscriptionWriteResult
+  (locking (subscriptionjvmconnection-output connection)
+    (write-response-under-lock!
+     connection request-id operation response)))
+
+(defn continue-reading? [connection SubscriptionJvmConnection] Bool
+  (not
+   (subscription/session-terminal?
+    (subscriptionjvmconnection-session connection))))
+
+(defn close-connection! [connection SubscriptionJvmConnection] Nil
+  (subscription/retire-session!
+   (subscriptionjvmconnection-session connection)
+   subscription/disconnected-retirement)
+  nil)

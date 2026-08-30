@@ -7,6 +7,7 @@
   (:require [clojure.java.io :as io]
             [store.rpc :as rpc]
             [store.rpc-subscription :as rpc-subscription]
+            [store.rpc-subscription-jvm :as rpc-subscription-jvm]
             [store.datalog :as datalog]
             [store.kernel :as kernel]
             [store.query :as query]
@@ -42,7 +43,9 @@
 (def ^:private connection-drain-monitor (Object.))
 (def ^:private connection-thread-sequence (AtomicLong. 0))
 (def published-snapshot (atom nil))
-(def subscription-registry rpc-subscription/default-registry)
+(def subscription-registry (atom nil))
+(def subscription-incarnation (atom nil))
+(def subscription-store-generation (atom nil))
 (def server-generation (atom 0))
 (def commit-sequencer (atom nil))
 (def commit-sequencer-stats
@@ -290,11 +293,32 @@
      :version (dec (deref (t/termstore-next-sequence root)))
      :root root}))
 
+(defn- subscription-coordinate [snapshot]
+  (rpc-subscription/store-coordinate!
+   @subscription-incarnation
+   @subscription-store-generation
+   (:space snapshot)
+   (:version snapshot)))
+
+(defn- install-subscription-registry! [db]
+  (let [incarnation (rpc-subscription-jvm/new-store-incarnation!)
+        store-generation @server-generation
+        snapshot (snapshot-of db)]
+    (reset! subscription-incarnation incarnation)
+    (reset! subscription-store-generation store-generation)
+    (reset! subscription-registry
+            (rpc-subscription/new-registry!
+             (subscription-coordinate snapshot)
+             rpc-subscription-jvm/monotonic-now-ns!))
+    (reset! published-snapshot snapshot)
+    @subscription-registry))
+
 (defn- publish-snapshot! [db]
   (let [snapshot (snapshot-of db)]
     (reset! published-snapshot snapshot)
-    (rpc-subscription/publish-version! subscription-registry
-                                       (:version snapshot))
+    (when-let [registry @subscription-registry]
+      (rpc-subscription/publish-coordinate!
+       registry (subscription-coordinate snapshot)))
     snapshot))
 
 (defn- drop-query-caches! []
@@ -319,7 +343,8 @@
       (reset! (:cancelled cancellation) true)
       (when-let [control @(:query-control cancellation)]
         (datalog/cancel-query! control :server-shutdown)))
-    (rpc-subscription/reset-registry! subscription-registry)
+    (when-let [registry @subscription-registry]
+      (rpc-subscription/reset-registry! registry))
     (stop-connection-admission!)
     (stop-commit-sequencer!)
     (reset! active-requests {})
@@ -327,6 +352,9 @@
     (reset! query-archive-manifest [])
     (reset! query-history-stores {})
     (reset! published-snapshot nil)
+    (reset! subscription-registry nil)
+    (reset! subscription-incarnation nil)
+    (reset! subscription-store-generation nil)
     (writer-authority/release! @writer-authority)
     (reset! writer-authority nil)
     (reset! active-store nil)
@@ -361,7 +389,7 @@
          (advance-server-generation!)
          (reset! active-store opened)
          (read-query-archive-manifest! opened)
-         (publish-snapshot! opened)
+         (install-subscription-registry! opened)
          (reset! server-role role)
          (reset! writer-authority authority)
          (when (= :active role)
@@ -2309,7 +2337,7 @@
                          "Store RPC subscription request failed") nil)
      nil)))
 
-(defn- handle-subscription-request! [connection request-id request]
+(defn- subscription-validation-error [request]
   (let [space (t/rpcrequest-space request)
         operation (t/rpcrequest-op request)]
     (try
@@ -2319,21 +2347,22 @@
       (when-not (= space (database/database-space @active-store))
         (server-fail! :rpc/space-mismatch
                       "request SpaceId does not match the served space" {}))
-      (rpc-subscription/handle-rpc-request!
-       connection request-id request)
+      nil
       (catch Throwable error
-        (subscription-error-response space operation error)))))
+        error))))
 
-(defn- handle-connection-packet! [connection packet cancellation]
-  (let [request (t/storerpcpacketv2-request packet)]
-    (if (and request
-             (rpc-subscription/subscription-operation?
-              (t/rpcrequest-op request)))
-      (rpc/store-rpc-response-packet
-       (t/storerpcpacketv2-request-id packet)
-       (handle-subscription-request!
-        connection (t/storerpcpacketv2-request-id packet) request))
-      (handle-rpc-packet! packet cancellation))))
+(defn- handle-subscription-request! [connection request-id request]
+  (let [space (t/rpcrequest-space request)
+        operation (t/rpcrequest-op request)]
+    (if-let [error (subscription-validation-error request)]
+      (rpc-subscription-jvm/write-response!
+       connection request-id operation
+       (subscription-error-response space operation error))
+      (rpc-subscription-jvm/handle-request-and-write!
+       connection request-id request subscription-error-response))))
+
+(defn- handle-connection-packet! [packet cancellation]
+  (handle-rpc-packet! packet cancellation))
 
 (defn- start-connection-request!
   [^Socket socket connection packet output started]
@@ -2347,11 +2376,24 @@
      :task
      (future
        (try
-         (let [response (handle-connection-packet!
-                         connection packet cancellation)
-               response-bytes (write-rpc-packet! output response)
+         (let [subscription?
+               (rpc-subscription/subscription-operation? operation)
+               [response response-bytes]
+               (if subscription?
+                 (let [result
+                       (handle-subscription-request!
+                        connection request-id
+                        (t/storerpcpacketv2-request packet))]
+                   [(rpc/store-rpc-response-packet
+                     request-id
+                     (rpc-subscription-jvm/subscriptionwriteresult-response
+                      result))
+                    (rpc-subscription-jvm/subscriptionwriteresult-byte-count
+                     result)])
+                 (let [response (handle-connection-packet!
+                                 packet cancellation)]
+                   [response (write-rpc-packet! output response)]))
                [outcome code] (response-outcome response)]
-           (rpc-subscription/activate-open! connection operation)
            (record-request! operation (- (System/nanoTime) started)
                             outcome code response-bytes))
          (catch Throwable error
@@ -2395,11 +2437,8 @@
 
 (defn- continue-subscription-after-read-timeout!
   [^Socket socket connection]
-  (when (rpc-subscription/continue-after-read-timeout?! connection)
-    (.setSoTimeout
-     socket
-     (rpc-subscription/read-timeout-ms!
-      connection connection-read-timeout-ms))
+  (when (rpc-subscription-jvm/continue-reading? connection)
+    (.setSoTimeout socket connection-read-timeout-ms)
     true))
 
 (defn serve-connection! [^Socket socket]
@@ -2408,8 +2447,11 @@
     (let [input (.getInputStream socket)
           output (.getOutputStream socket)
           subscription-connection
-          (rpc-subscription/new-connection
-           subscription-registry socket output)
+          (rpc-subscription-jvm/new-connection
+           (or @subscription-registry
+               (server-fail! :rpc/not-booted
+                             "subscription registry is not installed" {}))
+           socket output)
           opened (System/nanoTime)
           pending-request (atom nil)]
       (try
@@ -2429,9 +2471,7 @@
               (recur)
               (do
                 (.setSoTimeout
-                 socket
-                 (rpc-subscription/read-timeout-ms!
-                  subscription-connection connection-read-timeout-ms))
+                 socket connection-read-timeout-ms)
                 (if-not packet
                   (do
                     (await-connection-request! @pending-request true)
@@ -2465,7 +2505,7 @@
                                  :error code nil))))
           (throw error))
         (finally
-          (rpc-subscription/close-connection!
+          (rpc-subscription-jvm/close-connection!
            subscription-connection))))))
 
 (defn- readiness-probe-host [^java.net.InetAddress address]

@@ -710,7 +710,8 @@
     (rpc-write-present! out payload)
     (if (nil? payload) nil (rpc-write-term! out payload))))
 
-(defn store-rpc-encode-packet-v2! [packet t/StoreRpcPacketV2] Any
+(defn store-rpc-encode-packet-v2!
+  [packet t/StoreRpcPacketV2] (Arr I8)
   (let [body-size (store-rpc-body-bytes! packet)
         body (ByteArrayOutputStream. body-size)
         kind (t/storerpcpacketv2-kind packet)
@@ -1089,10 +1090,9 @@
                    "RPC record contains the wrong number of fields")))
     (rpc-fail! :rpc-invalid-record "RPC record tag or marker is invalid")))
 
-;; Subscription wire values stay domain-neutral: recipient, awaited peer/run,
-;; and transport are opaque identities.  The server-created observation window
-;; is part of the generation identity, so a stale ACK cannot validate a reopened
-;; generation that happens to reuse the caller's generation text.
+;; A subscription cursor binds one server-minted generation to one exact Store
+;; transaction coordinate.  Consumer identity is deliberately absent: the Store
+;; protocol owns only history position, generation, and lease duration.
 (defn- require-rpc-nonempty-string!
   [value Any
    label String] String
@@ -1101,12 +1101,12 @@
     (rpc-fail! :rpc-invalid-field (str label " must be nonempty"))
     value))
 
-(defn- require-rpc-version!
+(defn- require-rpc-nonnegative-int!
   [value Any
    label String] Int
-  (if (and (integer? value) (>= value -1))
+  (if (and (integer? value) (>= value 0))
     value
-    (rpc-fail! :rpc-integer-range (str label " must be at least -1"))))
+    (rpc-fail! :rpc-integer-range (str label " must be nonnegative"))))
 
 (defn- require-rpc-positive-u32!
   [value Any
@@ -1115,124 +1115,89 @@
     value
     (rpc-fail! :rpc-integer-range (str label " must be a positive u32"))))
 
-(defn- require-rpc-instant!
+(defn- require-rpc-transaction-coordinate!
   [value Any
-   label String] t/Instant
-  (if (t/instant? value)
+   label String] t/Triple
+  (if (t/transaction-coordinate? value)
     value
-    (rpc-fail! :rpc-invalid-field (str label " must be an Instant"))))
+    (rpc-fail! :rpc-invalid-field
+               (str label " must be a Store transaction coordinate"))))
 
-(defn- rpc-instant-before?
-  [earlier t/Instant
-   later t/Instant] Bool
-  (let [earlier-seconds (t/instant-epoch-seconds earlier)
-        later-seconds (t/instant-epoch-seconds later)]
-    (or (< earlier-seconds later-seconds)
-        (and (= earlier-seconds later-seconds)
-             (< (t/instant-nanos earlier) (t/instant-nanos later))))))
+(defn rpc-subscription-coordinate!
+  [incarnation String
+   store-generation Int
+   transaction t/Triple] t/Triple
+  (rpc-record!
+   :rpc/subscription-coordinate
+   [(require-rpc-nonempty-string! incarnation "Store incarnation")
+    (require-rpc-nonnegative-int! store-generation "Store generation")
+    (require-rpc-transaction-coordinate!
+     transaction "subscription transaction")]))
+
+(defn rpc-subscription-coordinate-fields! [value Any] (Vec Any)
+  (rpc-record-fields! value :rpc/subscription-coordinate 3))
+
+(defn rpc-subscription-cursor!
+  [generation String
+   coordinate t/Triple] t/Triple
+  (rpc-subscription-coordinate-fields! coordinate)
+  (rpc-record!
+   :rpc/subscription-cursor
+   [(require-rpc-nonempty-string! generation "subscription generation")
+    coordinate]))
+
+(defn rpc-subscription-cursor-fields! [value Any] (Vec Any)
+  (rpc-record-fields! value :rpc/subscription-cursor 2))
 
 (defn rpc-subscription-request!
-  [recipient String
-   awaited-peer-or-run String
-   transport String
-   generation String
-   acknowledged-version Int
-   ttl-ms Int] t/Triple
+  [resume t/Triple?
+   lease-ms Int] t/Triple
+  (when resume (rpc-subscription-cursor-fields! resume))
   (rpc-record!
    :rpc/subscription-request
-   [(require-rpc-nonempty-string! recipient "subscription recipient")
-    (require-rpc-nonempty-string! awaited-peer-or-run
-                                  "subscription awaited peer/run")
-    (require-rpc-nonempty-string! transport "subscription transport")
-    (require-rpc-nonempty-string! generation "subscription generation")
-    (require-rpc-version! acknowledged-version
-                          "subscription acknowledged-version")
-    (require-rpc-positive-u32! ttl-ms "subscription ttl-ms")]))
+   [(rpc-option! resume)
+    (require-rpc-positive-u32! lease-ms "subscription lease-ms")]))
 
 (defn rpc-subscription-request-fields! [value Any] (Vec Any)
-  (rpc-record-fields! value :rpc/subscription-request 6))
-
-(defn rpc-subscription-identity!
-  [recipient String
-   awaited-peer-or-run String
-   transport String
-   generation String
-   observed-at t/Instant
-   expires-at t/Instant] t/Triple
-  (let [observed (require-rpc-instant! observed-at "subscription observed-at")
-        expires (require-rpc-instant! expires-at "subscription expires-at")]
-    (if (rpc-instant-before? observed expires)
-      (rpc-record!
-       :rpc/subscription-identity
-       [(require-rpc-nonempty-string! recipient "subscription recipient")
-        (require-rpc-nonempty-string! awaited-peer-or-run
-                                      "subscription awaited peer/run")
-        (require-rpc-nonempty-string! transport "subscription transport")
-        (require-rpc-nonempty-string! generation "subscription generation")
-        observed
-        expires])
-      (rpc-fail! :rpc-invalid-field
-                 "subscription expires-at must be after observed-at"))))
-
-(defn rpc-subscription-identity-fields! [value Any] (Vec Any)
-  (rpc-record-fields! value :rpc/subscription-identity 6))
+  (rpc-record-fields! value :rpc/subscription-request 2))
 
 (defn rpc-subscription-open!
-  [identity t/Triple
-   baseline-version Int
-   acknowledged-version Int] t/Triple
-  (rpc-subscription-identity-fields! identity)
+  [acknowledged t/Triple
+   observed t/Triple] t/Triple
+  (rpc-subscription-cursor-fields! acknowledged)
+  (rpc-subscription-cursor-fields! observed)
   (rpc-record!
    :rpc/subscription-open
-   [identity
-    (require-rpc-version! baseline-version "subscription baseline-version")
-    (require-rpc-version! acknowledged-version
-                          "subscription acknowledged-version")]))
+   [acknowledged observed]))
 
 (defn rpc-subscription-open-fields! [value Any] (Vec Any)
-  (rpc-record-fields! value :rpc/subscription-open 3))
+  (rpc-record-fields! value :rpc/subscription-open 2))
 
 (defn rpc-subscription-event!
-  [identity t/Triple
-   acknowledged-version Int
-   observed-version Int] t/Triple
-  (rpc-subscription-identity-fields! identity)
-  (let [acknowledged (require-rpc-version!
-                      acknowledged-version "subscription acknowledged-version")
-        observed (require-rpc-version!
-                  observed-version "subscription observed-version")]
-    (if (> observed acknowledged)
-      (rpc-record! :rpc/subscription-event
-                   [identity acknowledged observed])
-      (rpc-fail! :rpc-invalid-field
-                 "subscription event must advance acknowledged-version"))))
+  [acknowledged t/Triple
+   observed t/Triple] t/Triple
+  (rpc-subscription-cursor-fields! acknowledged)
+  (rpc-subscription-cursor-fields! observed)
+  (rpc-record! :rpc/subscription-event [acknowledged observed]))
 
 (defn rpc-subscription-event-fields! [value Any] (Vec Any)
-  (rpc-record-fields! value :rpc/subscription-event 3))
+  (rpc-record-fields! value :rpc/subscription-event 2))
 
 (defn rpc-subscription-ack!
-  [identity t/Triple
-   observed-version Int] t/Triple
-  (rpc-subscription-identity-fields! identity)
-  (rpc-record!
-   :rpc/subscription-ack
-   [identity
-    (require-rpc-version! observed-version "subscription observed-version")]))
+  [cursor t/Triple] t/Triple
+  (rpc-subscription-cursor-fields! cursor)
+  (rpc-record! :rpc/subscription-ack [cursor]))
 
 (defn rpc-subscription-ack-fields! [value Any] (Vec Any)
-  (rpc-record-fields! value :rpc/subscription-ack 2))
+  (rpc-record-fields! value :rpc/subscription-ack 1))
 
 (defn rpc-subscription-acknowledged!
-  [identity t/Triple
-   observed-version Int] t/Triple
-  (rpc-subscription-identity-fields! identity)
-  (rpc-record!
-   :rpc/subscription-acknowledged
-   [identity
-    (require-rpc-version! observed-version "subscription observed-version")]))
+  [cursor t/Triple] t/Triple
+  (rpc-subscription-cursor-fields! cursor)
+  (rpc-record! :rpc/subscription-acknowledged [cursor]))
 
 (defn rpc-subscription-acknowledged-fields! [value Any] (Vec Any)
-  (rpc-record-fields! value :rpc/subscription-acknowledged 2))
+  (rpc-record-fields! value :rpc/subscription-acknowledged 1))
 
 (defn rpc-fence!
   [resource Any

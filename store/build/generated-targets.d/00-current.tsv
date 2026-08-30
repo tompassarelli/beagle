@@ -59,6 +59,7 @@ beagle	src/fri_port.bclj	out/fri_port.clj
 beagle	src/fri.bclj	out/fri.clj
 beagle	src/store/rpc.bclj	out/store/rpc.clj
 beagle	src/store/rpc_subscription.bclj	out/store/rpc_subscription.clj
+beagle	src/store/rpc_subscription_jvm.bclj	out/store/rpc_subscription_jvm.clj
 beagle	src/defcheck_gate.bclj	out/defcheck_gate.clj
 beagle	codegraph/src/codegraph.bclj	out/codegraph.clj
 beagle	codegraph/src/callgraph.bclj	out/callgraph.clj
