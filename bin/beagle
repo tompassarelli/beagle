@@ -215,8 +215,7 @@ store_dispatch() {
                 echo "beagle store: BEAGLE_STORE_SPACE_ID is required for data commands" >&2
                 return 2
             fi
-            exec bb -cp "$STORE_DIR/out" \
-                "$STORE_DIR/bin/beagle-store-cli.clj" "$@"
+            exec "$STORE_DIR/bin/beagle-store-cli" "$@"
             ;;
         *)
             store_prepare_local_state

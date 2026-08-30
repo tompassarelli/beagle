@@ -173,7 +173,7 @@ compatibility file, and no forwarding shim.
 | current | replacement/action |
 |---|---|
 | fram | delete; invoke as beagle store ... |
-| fram-fast.clj | beagle-store-cli.clj (private store dispatcher) |
+| fram-fast.clj | beagle-store-cli.bjs → generated beagle-store-cli.js; beagle-store-cli wrapper |
 | fram-backup | beagle-store-backup |
 | fram-server | beagle-store-server |
 | fram-server-native | beagle-store-server-native |

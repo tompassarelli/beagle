@@ -23,7 +23,7 @@ required=(
   "$package_root/bin/beagle-store-server"
   "$package_root/bin/beagle-store-backup" "$package_root/bin/beagle-store-mcp"
   "$runtime/clients/bun/backup.mjs" "$runtime/clients/bun/store-rpc.mjs"
-  "$runtime/bin/beagle-store-cli.clj"
+  "$runtime/bin/beagle-store-cli" "$runtime/bin/beagle-store-cli.js"
   "$runtime/database.clj" "$runtime/server.clj"
   "$runtime/writer_authority.clj"
   "$runtime/out/store/rpc.clj" "$runtime/out/store/rt.clj"
@@ -259,8 +259,7 @@ fi
 
 cli_env=("$env_bin" -i BEAGLE_STORE_SERVER_PORT="$port" BEAGLE_STORE_SPACE_ID="$space")
 run_private_cli() {
-  "${cli_env[@]}" "$bb" -cp "$runtime/out" \
-    "$runtime/bin/beagle-store-cli.clj" "$@"
+  "${cli_env[@]}" "$runtime/bin/beagle-store-cli" "$@"
 }
 tell_output="$(run_private_cli tell package title installed)"
 "$grep_bin" -Fq "committed via server" <<<"$tell_output" || {

@@ -57,16 +57,18 @@
                (str/includes? public "store.rt/native-call!"))
           nil))
 
-(let [fast (file-source "bin/beagle-store-cli.clj")
+(let [fast (file-source "bin/beagle-store-cli.bjs")
       up (file-source "bin/beagle-store-up")
       selfcheck (file-source "bin/beagle-store-doctor-probe.clj")]
-  (check! "CLI EDN use is confined to the local human query parser"
-          (= 2 (count (re-seq #"(?:clojure\.edn|edn/read-string)" fast)))
+  (check! "CLI human query parsing stays in the typed checkout client"
+          (and (str/includes? fast "(defn edn-json")
+               (str/includes? fast "(defn parse-query")
+               (not (str/includes? fast "edn/read-string")))
           nil)
   (check! "CLI occurrences drains bounded pages instead of truncating history"
-          (and (str/includes? fast "(wire/rpc-page-request! 200 cursor)")
-               (str/includes? fast "(t/rpcpageresponse-done page)")
-               (str/includes? fast "(t/rpc-page-response-cursor-value page)"))
+          (and (str/includes? fast "(loop [cursor Any nil]")
+               (str/includes? fast "(host-get (host-get response \"page\") \"done\")")
+               (str/includes? fast "(host-get (host-get response \"page\") \"nextCursor\")"))
           nil)
   (check! "readiness and deep probes speak native version records"
           (and (str/includes? up "native-call!")

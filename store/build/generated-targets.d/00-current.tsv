@@ -1,6 +1,7 @@
 # kind	source	destination
 # Production semantics compile from hosted Beagle. The separate Native Core
 # closure is an explicitly experimental viability path, not a production input.
+beagle	bin/beagle-store-cli.bjs	bin/beagle-store-cli.js
 beagle	src/store/rt_core.bclj	out/store/rt_core.clj
 copy	src/store/rt.clj	out/store/rt.clj
 copy	src/store/kernel_host.clj	out/store/kernel_host.clj

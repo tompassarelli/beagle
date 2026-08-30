@@ -72,7 +72,7 @@ may execute `beagle-store-server` and MCP clients may execute
 | `fram-up` | `beagle-store-up` | checkout supervisor; also `beagle store up` |
 | `fram-selfcheck` | `beagle-store-doctor` | deep store doctor |
 | `fram-selfcheck-probe.clj` | `beagle-store-doctor-probe.clj` | private doctor probe |
-| `fram-fast.clj` | `beagle-store-cli.clj` | private CLI implementation |
+| `fram-fast.clj` | `beagle-store-cli.bjs` → generated `beagle-store-cli.js`; `beagle-store-cli` wrapper | typed private CLI implementation |
 | `fram-native-build` | `beagle-store-native-build` | native artifact builder |
 | `fram-cloudflare-native-image` | `beagle-store-cloudflare-native-image` | Cloudflare native image builder |
 | `fram-code-on` | `beagle-store-code-on` | deep graph-authoring helper; routed as `store code on` |
