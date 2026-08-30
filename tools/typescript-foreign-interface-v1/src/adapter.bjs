@@ -10,63 +10,63 @@
 (defalias ForeignLiteralValueV1 (U String Int Float Bool))
 
 (defrecord TypeParameterV1
-  [(name String)
-   (nodeId String)
-   (constraintNode (U String Nil))
-   (defaultNode (U String Nil))])
+  [name String
+   nodeId String
+   constraintNode (U String Nil)
+   defaultNode (U String Nil)])
 
 (defrecord ParameterV1
-  [(name String)
-   (typeNode String)
-   (optional Bool)
-   (rest Bool)])
+  [name String
+   typeNode String
+   optional Bool
+   rest Bool])
 
 (defrecord SignatureV1
-  [(typeParameters (Vec TypeParameterV1))
-   (parameters (Vec ParameterV1))
-   (returnNode String)])
+  [typeParameters (Vec TypeParameterV1)
+   parameters (Vec ParameterV1)
+   returnNode String])
 
 (defrecord PropertyV1
-  [(name String)
-   (typeNode String)
-   (optional Bool)
-   (readonly Bool)])
+  [name String
+   typeNode String
+   optional Bool
+   readonly Bool])
 
+;; The id is the index key's node id, so the bridge's canonical id sorter
+;; establishes the schema's required index order.
 (defrecord IndexV1
-  ;; The id is the index key's node id, so the bridge's canonical id sorter
-  ;; establishes the schema's required index order.
-  [(id String)
-   (valueNode String)
-   (readonly Bool)])
+  [id String
+   valueNode String
+   readonly Bool])
 
 (defrecord TupleElementV1
-  [(name (U String Nil))
-   (typeNode String)
-   (optional Bool)
-   (rest Bool)])
+  [name (U String Nil)
+   typeNode String
+   optional Bool
+   rest Bool])
 
 (defrecord ObligationSourceV1
-  [(display String)
-   (kind String)])
+  [display String
+   kind String])
 
 (defrecord ObligationV1
-  [(id String)
-   (code String)
-   (message String)
-   (source ObligationSourceV1)])
+  [id String
+   code String
+   message String
+   source ObligationSourceV1])
 
 (defrecord ExportV1
-  [(name String)
-   (space String)
-   (nodeId String)
-   (runtimeName String)])
+  [name String
+   space String
+   nodeId String
+   runtimeName String])
 
 (defrecord StatsV1
-  [(nodeCount Int)
-   (exportCount Int)
-   (obligationCount Int)
-   (anyCount Int)
-   (generatedSourceCount Int)])
+  [nodeCount Int
+   exportCount Int
+   obligationCount Int
+   anyCount Int
+   generatedSourceCount Int])
 
 (defunion ForeignNodeV1
   (PrimitiveNode
@@ -122,19 +122,19 @@
      display String]))
 
 (defrecord BuildStateV1
-  [(seen OpaqueCompilerValueV1)
-   (nodes (Atom (Vec ForeignNodeV1)))
-   (obligations (Atom (Vec ObligationV1)))
-   (nodeCounter (Atom Int))
-   (obligationCounter (Atom Int))])
+  [seen OpaqueCompilerValueV1
+   nodes (Atom (Vec ForeignNodeV1))
+   obligations (Atom (Vec ObligationV1))
+   nodeCounter (Atom Int)
+   obligationCounter (Atom Int)])
 
 (defrecord ForeignInterfaceV1
-  [(moduleSpecifier String)
-   (exports (Vec ExportV1))
-   (nodes (Vec ForeignNodeV1))
-   (obligations (Vec ObligationV1))
-   (provenance WireValueV1)
-   (stats StatsV1)])
+  [moduleSpecifier String
+   exports (Vec ExportV1)
+   nodes (Vec ForeignNodeV1)
+   obligations (Vec ObligationV1)
+   provenance WireValueV1
+   stats StatsV1])
 
 (defn sorted-opaque
   [bridge OpaqueCompilerValueV1
@@ -166,8 +166,7 @@
    values (Vec ExportV1)] (Vec ExportV1)
   (.sort bridge values))
 
-(defn empty-build-state
-  [bridge OpaqueCompilerValueV1] BuildStateV1
+(defn empty-build-state [bridge OpaqueCompilerValueV1] BuildStateV1
   (->BuildStateV1
     (.weakMap bridge)
     (atom [])
@@ -278,8 +277,7 @@
    code String] ForeignNodeV1
   (let [obligation-id String (next-obligation-id! bridge state)
         display String (.typeDisplay bridge type)
-        obligation ObligationV1
-        (->ObligationV1
+        obligation ObligationV1 (->ObligationV1
           obligation-id
           code
           (str "TypeScript type requires a lazy foreign obligation: " display)
@@ -297,8 +295,7 @@
    state BuildStateV1
    id String
    type OpaqueCompilerValueV1] ForeignNodeV1
-  (let [properties OpaqueCompilerValueV1
-        (sorted-opaque bridge (.propertiesOfType bridge type))]
+  (let [properties OpaqueCompilerValueV1 (sorted-opaque bridge (.propertiesOfType bridge type))]
     (->ObjectNode
       id
       (.typeName bridge type)
@@ -453,8 +450,7 @@
 ;; Raw JavaScript object construction is intentionally confined to this
 ;; explicit projection boundary.  The wire keys stay visible and reviewable.
 
-(defn object
-  [entries (Vec (Vec WireValueV1))] WireValueV1
+(defn object [entries (Vec (Vec WireValueV1))] WireValueV1
   (.fromEntries Object entries))
 
 (defn object-with-optional
@@ -466,24 +462,21 @@
       (conj entries [key value])
       entries)))
 
-(defn type-parameter->wire
-  [value TypeParameterV1] WireValueV1
+(defn type-parameter->wire [value TypeParameterV1] WireValueV1
   (object
     [["name" (typeparameterv1-name value)]
      ["node" (typeparameterv1-nodeId value)]
      ["constraint" (typeparameterv1-constraintNode value)]
      ["default" (typeparameterv1-defaultNode value)]]))
 
-(defn parameter->wire
-  [value ParameterV1] WireValueV1
+(defn parameter->wire [value ParameterV1] WireValueV1
   (object
     [["name" (parameterv1-name value)]
      ["type" (parameterv1-typeNode value)]
      ["optional" (parameterv1-optional value)]
      ["rest" (parameterv1-rest value)]]))
 
-(defn signature->wire
-  [value SignatureV1] WireValueV1
+(defn signature->wire [value SignatureV1] WireValueV1
   (object
     [["typeParameters"
       (mapv type-parameter->wire (signaturev1-typeParameters value))]
@@ -491,23 +484,20 @@
       (mapv parameter->wire (signaturev1-parameters value))]
      ["return" (signaturev1-returnNode value)]]))
 
-(defn property->wire
-  [value PropertyV1] WireValueV1
+(defn property->wire [value PropertyV1] WireValueV1
   (object
     [["name" (propertyv1-name value)]
      ["type" (propertyv1-typeNode value)]
      ["optional" (propertyv1-optional value)]
      ["readonly" (propertyv1-readonly value)]]))
 
-(defn index->wire
-  [value IndexV1] WireValueV1
+(defn index->wire [value IndexV1] WireValueV1
   (object
     [["key" (indexv1-id value)]
      ["value" (indexv1-valueNode value)]
      ["readonly" (indexv1-readonly value)]]))
 
-(defn tuple-element->wire
-  [value TupleElementV1] WireValueV1
+(defn tuple-element->wire [value TupleElementV1] WireValueV1
   (object-with-optional
     [["type" (tupleelementv1-typeNode value)]
      ["optional" (tupleelementv1-optional value)]
@@ -515,30 +505,26 @@
     "name"
     (tupleelementv1-name value)))
 
-(defn obligation-source->wire
-  [value ObligationSourceV1] WireValueV1
+(defn obligation-source->wire [value ObligationSourceV1] WireValueV1
   (object
     [["display" (obligationsourcev1-display value)]
      ["kind" (obligationsourcev1-kind value)]]))
 
-(defn obligation->wire
-  [value ObligationV1] WireValueV1
+(defn obligation->wire [value ObligationV1] WireValueV1
   (object
     [["id" (obligationv1-id value)]
      ["code" (obligationv1-code value)]
      ["message" (obligationv1-message value)]
      ["source" (obligation-source->wire (obligationv1-source value))]]))
 
-(defn export->wire
-  [value ExportV1] WireValueV1
+(defn export->wire [value ExportV1] WireValueV1
   (object
     [["name" (exportv1-name value)]
      ["space" (exportv1-space value)]
      ["node" (exportv1-nodeId value)]
      ["runtimeName" (exportv1-runtimeName value)]]))
 
-(defn stats->wire
-  [value StatsV1] WireValueV1
+(defn stats->wire [value StatsV1] WireValueV1
   (object
     [["nodeCount" (statsv1-nodeCount value)]
      ["exportCount" (statsv1-exportCount value)]
@@ -546,8 +532,7 @@
      ["anyCount" (statsv1-anyCount value)]
      ["generatedSourceCount" (statsv1-generatedSourceCount value)]]))
 
-(defn node->wire
-  [node ForeignNodeV1] WireValueV1
+(defn node->wire [node ForeignNodeV1] WireValueV1
   (match node
     [(PrimitiveNode id name)
      (object [["id" id]
@@ -637,8 +622,7 @@
               ["obligationId" obligation-id]
               ["display" display]])]))
 
-(defn interface->wire
-  [value ForeignInterfaceV1] WireValueV1
+(defn interface->wire [value ForeignInterfaceV1] WireValueV1
   (object
     [["kind" "ForeignInterfaceV1"]
      ["schemaVersion" 1]
@@ -660,19 +644,15 @@
      module-specifier String
      conditions (Vec String)] WireValueV1
     (let [state BuildStateV1 (empty-build-state bridge)
-          exports (Vec ExportV1)
-          (sorted-exports
+          exports (Vec ExportV1) (sorted-exports
             bridge
             (mapv
               (fn [exported-symbol OpaqueCompilerValueV1] ExportV1
                 (export-node! bridge state exported-symbol))
               (sorted-opaque bridge (.moduleExports bridge context))))
-          nodes (Vec ForeignNodeV1)
-          (sorted-nodes bridge (deref (buildstatev1-nodes state)))
-          obligations (Vec ObligationV1)
-          (sorted-obligations bridge (deref (buildstatev1-obligations state)))
-          stats StatsV1
-          (->StatsV1
+          nodes (Vec ForeignNodeV1) (sorted-nodes bridge (deref (buildstatev1-nodes state)))
+          obligations (Vec ObligationV1) (sorted-obligations bridge (deref (buildstatev1-obligations state)))
+          stats StatsV1 (->StatsV1
             (count nodes)
             (count exports)
             (count obligations)

@@ -381,7 +381,9 @@
 (defn- max-fn-placeholder-index [datum Any] Int
   (if (and (vector? datum) (not (inert-literal-datum? datum)))
     (reduce
-      (fn [best Int child Any] Int
+      (fn
+        [best Int
+         child Any] Int
         (max best (max-fn-placeholder-index child)))
       0
       datum)
@@ -390,7 +392,9 @@
 (defn- fn-rest-placeholder? [datum Any] Bool
   (if (and (vector? datum) (not (inert-literal-datum? datum)))
     (reduce
-      (fn [found Bool child Any] Bool
+      (fn
+        [found Bool
+         child Any] Bool
         (or found (fn-rest-placeholder? child)))
       false
       datum)
