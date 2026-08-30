@@ -296,6 +296,16 @@
   (let [tag (clj-tag-for-type t)]
     (if (nil? tag) "" (str "^" tag " "))))
 
+;; A comparison or boolean connective compiles to a primitive boolean. Clojure
+;; rejects ^Boolean metadata on a local initialized by that expression, so the
+;; local-binding boundary alone omits that otherwise useful boxed hint.
+(defn clj-let-tag-prefix [t Any] String
+  (if (and (map? t)
+        (= (get t "kind") "prim")
+        (= (get t "name") "Bool"))
+    ""
+    (clj-tag-prefix t)))
+
 ;; --- params / binding names ----------------------------------------------------
 
 (defn param-binding-target [p Any] Any
@@ -353,6 +363,11 @@
 ;; binding context (let / loop / binding / with-open / for :let).
 (defn emit-binding-target! [target Any] String
   (emit-binding-form (param-binding-target target)))
+
+(defn let-binding-tag-prefix [binding Any] String
+  (if (string? (get binding "name"))
+    (clj-let-tag-prefix (get binding "ann"))
+    ""))
 
 ;; --- binding constraints ---------------------------------------------------
 
@@ -530,7 +545,8 @@
       (if (>= index (count bindings))
         acc
         (let [b (nth bindings index)
-              target (emit-binding-target! (get b "name"))
+              target (str (let-binding-tag-prefix b)
+                       (emit-binding-target! (get b "name")))
               value (emit-expr* (get b "value"))]
           (if (constraint-present? b)
             (let [raw-name (str "$beagle$constraint$raw-binding$" index)
@@ -550,7 +566,8 @@
   (if (= 0 (count bindings))
     body-str
     (let [b (nth bindings 0)
-          target (emit-binding-target! (get b "name"))
+          target (str (let-binding-tag-prefix b)
+                   (emit-binding-target! (get b "name")))
           value (emit-expr* (get b "value"))
           inner (emit-with-open-chain! (subvec (vec bindings) 1) body-str (+ index 1))]
       (if (constraint-present? b)
@@ -2117,6 +2134,21 @@
          [{"name" {"type" "map-destructure" "keys" ["id" "b"] "as" false}
            "value" {"node" "ref" "name" "m"}}])
        "{:keys [id b]} m"))
+  (expect! "let-bindings: typed identifier emits the oracle local hint"
+    (= (emit-let-bindings!
+         [{"name" "text"
+           "ann" {"kind" "prim" "name" "String"}
+           "value" {"node" "ref" "name" "source"}}])
+       "^String text source"))
+  (expect! "let-bindings: primitive Bool initializer omits boxed local hint"
+    (= (emit-let-bindings!
+         [{"name" "inside"
+           "ann" {"kind" "prim" "name" "Bool"}
+           "value" {"node" "call"
+                    "fn" {"node" "ref" "name" "<"}
+                    "args" [{"node" "ref" "name" "value"}
+                            {"node" "literal" "kind" "number" "value" 2}]}}])
+       "inside (< value 2)"))
 
   (expect! "constrained callable captures predicate before authored binder"
     (let [output (emit-expr!
