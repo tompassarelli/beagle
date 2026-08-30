@@ -768,7 +768,8 @@
     [(legacy) (= (length datum) 3)]
     [(legacy-rest) (= (length (cadr datum)) 3)]
     [(legacy-triple)
-     (and (list? (car datum)) (= (length (car datum)) 3))]
+     (and (structured-binding? (car datum))
+          (= (length (car datum)) 3))]
     [else #f]))
 
 (define (canonical-entry-text tokens entry start end col [suffix-width 0])
@@ -811,6 +812,13 @@
                         (syntax-end-offset (caddr source-stxs) tokens)))]
     [else inline]))
 
+(define (canonical-gap-text tokens start end fallback)
+  ;; Comments own their surrounding physical gap. Preserve those bytes in
+  ;; place while the formatter canonicalizes the adjacent grammar entries.
+  (if (comment-in-range? tokens start end)
+      (fragment->source tokens start end)
+      fallback))
+
 (define (canonical-vector-text tokens open close entries continuation-col
                                vertical?)
   (define open-end (token-end open))
@@ -819,6 +827,9 @@
   (cond
     [(null? starts) "[]"]
     [else
+     (define ends
+       (for/list ([entry (in-list entries)])
+         (syntax-end-offset entry tokens)))
      (define fragments
        (for/list ([entry (in-list entries)]
                   [index (in-naturals)])
@@ -828,14 +839,24 @@
           (if (= index (sub1 (length entries)))
               (string-length (token-text close))
               0))))
-     (if vertical?
-         (string-append
-          "[" (car fragments)
-          (apply string-append
-                 (for/list ([fragment (in-list (cdr fragments))])
-                   (string-append "\n" (make-string continuation-col #\space) fragment)))
-          "]")
-         (string-append "[" (string-join fragments " ") "]"))]))
+     (define entry-separator
+       (if vertical?
+           (string-append "\n" (make-string continuation-col #\space))
+           " "))
+     (define separators
+       (for/list ([left-end (in-list ends)]
+                  [right-start (in-list (cdr starts))])
+         (canonical-gap-text tokens left-end right-start entry-separator)))
+     (string-append
+      "["
+      (canonical-gap-text tokens open-end (car starts) "")
+      (car fragments)
+      (apply string-append
+             (for/list ([separator (in-list separators)]
+                        [fragment (in-list (cdr fragments))])
+               (string-append separator fragment)))
+      (canonical-gap-text tokens (last ends) close-start "")
+      "]")]))
 
 (define (expression-end-offset tokens tok)
   (cond
@@ -968,6 +989,16 @@
       (next-significant-token tokens signature-end))
     (define body?
       (and after-signature (not (closer? after-signature))))
+    (define expanded-body-gap
+      (and (eq? layout 'expanded)
+           body?
+           (substring source signature-end (token-offset after-signature))))
+    (define expanded-body-separator
+      (cond
+        [(not expanded-body-gap) ""]
+        [(comment-in-range? tokens signature-end (token-offset after-signature))
+         expanded-body-gap]
+        [else (string-append "\n" (make-string body-col #\space))]))
     (define region-end
       (if (and (eq? layout 'expanded) body?)
           (token-offset after-signature)
@@ -983,7 +1014,7 @@
        (cond
          [(not return-slot?)
           (if (and (eq? layout 'expanded) body?)
-              (string-append "\n" (make-string body-col #\space))
+              expanded-body-separator
               "")]
          [else
           (string-append
@@ -996,7 +1027,9 @@
            (if (and body?
                     (or (eq? layout 'expanded)
                         (pair? qualification-fragments)))
-               (string-append "\n" (make-string body-col #\space))
+               (if (eq? layout 'expanded)
+                   expanded-body-separator
+                   (string-append "\n" (make-string body-col #\space)))
                ""))])))
     (define before (substring source region-start region-end))
     (unless (string=? before replacement)

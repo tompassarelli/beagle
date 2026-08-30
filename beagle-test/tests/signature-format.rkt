@@ -397,8 +397,66 @@
    (lambda (path)
      (check-equal? (format-signature-files 'write (list path)) 0)
      (check-true
-      (string-contains? (file->string path) ";; keep runtime ownership"))
+     (string-contains? (file->string path) ";; keep runtime ownership"))
      (check-equal? (format-signature-files 'check (list path)) 0))))
+
+(test-case "map destructuring is not a legacy refinement"
+  (define source
+    (string-append
+     "(let [{:keys [process-outcome delivery-outcome]} (terminal-state facts) "
+     "task (task-of facts)] task)\n"))
+  (with-source
+   source
+   (lambda (path)
+     (check-equal? (format-signature-files 'write (list path)) 0)
+     (check-equal? (format-signature-files 'check (list path)) 0)
+     (check-equal?
+      (file->string path)
+      (string-append
+       "(let [{:keys [process-outcome delivery-outcome]} (terminal-state facts)\n"
+       "      task (task-of facts)]\n"
+       "  task)\n")))))
+
+(test-case "comments between a binding vector and body survive one write"
+  (define source
+    (string-append
+     "(let [provider-axis (provider-target-label facts) composition "
+     "(orchestration-provenance facts)]\n"
+     "  ;; the visible identity is derived on every read\n"
+     "  (str provider-axis composition))\n"))
+  (with-source
+   source
+   (lambda (path)
+     (check-equal? (format-signature-files 'write (list path)) 0)
+     (check-equal? (format-signature-files 'check (list path)) 0)
+     (check-equal?
+      (file->string path)
+      (string-append
+       "(let [provider-axis (provider-target-label facts)\n"
+       "      composition (orchestration-provenance facts)]\n"
+       "  ;; the visible identity is derived on every read\n"
+       "  (str provider-axis composition))\n")))))
+
+(test-case "comments between local bindings survive one write"
+  (define source
+    (string-append
+     "(let [first (first-value) _ (when first (use first))\n"
+     "      ;; preserve the gate attached to the following binding\n"
+     "      second (second-value) third (third-value)] third)\n"))
+  (with-source
+   source
+   (lambda (path)
+     (check-equal? (format-signature-files 'write (list path)) 0)
+     (check-equal? (format-signature-files 'check (list path)) 0)
+     (check-equal?
+      (file->string path)
+      (string-append
+       "(let [first (first-value)\n"
+       "      _ (when first (use first))\n"
+       "      ;; preserve the gate attached to the following binding\n"
+       "      second (second-value)\n"
+       "      third (third-value)]\n"
+       "  third)\n")))))
 
 (test-case "one write reaches the canonical fixed point"
   (define source "(defn add [(x Int) (y Int)] Int (+ x y))\n")
