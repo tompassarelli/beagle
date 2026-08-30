@@ -3149,6 +3149,12 @@
   (expect! "call: wrong arity" (let [prog {"namespace" "test" "target" "js" "forms" [(make-def-node "r" nil (make-call "add" [(make-lit "number" 1)]))] "externs" [{"name" "add" "type" (make-fn [(make-prim "Int") (make-prim "Int")] nil (make-prim "Int"))}] "requires" []}
    result (type-check! prog)]
   (> (get result "count") 0)))
+  (expect! "stdlib call: into accepts transducer collection arity" (let [prog (make-prog [(make-def-node "r" ANY (make-call "into" [(make-lit "string" "target") (make-lit "string" "transducer") (make-lit "string" "collection")]))])
+   result (type-check! prog)]
+  (= (get result "count") 0)))
+  (expect! "stdlib call: chained <= accepts trailing numeric arguments" (let [prog (make-prog [(make-def-node "r" nil (make-call "<=" [(make-lit "float" 0.0) (make-lit "float" 0.5) (make-lit "float" 1.0)]))])
+   result (type-check! prog)]
+  (= (get result "count") 0)))
   (expect! "buffer primitive: double-array wrong arity" (let [prog (assoc (make-prog [(make-def-node "r" nil (make-call "double-array" []))]) "target" "core")]
   (> (get (type-check! prog) "count") 0)))
   (expect! "buffer primitive: alength wrong arity" (let [prog (assoc (make-prog [(make-def-node "r" nil (make-call "alength" []))]) "target" "core")]

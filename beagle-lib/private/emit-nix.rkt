@@ -1544,12 +1544,9 @@
   ;; inferred types, or source blame (notably a record-update validator nested
   ;; beneath nix/with-cfg).
   (define (preserve-metadata old new)
-    (when (and semantic-contracts (hash-has-key? semantic-contracts old))
-      (for ([contract
-             (in-list
-              (semantic-contract-entry-values
-               (hash-ref semantic-contracts old)))])
-        (semantic-contract-add! semantic-contracts new contract)))
+    (when semantic-contracts
+      (for ([contract (in-list (semantic-contracts-at semantic-contracts old))])
+        (semantic-contract-set! semantic-contracts new contract)))
     (for ([table (in-list (list type-table src-table))]
           #:when (and table (hash-has-key? table old)))
       (hash-set! table new (hash-ref table old)))

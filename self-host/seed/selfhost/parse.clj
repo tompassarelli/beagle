@@ -221,6 +221,8 @@
 
 (def PARAMETRIC-CTORS ["Vec" "List" "Set" "Map" "Promise" "NixType" "Arr" "Ptr" "Atom" "HVec" "Regex" "Buffer" "JsMap"])
 
+(def BUILTIN-PARAMETRIC-APPLICATION-ARITIES {"Regex" 1 "Buffer" 1 "JsMap" 2})
+
 (def CLJ-ALIASES {"Long" "Int" "Double" "Float" "Boolean" "Bool" "Integer" "Int"})
 
 (def SCALAR-BACKING-PRIMITIVES #{"String" "Int" "Float" "Bool" "Keyword" "Symbol" "Nil" "Any" "Regex" "NixType" "U8" "U16" "U32" "U64" "I8" "I16" "I32" "F32"})
@@ -320,10 +322,7 @@
   (and (vector? t) (> (count t) 1) (= (nth t 0) "U")) (make-union (mapv parse-type! (subvec t 1)))
   (and (vector? t) (> (count t) 0) (= (nth t 0) "Dyn")) (make-app "Dyn" (mapv parse-type! (subvec t 1)))
   (and (vector? t) (> (count t) 0) (string? (nth t 0)) (or (has-item? PARAMETRIC-CTORS (nth t 0)) (some? (get (deref USER-PARAMETRIC-ARITIES) (nth t 0))))) (let [name (nth t 0)
-   expected (or (get (deref USER-PARAMETRIC-ARITIES) name) (cond
-  (= name "Buffer") 1
-  (= name "JsMap") 2
-  :else nil))
+   expected (or (get (deref USER-PARAMETRIC-ARITIES) name) (get BUILTIN-PARAMETRIC-APPLICATION-ARITIES name))
    actual (- (count t) 1)]
   (if (and (some? expected) (not (= expected actual))) (do
   (type-arity-error! name expected actual)
@@ -2978,7 +2977,15 @@
   (and (= (get t "kind") "fn") (= (count (get t "params")) 1))))
   (expect! "parse-type! Vec app" (let [t (parse-type! ["Vec" "String"])]
   (and (= (get t "kind") "app") (= (get t "name") "Vec"))))
-  (expect! "parse-type! shaped Regex app" (= (parse-type! ["Regex" ["HVec" "String" "String"]]) {"kind" "app" "name" "Regex" "args" [{"kind" "app" "name" "HVec" "args" [{"kind" "prim" "name" "String"} {"kind" "prim" "name" "String"}]}]}))
+  (expect! "parse-type! Regex keeps its scalar form" (= (parse-type! "Regex") {"kind" "prim" "name" "Regex"}))
+  (expect! "parse-type! Regex carries one exact HVec match shape" (do
+  (reset-errors!)
+  (let [t (parse-type! ["Regex" ["HVec" "String" "String"]])]
+  (and (= (count (parse-errors)) 0) (= t {"kind" "app" "name" "Regex" "args" [{"kind" "app" "name" "HVec" "args" [{"kind" "prim" "name" "String"} {"kind" "prim" "name" "String"}]}]})))))
+  (expect! "parse-type! Regex rejects a two-argument application" (do
+  (reset-errors!)
+  (parse-type! ["Regex" "String" "String"])
+  (and (= (count (parse-errors)) 1) (str/includes? (nth (parse-errors) 0) "type Regex expects 1 argument, got 2"))))
   (expect! "parse-type! Dyn preserves ordered alternatives" (= (parse-type! ["Dyn" "String" "Int"]) {"kind" "app" "name" "Dyn" "args" [{"kind" "prim" "name" "String"} {"kind" "prim" "name" "Int"}]}))
   (expect! "parse-type! Buffer exact arity" (let [t (parse-type! ["Buffer" "Float"])]
   (and (= (get t "kind") "app") (= (get t "name") "Buffer") (= (count (get t "args")) 1))))
