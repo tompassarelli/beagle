@@ -1,0 +1,272 @@
+#!/usr/bin/env bun
+
+import { readFileSync, writeFileSync } from "node:fs";
+
+function readText(path) {
+  return readFileSync(path, "utf8");
+}
+
+function readProperties(path) {
+  const result = {};
+  for (const line of readText(path).split("\n")) {
+    if (line.length === 0) continue;
+    const tab = line.indexOf("\t");
+    if (tab < 1) throw new Error(`invalid fact row: ${line}`);
+    result[line.slice(0, tab)] = line.slice(tab + 1);
+  }
+  return result;
+}
+
+function integer(properties, name) {
+  const value = properties[name];
+  if (value === undefined || !/^-?[0-9]+$/.test(value)) {
+    throw new Error(`missing or invalid integer fact: ${name}`);
+  }
+  const number = Number(value);
+  if (!Number.isSafeInteger(number)) {
+    throw new Error(`integer fact is outside the exact JSON range: ${name}`);
+  }
+  return number;
+}
+
+function optionalInteger(properties, name) {
+  return properties[name] === undefined || properties[name] === ""
+    ? null
+    : integer(properties, name);
+}
+
+function json(path) {
+  return JSON.parse(readText(path));
+}
+
+function percentile(values, fraction) {
+  if (values.length === 0) return 0;
+  const sorted = values.toSorted((left, right) => left - right);
+  const index = Math.min(sorted.length - 1,
+    Math.floor(fraction * sorted.length));
+  return sorted[index];
+}
+
+function gcFacts(paths, wallMs) {
+  const pauses = [];
+  let fullGcCount = 0;
+  for (const path of paths) {
+    for (const line of readText(path).split("\n")) {
+      if (!line.includes("Pause")) continue;
+      const match = line.match(/([0-9]+(?:\.[0-9]+)?)ms\s*$/);
+      if (match) pauses.push(Number(match[1]));
+      if (line.includes("Pause Full") || line.includes("Full GC")) {
+        fullGcCount += 1;
+      }
+    }
+  }
+  const pauseWallMs = pauses.reduce((sum, value) => sum + value, 0);
+  return {
+    pauseCount: pauses.length,
+    pauseWallMs,
+    pauseWallShare: wallMs > 0 ? pauseWallMs / wallMs : 0,
+    pauseP99Ms: percentile(pauses, 0.99),
+    fullGcCount,
+  };
+}
+
+const [propertiesPath, outputPath] = process.argv.slice(2);
+if (!propertiesPath || !outputPath) {
+  throw new Error("usage: report.bjs FACTS.tsv OUTPUT.jsonl");
+}
+
+const facts = readProperties(propertiesPath);
+const seed = json(facts.seed_result);
+const initialVerify = json(facts.initial_verify_result);
+const checkpoint = json(facts.checkpoint_result);
+const coldVerify = json(facts.cold_verify_result);
+const warmVerify = json(facts.warm_verify_result);
+const agent = json(facts.agent_result);
+const finalVerify = json(facts.final_verify_result);
+const steadyWallMs = integer(facts, "idle_wall_ms") +
+  integer(facts, "agent_wall_ms");
+const totalGc = gcFacts([
+  facts.load_gc_log,
+  facts.cold_gc_log,
+  facts.warm_gc_log,
+], integer(facts, "total_server_wall_ms"));
+const steadyGc = gcFacts([facts.steady_gc_log], steadyWallMs);
+const expectedTriples = integer(facts, "triple_count");
+const observedDigests = [
+  seed.logicalDigest,
+  initialVerify.logicalDigest,
+  coldVerify.logicalDigest,
+  warmVerify.logicalDigest,
+  finalVerify.logicalDigest,
+];
+const digestMatch = observedDigests.every((value) => value === seed.logicalDigest);
+const observedCounts = [
+  initialVerify.observed,
+  coldVerify.observed,
+  warmVerify.observed,
+  finalVerify.observed,
+];
+const countMatch = observedCounts.every((value) => value === expectedTriples);
+const oomKills = integer(facts, "cgroup_oom_kills");
+const swapPeakBytes = integer(facts, "cgroup_swap_peak_bytes");
+const fatalConditions = [];
+if (!digestMatch) fatalConditions.push("logical-digest-mismatch");
+if (!countMatch) fatalConditions.push("logical-count-mismatch");
+if (agent.errors !== 0) fatalConditions.push("agent-errors");
+if (agent.connections !== 32 || agent.maxActive > 8) {
+  fatalConditions.push("agent-shape-violation");
+}
+if (![initialVerify, coldVerify, warmVerify, finalVerify]
+    .every((value) => value.validationValid && value.validationViolations === 0)) {
+  fatalConditions.push("validation-or-corruption-failure");
+}
+if (oomKills !== 0) fatalConditions.push("cgroup-oom-kill");
+if (swapPeakBytes !== 0) fatalConditions.push("swap-use");
+if (integer(facts, "unexpected_server_exits") !== 0) {
+  fatalConditions.push("unexpected-server-exit");
+}
+
+const receipt = {
+  schema: "beagle-store-resource/v1",
+  startedUtc: facts.started_utc,
+  endedUtc: facts.ended_utc,
+  input: {
+    sourceRevision: facts.source_revision || null,
+    sourceDirty: facts.source_dirty === "1",
+    sourceStatusSha256: facts.source_status_sha256 || null,
+    artifactSha256: facts.artifact_sha256,
+    artifactManifestSha256: facts.artifact_manifest_sha256,
+    storeHome: facts.store_home,
+    classpathSha256: facts.classpath_sha256,
+    classpathIdentitySha256: facts.classpath_identity_sha256,
+    java: {
+      path: facts.java_path,
+      realPath: facts.java_real_path,
+      executableSha256: facts.java_sha256,
+      settingsSha256: facts.java_settings_sha256,
+      version: facts.java_version,
+      heapMaxBytes: integer(facts, "heap_max_bytes"),
+      collector: "G1",
+      forcedRegionSize: false,
+    },
+    host: {
+      kernel: facts.kernel,
+      architecture: facts.architecture,
+      logicalCpus: integer(facts, "logical_cpus"),
+      memoryTotalBytes: integer(facts, "memory_total_bytes"),
+    },
+    cgroup: {
+      version: 2,
+      parent: facts.cgroup_parent,
+      path: facts.cgroup_path,
+      memoryMaxBytes: integer(facts, "cgroup_memory_max_bytes"),
+      memorySwapMaxBytes: integer(facts, "cgroup_swap_max_bytes"),
+      parentMemoryMax: facts.cgroup_parent_memory_max,
+      cpuMax: facts.cgroup_cpu_max,
+      cpusEffective: facts.cgroup_cpus_effective,
+    },
+  },
+  corpus: {
+    liveTriples: expectedTriples,
+    generator: "beagle-store-resource-corpus/v1",
+    logicalDigestSha256: seed.logicalDigest,
+    seedWorkers: seed.workers,
+    seedBatchSize: seed.batchSize,
+  },
+  phases: {
+    load: {
+      wallMs: integer(facts, "load_wall_ms"),
+      processTreeCpuMs: integer(facts, "load_cpu_usec") / 1000,
+      acknowledgedTriples: seed.acknowledged,
+      verify: initialVerify,
+    },
+    checkpoint: {
+      wallMs: integer(facts, "checkpoint_wall_ms"),
+      processTreeCpuMs: integer(facts, "checkpoint_cpu_usec") / 1000,
+      ...checkpoint,
+    },
+    coldRestart: {
+      checkpointUsed: false,
+      replayedLogBytes: integer(facts, "log_logical_bytes"),
+      readyWallMs: integer(facts, "cold_ready_wall_ms"),
+      processTreeCpuMs: integer(facts, "cold_ready_cpu_usec") / 1000,
+      verify: coldVerify,
+    },
+    warmRestart: {
+      checkpointUsed: true,
+      checkpointBytes: integer(facts, "snapshot_logical_bytes"),
+      readyWallMs: integer(facts, "warm_ready_wall_ms"),
+      processTreeCpuMs: integer(facts, "warm_ready_cpu_usec") / 1000,
+      verify: warmVerify,
+    },
+    idle: {
+      wallMs: integer(facts, "idle_wall_ms"),
+      processTreeCpuMs: integer(facts, "idle_cpu_usec") / 1000,
+      oneLogicalCpuPercent:
+        integer(facts, "idle_cpu_usec") /
+        (integer(facts, "idle_wall_ms") * 1000) * 100,
+    },
+    agent: {
+      wallMs: integer(facts, "agent_wall_ms"),
+      processTreeCpuMs: integer(facts, "agent_cpu_usec") / 1000,
+      ...agent,
+    },
+    finalVerify,
+  },
+  resources: {
+    processTreeCpuTimeMs: integer(facts, "total_cpu_usec") / 1000,
+    postExplicitFullGc: {
+      heapUsedBytes: integer(facts, "post_gc_heap_used_bytes"),
+      rssBytes: integer(facts, "post_gc_rss_bytes"),
+      pssBytes: integer(facts, "post_gc_pss_bytes"),
+      filePssBytes: integer(facts, "post_gc_file_pss_bytes"),
+      anonymousBytes: integer(facts, "post_gc_anon_bytes"),
+      swapBytes: integer(facts, "post_gc_swap_bytes"),
+      mappedFileResidentBytes: integer(facts, "post_gc_file_mapped_bytes"),
+    },
+    peak: {
+      rssBytes: integer(facts, "peak_rss_bytes"),
+      cgroupChargedBytes: integer(facts, "cgroup_memory_peak_bytes"),
+    },
+    disk: {
+      logLogicalBytes: integer(facts, "log_logical_bytes"),
+      logAllocatedBytes: integer(facts, "log_allocated_bytes"),
+      snapshotLogicalBytes: integer(facts, "snapshot_logical_bytes"),
+      snapshotAllocatedBytes: integer(facts, "snapshot_allocated_bytes"),
+      logicalBytesPerLiveTriple:
+        (integer(facts, "log_logical_bytes") +
+         integer(facts, "snapshot_logical_bytes")) / expectedTriples,
+      allocatedBytesPerLiveTriple:
+        (integer(facts, "log_allocated_bytes") +
+         integer(facts, "snapshot_allocated_bytes")) / expectedTriples,
+    },
+    gc: {
+      total: totalGc,
+      steadyAfterExplicitGc: steadyGc,
+    },
+  },
+  verdictInputs: {
+    expectedLiveTriples: expectedTriples,
+    observedLiveTripleCounts: observedCounts,
+    logicalDigestMatch: digestMatch,
+    validationValid: fatalConditions.every((value) =>
+      value !== "validation-or-corruption-failure"),
+    adapterErrors: agent.errors,
+    cgroupOomKills: oomKills,
+    cgroupSwapPeakBytes: swapPeakBytes,
+    unexpectedServerExits: integer(facts, "unexpected_server_exits"),
+    connections: agent.connections,
+    maximumActiveClients: agent.maxActive,
+    fatalConditions,
+  },
+  evidenceDirectory: facts.evidence_directory,
+};
+
+writeFileSync(outputPath, `${JSON.stringify(receipt)}\n`);
+process.stderr.write(
+  `store-resource: triples=${expectedTriples} digest-match=${digestMatch} ` +
+  `errors=${agent.errors} rss-peak=${receipt.resources.peak.rssBytes} ` +
+  `post-gc-heap=${receipt.resources.postExplicitFullGc.heapUsedBytes} ` +
+  `steady-full-gc=${steadyGc.fullGcCount} evidence=${facts.evidence_directory}\n`,
+);
+if (fatalConditions.length > 0) process.exit(1);
