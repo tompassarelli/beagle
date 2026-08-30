@@ -36,12 +36,12 @@
    #:capture-types? #t)
   (emit-program prog))
 
-(define (run-clj-test beagle-forms assertions-clj)
+(define (run-clj-test beagle-forms assertions-clj #:prefix-clj [prefix-clj ""])
   (define raw-clj
     (clj-emit (append (list '(ns test.clj-behavioral))
                       beagle-forms)))
   (define clj-code
-    (string-append raw-clj "\n\n" assertions-clj "\n"))
+    (string-append prefix-clj raw-clj "\n\n" assertions-clj "\n"))
   (define tmp (make-temporary-file "beagle-clj-test-~a.clj"))
   (dynamic-wind
     void
@@ -530,6 +530,24 @@
               (binding [*a* Int 10 *b* Int 20] (+ *a* *b*))))
      "(println (combine))"
      "30")
+
+   (test-case "declared external ^:dynamic var binds within extent then reverts"
+     (define-values (code out err clj)
+       (run-clj-test
+        (list
+         '(declare-extern (#%meta :dynamic external.state/*value*) Int)
+         '(defn external-value [] Int external.state/*value*)
+         '(defn bound-external-value [] Int
+            (binding [external.state/*value* Int 7]
+              external.state/*value*)))
+        "(println [(external-value) (bound-external-value) (external-value)])"
+        #:prefix-clj
+        "(ns external.state)\n(def ^:dynamic *value* 1)\n\n"))
+     (check-equal? code 0
+                   (format "exit ~a\n--- stderr ---\n~a\n--- clj ---\n~a"
+                           code err clj))
+     (check-equal? (string-trim out) "[1 7 1]"
+                   (format "wrong output\n--- clj ---\n~a" clj)))
 
    ;; --- structural binding constraints ------------------------------------
 

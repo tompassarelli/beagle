@@ -883,6 +883,7 @@
   (expect! "if: else-less encodes 2-arity" (= (emit-expr! {"node" "if" "cond" {"node" "ref" "name" "p"} "then" {"node" "ref" "name" "t"} "else" {"node" "literal" "kind" "bool" "value" false}}) "(if p t)"))
   (expect! "call: keyword access in function position" (= (emit-expr! {"node" "call" "fn" {"node" "kw-access" "kw" ":k" "target" {"node" "ref" "name" "m"} "default" false} "args" []}) "((:k m))"))
   (expect! "def: dynamic metadata survives emission" (= (emit-expr! {"node" "def" "name" "*arity-check?*" "ann" {"kind" "prim" "name" "Bool"} "doc" false "dynamic" true "value" {"node" "literal" "kind" "bool" "value" true}}) "(def ^:dynamic ^Boolean *arity-check?* true)"))
+  (expect! "binding: qualified external target emits as real Clojure binding" (= (emit-expr! {"node" "binding" "bindings" [{"name" "external.state/*value*" "ann" {"kind" "prim" "name" "Int"} "constraint" nil "value" {"node" "literal" "kind" "number" "value" 7}}] "body" [{"node" "ref" "qualifier" "external.state" "name" "*value*" "providerId" nil}]}) "(binding [external.state/*value* 7]\n  external.state/*value*)"))
   (expect! "match temps deterministic" (do
   (reset! match-counter 0)
   (= (fresh-match-sym!) "match__0")))

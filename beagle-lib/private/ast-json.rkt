@@ -8,6 +8,7 @@
 
 (require racket/match
          racket/list
+         racket/set
          racket/string
          racket/format
          json
@@ -1047,9 +1048,13 @@
             (for/list ([name (in-list
                               (sort (hash-keys (program-externs prog))
                                     symbol<?))])
-              (hasheq 'name (symbol->string name)
-                      'type (type->json
-                             (hash-ref (program-externs prog) name))))
+              (define entry
+                (hasheq 'name (symbol->string name)
+                        'type (type->json
+                               (hash-ref (program-externs prog) name))))
+              (if (set-member? (program-external-dynamic-vars prog) name)
+                  (hash-set entry 'dynamic #t)
+                  entry))
             'forms (map expr->json (program-forms prog)))))
 
 (define (program->json-string prog)

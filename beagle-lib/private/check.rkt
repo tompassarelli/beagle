@@ -2480,11 +2480,10 @@
                         *source-path* *clojure-version* *agent*))])
       (set-add! dyn-vars d)
       (unless (hash-has-key? env d) (hash-set! env d ANY))))
-  ;; G-A: `^:dynamic` vars imported from required modules — the importer keyed
-  ;; them by the use-site name (alias/last-segment-qualified, e.g. `a/*v*`), so a
-  ;; requiring module can `(binding [a/*v* ...] ...)` across the module boundary,
-  ;; matching Clojure (`(binding [other/*x* v] ...)` is standard there).
-  (for ([dv (in-set (or (program-imported-dynamic-vars prog) (seteq)))])
+  ;; Non-local `^:dynamic` values use the same registry as local definitions:
+  ;; imported Beagle vars are keyed by their use-site spelling and declared
+  ;; host vars retain the exact qualified name from `declare-extern`.
+  (for ([dv (in-set (or (program-external-dynamic-vars prog) (seteq)))])
     (set-add! dyn-vars dv))
   (hash-set! env '#%dynamic-vars dyn-vars)
 
@@ -6083,8 +6082,8 @@
        (define vt (infer-expr (let-binding-value b) env))
        (unless (and (symbol? name) (set-member? dyn-vars name))
          (raise-diag 'type-mismatch
-                     (format "binding: ~a is not a dynamic var — only `(def ^:dynamic ~a ...)` vars can be rebound with `binding`"
-                             name name)
+                     (format "binding: ~a is not a dynamic var — mark an owned var with `(def ^:dynamic ~a ...)` or a foreign var with `(declare-extern ^:dynamic ~a Type)` before rebinding it"
+                             name name name)
                      (hash 'name (if (symbol? name) (symbol->string name) (format "~a" name)))
                      #:src (src-for (let-binding-value b))))
        (define declared (and (symbol? name) (hash-ref env name #f)))

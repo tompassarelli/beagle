@@ -2052,6 +2052,26 @@ BEAGLE
   #rx"dynamic"
   '(defn f [] Int (binding [*z* Int 5] 0)))
 
+(check-ok "binding a declared external ^:dynamic var is accepted"
+  '(declare-extern (#%meta :dynamic external.state/*value*) Int)
+  '(defn f [] Int
+     (binding [external.state/*value* Int 5]
+       external.state/*value*)))
+
+(check-err/rx "binding a declared external non-dynamic var is rejected"
+  #rx"not a dynamic var"
+  '(declare-extern external.state/*value* Int)
+  '(defn f [] Int
+     (binding [external.state/*value* Int 5]
+       external.state/*value*)))
+
+(check-err/rx "declared external dynamic metadata rejects unrelated flags"
+  #rx"only \\^:dynamic metadata"
+  '(declare-extern
+     (#%meta (#%map :dynamic true :private true)
+             external.state/*value*)
+     Int))
+
 (check-err/rx "binding a ^:dynamic Int var with a String mismatches"
   #rx"expected Int|got String"
   '(def (#%meta :dynamic *n*) Int 0)

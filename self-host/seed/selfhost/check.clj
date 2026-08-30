@@ -1476,7 +1476,7 @@
    declared (get env nm)
    authored (get b "ann")]
   (if (nil? (get dyn-vars nm)) (do
-  (emit-diag! (str "beagle: binding: " nm " is not a dynamic var — only `(def ^:dynamic " nm " ...)` vars can be rebound with `binding`"))))
+  (emit-diag! (str "beagle: binding: " nm " is not a dynamic var — mark an owned var with `(def ^:dynamic " nm " ...)` or a foreign var with `(declare-extern ^:dynamic " nm " Type)` before rebinding it"))))
   (if (and (not (nil? authored)) (not (nil? declared)) (not (type-compatible? authored declared))) (do
   (emit-diag! (str "beagle: binding " nm ": annotation " (type->string authored) " does not match dynamic var type " (type->string declared)))))
   (check-binding-constraint! b authored (cond
@@ -1821,7 +1821,8 @@
    target-stdlib (merge base-stdlib (hosted-require-contracts (get prog "requires" [])))
    env-with-externs (if (not (nil? externs)) (reduce (fn [env ext] (reference-map-assoc env (get ext "name") (get ext "type"))) target-stdlib externs) target-stdlib)
    dyn-from-defs (reduce (fn [acc f] (if (and (= (get f "node") "def") (= (get f "dynamic") true)) (assoc acc (get f "name") true) acc)) {} forms)
-   dyn-vars (if (= (get prog "target") "clj") (reduce (fn [acc ^String nm] (assoc acc nm true)) dyn-from-defs CLJ-BUILTIN-DYNAMIC-VARS) dyn-from-defs)
+   dyn-from-externs (reduce (fn [acc extern] (if (= true (get extern "dynamic")) (assoc acc (get extern "name") true) acc)) dyn-from-defs externs)
+   dyn-vars (if (= (get prog "target") "clj") (reduce (fn [acc ^String nm] (assoc acc nm true)) dyn-from-externs CLJ-BUILTIN-DYNAMIC-VARS) dyn-from-externs)
    env-with-externs (assoc env-with-externs "#%dynamic-vars" dyn-vars)
    env-with-externs (if (= (get prog "target") "clj") (reduce (fn [env ^String nm] (if (nil? (get env nm)) (assoc env nm ANY) env)) env-with-externs CLJ-BUILTIN-DYNAMIC-VARS) env-with-externs)
    callable-synchronization (program-callable-synchronization prog)
@@ -3188,6 +3189,8 @@
   (swap! STATE assoc "diagnostics" [])
   (infer-expr! (make-call "or" [(make-call "nil?" [(make-ref "pa")]) (make-call "f" [(make-ref "pa")])]) {"pa" (make-union [(make-prim "String") (make-prim "Nil")]) "f" (make-fn [(make-prim "String")] nil (make-prim "Bool"))})
   (= 0 (count (get (deref STATE) "diagnostics")))))
+  (expect! "binding: declared external ^:dynamic values enter the registry" (let [env (build-initial-env! {"target" "clj" "forms" [] "externs" [{"name" "external.state/*value*" "type" (make-prim "Int") "dynamic" true}]})]
+  (= true (get (get env "#%dynamic-vars") "external.state/*value*"))))
   (expect! "binding: returns body's last type, env unchanged" (let [e {"node" "binding" "bindings" [{"name" "*out*" "ann" nil "value" {"node" "dynamic-var" "name" "*err*"}}] "body" [(make-lit "number" 7)]}
    t1 (infer-expr! e {})]
   (and (prim? t1) (= (get t1 "name") "Int"))))

@@ -1509,7 +1509,7 @@
                  imported-union-members
                  imported-parametric-unions
                  imported-enums
-                 imported-dynamic-vars
+                 external-dynamic-vars
                  imported-module-interfaces
                  target
                  gen-class?)

@@ -1857,6 +1857,19 @@
   :else (recur (+ i 2)))))
   :else false))
 
+(defn- declare-extern-name-spec! [raw-name]
+  (cond
+  (string? raw-name) {"name" raw-name "dynamic" false}
+  (meta-name? raw-name) (let [metadata (nth raw-name 1)
+   map-body (if (map-tagged? metadata) (map-body metadata) [])
+   dynamic-only? (or (= metadata ":dynamic") (and (= 2 (count map-body)) (= (nth map-body 0) ":dynamic") (= (nth map-body 1) true)))]
+  (if dynamic-only? {"name" (nth raw-name 2) "dynamic" true} (do
+  (err! (str "declare-extern: only ^:dynamic metadata is supported on an extern name, got: " (racket-written-datum raw-name)))
+  nil)))
+  :else (do
+  (err! (str "declare-extern: each declared name must be a symbol or ^:dynamic symbol, got: " (racket-written-datum raw-name)))
+  nil)))
+
 (defn- mk-def-node [^String kw ^String name ann value doc ^Boolean dyn]
   (if (= kw "defonce") (make-defonce name ann value doc) (make-def name ann value doc dyn)))
 
@@ -2273,18 +2286,20 @@
   (= head "defcontract") nil
   (= head "declare-extern") (if (>= (count d) 3) (let [name-form (nth d 1)
    t (parse-type* (nth d 2))
-   add-extern! (fn [nm] (if (string? nm) (do
+   add-extern! (fn [raw-name] (let [spec (declare-extern-name-spec! raw-name)]
+  (if (some? spec) (do
+  (let [nm (get spec "name")
+   base {"name" nm "type" t}
+   entry (if (get spec "dynamic") (assoc base "dynamic" true) base)]
   (validate-identifier! nm "extern")
   (if (some? (get (deref extern-seen) nm)) (do
   (err! (str "duplicate declare-extern: " nm))
   nil) (do
   (swap! extern-seen assoc nm true)
-  (swap! extern-list conj {"name" nm "type" t})
-  nil))) (do
-  (err! (str "declare-extern: each name must be a name, got: " (str nm)))
-  nil)))]
-  (if (bracketed? name-form) (doseq [nm (bracket-body name-form)]
-  (add-extern! nm)) (add-extern! name-form))) (err! "malformed declare-extern — expected (declare-extern name TYPE) or (declare-extern [name1 name2 ...] TYPE)"))
+  (swap! extern-list conj entry)
+  nil)))))))]
+  (if (bracketed? name-form) (doseq [raw-name (bracket-body name-form)]
+  (add-extern! raw-name)) (add-extern! name-form))) (err! "malformed declare-extern — expected (declare-extern name TYPE), (declare-extern ^:dynamic name TYPE), or a batch of those names"))
   (= head "require") (doseq [spec (subvec d 1)]
   (let [r (parse-require-libspec! spec)]
   (if (some? r) (do
@@ -2468,17 +2483,23 @@
    referred? (fn [nm] (and (some? refer-set) (= true (get refer-set nm))))
    out (atom [])
    seen (atom {})
-   emit! (fn [nm t] (let [q (if (= prefix "") nm (str prefix "/" nm))
+   emit! (fn [raw-name t] (let [spec (declare-extern-name-spec! raw-name)]
+  (if (some? spec) (do
+  (let [nm (get spec "name")
+   dynamic? (get spec "dynamic")
+   q (if (= prefix "") nm (str prefix "/" nm))
    provider-q (str provider-ns "/" nm)
    qualified-type (if (= prefix "") t (qualify-provider-type t provider-ns local-type-names))
    names (if (= prefix "") [q] (if (= q provider-q) [q] [q provider-q]))]
   (doseq [name names]
   (if (not (= true (get (deref seen) name))) (do
+  (let [base {"name" name "type" qualified-type}]
   (swap! seen assoc name true)
-  (swap! out conj {"name" name "type" qualified-type}))))
+  (swap! out conj (if dynamic? (assoc base "dynamic" true) base))))))
   (if (and (referred? nm) (not (= true (get (deref seen) nm)))) (do
+  (let [base {"name" nm "type" qualified-type}]
   (swap! seen assoc nm true)
-  (swap! out conj {"name" nm "type" qualified-type}))))
+  (swap! out conj (if dynamic? (assoc base "dynamic" true) base)))))))))
   nil)]
   (doseq [d0 datums]
   (let [d (import-normalize d0)]
@@ -2488,8 +2509,8 @@
   (= head "declare-extern") (if (>= (count d) 3) (do
   (let [name-form (nth d 1)
    t (parse-type* (nth d 2))]
-  (if (bracketed? name-form) (doseq [nm (bracket-body name-form)]
-  (emit! nm t)) (emit! name-form t)))))
+  (if (bracketed? name-form) (doseq [raw-name (bracket-body name-form)]
+  (emit! raw-name t)) (emit! name-form t)))))
   (and (= head "defrecord") (= (count d) 3) (string? (nth d 1))) (let [nm (nth d 1)
    fields (parse-record-fields! (nth d 2))
    nlow (str/lower-case nm)]
@@ -2515,8 +2536,10 @@
   :else nil)
   (or (= head "def") (= head "defonce")) (cond
   (and (= (count d) 4) (string? (nth d 1))) (emit! (nth d 1) (parse-type* (nth d 2)))
-  (and (>= (count d) 3) (meta-name? (nth d 1))) (let [nm (nth (nth d 1) 2)]
-  (if (= (count d) 4) (emit! nm (parse-type* (nth d 2))) (emit! nm (make-prim "Any"))))
+  (and (>= (count d) 3) (meta-name? (nth d 1))) (let [name-form (nth d 1)
+   nm (nth name-form 2)
+   surface-name (if (and (= head "def") (meta-dynamic? (nth name-form 1))) ["#%meta" ":dynamic" nm] nm)]
+  (if (= (count d) 4) (emit! surface-name (parse-type* (nth d 2))) (emit! surface-name (make-prim "Any"))))
   :else nil)
   (= head "defn") (let [name-form (nth d 1)
    name (if (meta-name? name-form) (nth name-form 2) name-form)
@@ -2971,6 +2994,9 @@
   (and (= (count errors) 1) (str/includes? (nth errors 0) "parametric defunion Unit requires at least one type parameter"))))
   (expect! "parse-program! meta extraction" (let [prog (parse-program! [["ns" "my.app"] ["define-target" "js"] ["declare-extern" "console" "Any"] ["def" "x" 42]])]
   (and (= (get prog "namespace") "my.app") (= (get prog "target") "js") (= (count (get prog "forms")) 1) (= (get (nth (get prog "forms") 0) "node") "def") (= (count (get prog "externs")) 1) (= (get (nth (get prog "externs") 0) "name") "console"))))
+  (expect! "parse-program! marks a declared external ^:dynamic value" (let [prog (parse-program! [["declare-extern" ["#%meta" ":dynamic" "external.state/*value*"] "Int"]])
+   extern (first (get prog "externs"))]
+  (and (= (get extern "name") "external.state/*value*") (= true (get extern "dynamic")))))
   (expect! "defcontract parses as canonical non-executable module metadata" (let [prog (parse-program! [["defcontract" [BRACKET-TAG ["id" ["Fn" [BRACKET-TAG "Int"] "Int"]]]] ["defn" "id" [BRACKET-TAG ["x" "Int"]] "Int" "x"]])]
   (and (= (get-in prog ["declared-contract" "id"]) (make-fn-type [(make-prim "Int")] nil (make-prim "Int"))) (= (count (get prog "forms")) 1) (= (get (nth (get prog "forms") 0) "node") "defn"))))
   (expect! "clj defcontract record surface includes generated map constructor" (let [prog (parse-program! [["define-target" "clj"] ["defcontract" [BRACKET-TAG ["->Point" ["Fn" [BRACKET-TAG "String"] "Point"]] ["map->Point" ["Fn" [BRACKET-TAG "Any"] "Point"]] ["point-x" ["Fn" [BRACKET-TAG "Point"] "String"]]]] ["defrecord" "Point" [BRACKET-TAG ["x" "String"]]]])

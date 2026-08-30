@@ -3480,8 +3480,9 @@
                   authored (get b "ann")]
               (when (nil? (get dyn-vars nm))
                 (emit-diag! (str "beagle: binding: " nm
-                                 " is not a dynamic var — only `(def ^:dynamic " nm
-                                 " ...)` vars can be rebound with `binding`")))
+                                 " is not a dynamic var — mark an owned var with `(def ^:dynamic "
+                                 nm " ...)` or a foreign var with `(declare-extern ^:dynamic "
+                                 nm " Type)` before rebinding it")))
               (when (and (not (nil? authored))
                          (not (nil? declared))
                          (not (type-compatible? authored declared)))
@@ -4132,13 +4133,20 @@
                                   (assoc acc (get f "name") true)
                                   acc))
                               {} forms)
+        dyn-from-externs (reduce (fn
+                                   [acc Any
+                                    extern Any] Any
+                                   (if (= true (get extern "dynamic"))
+                                     (assoc acc (get extern "name") true)
+                                     acc))
+                                 dyn-from-defs externs)
         dyn-vars (if (= (get prog "target") "clj")
                    (reduce (fn
                              [acc Any
                               nm String] Any
                              (assoc acc nm true))
-                           dyn-from-defs CLJ-BUILTIN-DYNAMIC-VARS)
-                   dyn-from-defs)
+                           dyn-from-externs CLJ-BUILTIN-DYNAMIC-VARS)
+                   dyn-from-externs)
         env-with-externs (assoc env-with-externs "#%dynamic-vars" dyn-vars)
         env-with-externs (if (= (get prog "target") "clj")
                            (reduce (fn
@@ -7492,6 +7500,15 @@
         (= 0 (count (get (deref STATE) "diagnostics")))))
 
   ;; --- binding (dynamic var rebinding; targets are not new locals) ---
+  (expect! "binding: declared external ^:dynamic values enter the registry"
+    (let [env (build-initial-env!
+                {"target" "clj"
+                 "forms" []
+                 "externs" [{"name" "external.state/*value*"
+                              "type" (make-prim "Int")
+                              "dynamic" true}]})]
+      (= true (get (get env "#%dynamic-vars")
+                   "external.state/*value*"))))
   (expect! "binding: returns body's last type, env unchanged"
     (let [e {"node" "binding"
              "bindings" [{"name" "*out*" "ann" nil "value" {"node" "dynamic-var" "name" "*err*"}}]

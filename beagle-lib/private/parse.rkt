@@ -1662,6 +1662,33 @@
    #:source-path src
    #:module-resolver module-resolver))
 
+;; A foreign value may be marked rebindable with the same metadata Clojure
+;; uses on an owned `def`: `(declare-extern ^:dynamic ns/*value* Type)`.
+;; Keeping the marker on the declared name makes dynamic-ness part of the one
+;; typed boundary declaration instead of a parallel name registry in source.
+(define (declare-extern-name-spec raw-name)
+  (match raw-name
+    [(? symbol? name) (values name #f)]
+    [(list '#%meta metadata (? symbol? name))
+     ;; Extern metadata is a typed foreign-boundary contract, not the
+     ;; permissive metadata surface of an owned `def`.  Accept exactly the
+     ;; dynamic marker and reject maps carrying unrelated flags.
+     (unless (or (eq? metadata ':dynamic)
+                 (equal? metadata (list '#%map ':dynamic 'true)))
+       (raise-parse-error
+        'bad-meta-value
+        "declare-extern: only ^:dynamic metadata is supported on an extern name, got: ~v"
+        raw-name))
+     (values name #t)]
+    [_
+     (raise-parse-error
+      'bad-meta-value
+      "declare-extern: each declared name must be a symbol or ^:dynamic symbol, got: ~v"
+      raw-name)]))
+
+(define (declare-extern-name-forms name-form)
+  (if (bracketed? name-form) (bracket-body name-form) (list name-form)))
+
 (define (parse-program* stxs*
                         #:source-path [source-path #f]
                         #:module-resolver [module-resolver #f])
@@ -1672,12 +1699,15 @@
   ;; Inspect the complete authored datum stream so declaration order never
   ;; changes whether the preceding require is authorized.
   (define declared-extern-names
-    (for/set ([datum (in-list raw-datums)]
-              #:when
-              (match datum
-                [(list* 'declare-extern (? symbol?) _) #t]
-                [_ #f]))
-      (cadr datum)))
+    (for*/set ([datum (in-list raw-datums)]
+               [raw-name
+                (in-list
+                 (match datum
+                   [(list 'declare-extern name-form _)
+                    (declare-extern-name-forms name-form)]
+                   [_ '()]))])
+      (define-values (name _dynamic?) (declare-extern-name-spec raw-name))
+      name))
 
   ;; Determine target up-front so reader-conditionals can be resolved before
   ;; any per-form parsing. `define-target` appears as a datum produced by the
@@ -1764,7 +1794,9 @@
   (define imp-union-members (make-hash))
   (define imp-param-unions (make-hash))
   (define imp-enums (make-hash))
-  (define imp-dyn-vars (mutable-seteq))  ; G-A: imported ^:dynamic vars (qualified)
+  ;; Every non-local value that `binding` may legally rebind: dynamic vars
+  ;; imported from typed modules plus explicit ^:dynamic foreign declarations.
+  (define external-dyn-vars (mutable-seteq))
   (define imp-module-interfaces '())
   (define declared-type-aliases (make-hasheq))
   (define declared-module-contract #f)
@@ -2114,7 +2146,7 @@
       (for ([spelling
              (in-list (interface-spellings
                        interface prefix refer-syms name))])
-        (set-add! imp-dyn-vars spelling)))
+        (set-add! external-dyn-vars spelling)))
     (set! imp-module-interfaces
           (cons (module-import interface prefix refer-syms)
                 imp-module-interfaces)))
@@ -2461,24 +2493,16 @@
               template-stx (current-source-bytes))))
        (hash-set! declared-macros name (hash-ref registry name))]
 
-      [(list 'declare-extern (? bracketed? names-form) type-expr)
-       (for ([name (in-list (bracket-body names-form))])
-         (unless (symbol? name)
-           (raise-parse-error 'bad-meta-value
-             "declare-extern: each name in batch form must be a symbol, got: ~v" name))
+      [(list 'declare-extern name-form type-expr)
+       (define type (parse-type type-expr))
+       (for ([raw-name (in-list (declare-extern-name-forms name-form))])
+         (define-values (name dynamic?) (declare-extern-name-spec raw-name))
          (validate-identifier! name "extern")
          (when (hash-has-key? externs name)
            (raise-parse-error 'duplicate-meta "duplicate declare-extern: ~a" name))
-         (define type (parse-type type-expr))
          (hash-set! externs name type)
-         (hash-set! declared-externs name type))]
-      [(list 'declare-extern (? symbol? name) type-expr)
-       (validate-identifier! name "extern")
-       (when (hash-has-key? externs name)
-         (raise-parse-error 'duplicate-meta "duplicate declare-extern: ~a" name))
-       (define type (parse-type type-expr))
-       (hash-set! externs name type)
-       (hash-set! declared-externs name type)]
+         (hash-set! declared-externs name type)
+         (when dynamic? (set-add! external-dyn-vars name)))]
 
       ;; One complete declaration per export.  The vector is the exact public
       ;; name set; adjacent/flattened tokens are never paired implicitly.
@@ -2541,7 +2565,7 @@
                           "malformed import — expected (import java.pkg.Class) or (import (java.pkg Class1 Class2)), got: ~v" d)]
       [(cons 'declare-extern _)
        (raise-parse-error 'bad-meta-value
-                          "malformed declare-extern — expected (declare-extern name TYPE) or (declare-extern [name1 name2 ...] TYPE), got: ~v" d)]
+                          "malformed declare-extern — expected (declare-extern name TYPE), (declare-extern ^:dynamic name TYPE), or a batch of those names, got: ~v" d)]
       [(cons 'defcontract _)
        (raise-parse-error
         'bad-meta-value
@@ -2709,7 +2733,7 @@
              imp-type-names
              imp-rec-fields imp-rec-field-order imp-rec-ns
              (hash-keys imp-scalar-fns) imp-scalar-preds imp-symbol-ns
-             imp-union-members imp-param-unions imp-enums imp-dyn-vars
+             imp-union-members imp-param-unions imp-enums external-dyn-vars
              (reverse imp-module-interfaces)
              target gen-class?))
   ;; Stash the macro-derived-table keyed by the program so check.rkt
