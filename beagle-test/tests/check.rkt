@@ -1778,6 +1778,14 @@ BEAGLE
      (let [w v]
        (if w (Math/floor w) 0.0))))
 
+(check-ok "narrow: if-let shadow uses the active optional-record binding"
+  '(define-target clj)
+  '(defrecord LoopContext [(bindings (Vec Int))])
+  `(defn f [(loop-context LoopContext?)] (Vec Int)
+     (if-let [context loop-context]
+       (loopcontext-bindings context)
+       ,(br 0))))
+
 ;; Soundness: the falsy branch of bare truthiness must NOT narrow to Nil
 ;; when the union contains Bool (x could be `false`). We assert the
 ;; falsy branch still treats x as the full (U Bool Nil) by passing it

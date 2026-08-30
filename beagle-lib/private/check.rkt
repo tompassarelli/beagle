@@ -46,9 +46,24 @@
                 (equal? (qualified-ref-provider-id key) provider-id)))
     (hash-ref table key #f)))
 
+(define BINDING-ALIASES-KEY '#%binding-aliases)
+
+(define (active-resolved-binding-id table ref)
+  (and (resolved-ref? ref)
+       (not (structural-name-qualifier (resolved-ref-name ref)))
+       (let* ([aliases (hash-ref table BINDING-ALIASES-KEY #f)]
+              [active-id
+               (and aliases
+                    (hash-ref aliases
+                              (structural-name-leaf (resolved-ref-name ref))
+                              #f))])
+         (and active-id (hash-has-key? table active-id) active-id))))
+
 (define (reference-hash-ref table ref [fallback #f])
   (define structural (reference-structural-name ref))
-  (or (and (resolved-ref? ref)
+  (define active-id (active-resolved-binding-id table ref))
+  (or (and active-id (hash-ref table active-id #f))
+      (and (resolved-ref? ref)
            (hash-ref table (resolved-ref-binding-id ref) #f))
       (hash-ref table ref #f)
       (and structural
@@ -107,6 +122,10 @@
 (define (binder-env-set! table binder name value)
   (hash-set! table name value)
   (define id (binder-binding-id binder name #f))
+  (define aliases
+    (hash-copy (hash-ref table BINDING-ALIASES-KEY (hasheq))))
+  (hash-set! aliases name id)
+  (hash-set! table BINDING-ALIASES-KEY aliases)
   (when id (hash-set! table id value)))
 
 (define (local-reference? value)
@@ -114,6 +133,19 @@
 
 (define (local-reference-key value)
   (if (resolved-ref? value) (resolved-ref-binding-id value) value))
+
+(define (active-local-reference-key env value)
+  (define identity (local-reference-key value))
+  (define leaf (reference-leaf value))
+  (define aliases (hash-ref env BINDING-ALIASES-KEY #f))
+  (define active-id (and aliases (hash-ref aliases leaf #f)))
+  (define active
+    (and active-id (hash-has-key? env active-id) active-id))
+  (cond
+    [(and (resolved-ref? value) active) active]
+    [(and (resolved-ref? value) (hash-has-key? env identity)) identity]
+    [(hash-has-key? env leaf) leaf]
+    [else identity]))
 
 (define (symbol-qualified-reference sym)
   (and
@@ -5013,13 +5045,14 @@
         (reference-hash-ref env var ANY)
         (hash-ref TYPE-PREDICATES (call-form-fn cond-expr))))
      (if target
-         (values (local-reference-key var) target #f)
+         (values (active-local-reference-key env var) target #f)
          (values #f #f #f))]
     [(and (call-form? cond-expr)
           (eq? (call-form-fn cond-expr) 'some?)
           (= (length (call-form-args cond-expr)) 1)
           (local-reference? (car (call-form-args cond-expr))))
-     (values (local-reference-key (car (call-form-args cond-expr)))
+     (values (active-local-reference-key
+              env (car (call-form-args cond-expr)))
              (type-prim 'Nil)
              #t)]
     ;; (= x nil) / (not= x nil), either argument order.
@@ -5030,9 +5063,9 @@
      (define a1 (car (call-form-args cond-expr)))
      (define a2 (cadr (call-form-args cond-expr)))
      (define v (cond [(and (local-reference? a1) (eq? a2 'nil))
-                      (local-reference-key a1)]
+                      (active-local-reference-key env a1)]
                      [(and (eq? a1 'nil) (local-reference? a2))
-                      (local-reference-key a2)]
+                      (active-local-reference-key env a2)]
                      [else #f]))
      (if v
          (values v (type-prim 'Nil) (eq? fn 'not=))
@@ -5164,7 +5197,7 @@
              [var (cadr (call-form-args cond-expr))])
          (and (symbol? written)
               (stable-scrutinee-var var env)
-              (let* ([key (local-reference-key var)]
+              (let* ([key (active-local-reference-key env var)]
                      [cur (hash-ref env key #f)]
                      [member-name
                       (and cur
@@ -5249,7 +5282,7 @@
         => (lambda (p) (values (car p) (cdr p)))]
        ;; Bare-local truthiness.
        [(local-reference? cond-expr)
-        (define key (local-reference-key cond-expr))
+        (define key (active-local-reference-key env cond-expr))
         (define cur (hash-ref env key #f))
         (cond
           [(not cur) (values '() '())]
@@ -5321,7 +5354,9 @@
 ;; can be rebound under the arm. Field/atom mutation does not participate — it
 ;; cannot change the value's nominal type.
 (define (stable-scrutinee-var target env)
-  (define key (and (local-reference? target) (local-reference-key target)))
+  (define key
+    (and (local-reference? target)
+         (active-local-reference-key env target)))
   (and key
        (hash-has-key? env key)
        (not (set-member? (current-unstable-bindings) key))

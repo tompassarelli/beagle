@@ -8,284 +8,1495 @@
 (defrecord SourceSpan
   [line Int
    column Int])
+(defrecord ReaderDatum
+  [value Any
+   span SourceSpan])
 
-(defrecord ConstraintIR
-  [path String
+(defenum ScalarType :int :string :bool :nil :never)
+(defenum ConstraintReason :builtin-argument :local-call :branch :return :binding :recur)
+(defenum ObligationKind :missing-call-contract :unbound-symbol :unresolved-type)
+(defenum DiagnosticCode
+  :module-shape :definition-shape :expression-shape :binding-shape
+  :arity :type-conflict :recur-target :recur-nontail)
+
+(defunion TypeTerm
+  (KnownType [value ScalarType])
+  (TypeVariable [name String]))
+
+(defrecord UnresolvedObligation
+  [kind ObligationKind
+   owner String
    subject String
-   required-type String
-   evidence String
    span SourceSpan])
 
-(defrecord NamespaceIR [name String])
+(defrecord Diagnostic
+  [code DiagnosticCode
+   path String
+   message String
+   span SourceSpan])
 
-(defrecord BindingIR
+(defrecord LocalBinding
   [name String
-   operator String
-   parameter String
-   literal Int
-   inferred-type String
+   term TypeTerm
+   value Form
    span SourceSpan])
 
+(defunion Form
+  (IntLiteral
+    [value Int
+     term TypeTerm
+     span SourceSpan])
+  (StringLiteral
+    [value String
+     term TypeTerm
+     span SourceSpan])
+  (BoolLiteral
+    [value Bool
+     term TypeTerm
+     span SourceSpan])
+  (NilLiteral
+    [term TypeTerm
+     span SourceSpan])
+  (ReferenceExpr
+    [name String
+     term TypeTerm
+     span SourceSpan])
+  (CallExpr
+    [callee String
+     arguments (Vec Form)
+     term TypeTerm
+     span SourceSpan])
+  (IfExpr
+    [test Form
+     consequent Form
+     alternative Form
+     term TypeTerm
+     span SourceSpan])
+  (LetExpr
+    [bindings (Vec LocalBinding)
+     body Form
+     term TypeTerm
+     span SourceSpan])
+  (LoopExpr
+    [bindings (Vec LocalBinding)
+     body Form
+     term TypeTerm
+     span SourceSpan])
+  (RecurExpr
+    [arguments (Vec Form)
+     term TypeTerm
+     span SourceSpan])
+  (BlockedExpr
+    [obligation UnresolvedObligation
+     term TypeTerm
+     span SourceSpan]))
+
+(defrecord Constraint
+  [left TypeTerm
+   right TypeTerm
+   reason ConstraintReason
+   span SourceSpan])
+
+(defrecord ParameterIR
+  [name String
+   term TypeTerm
+   span SourceSpan])
+(defrecord RawFunction
+  [name String
+   parameters (Vec ParameterIR)
+   declarations-before (Vec String)
+   body ReaderDatum
+   span SourceSpan])
+(defrecord FunctionContract
+  [name String
+   parameters (Vec TypeTerm)
+   result TypeTerm
+   reason ConstraintReason])
 (defrecord FunctionIR
   [name String
-   string-parameter String
-   integer-parameter String
-   binding BindingIR
-   result-operator String
-   result-type String
-   constraints (Vec ConstraintIR)])
+   parameters (Vec ParameterIR)
+   result TypeTerm
+   body Form
+   dependencies (Vec String)
+   span SourceSpan])
+(defrecord RawModule
+  [namespace String
+   declarations (Vec String)
+   functions (Vec RawFunction)])
 
-(defrecord ModuleIR
-  [namespace NamespaceIR
-   function FunctionIR])
+(defrecord RewriteRule
+  [callee String
+   target String
+   literal Int])
+(defrecord LexicalBinding
+  [name String
+   term TypeTerm])
+(defrecord LoopContext [bindings (Vec LocalBinding)])
 
-(defn reject! [] Any
-  (throw (ex-info REJECTION {})))
+(defrecord ParseEffects
+  [constraints (Vec Constraint)
+   obligations (Vec UnresolvedObligation)
+   rewrite-count Int])
+(defrecord ParsedExpr
+  [form Form
+   effects ParseEffects])
+(defrecord ParsedExpressions
+  [forms (Vec Form)
+   effects ParseEffects])
+(defrecord ParsedBindings
+  [bindings (Vec LocalBinding)
+   environment (Vec LexicalBinding)
+   effects ParseEffects])
+(defrecord ParsedModule
+  [functions (Vec FunctionIR)
+   effects ParseEffects])
+(defrecord NormalizedCall
+  [callee String
+   arguments (Vec Form)
+   rewrite-count Int])
 
+(defrecord TypeAssignment
+  [variable String
+   value ScalarType])
+(defrecord SolverState
+  [assignments (Vec TypeAssignment)
+   changed Boolean])
+(defrecord DependencyNode
+  [name String
+   dependencies (Vec String)])
+(defrecord DependencyScc
+  [members (Vec String)
+   recurrent Boolean])
+(defrecord MigrationResult
+  [module RawModule
+   functions (Vec FunctionIR)
+   graph (Vec DependencyNode)
+   sccs (Vec DependencyScc)
+   assignments (Vec TypeAssignment)
+   obligations (Vec UnresolvedObligation)
+   rewrite-count Int])
+
+(defmacro defvec-append [name type]
+  `(defn ~name
+     [left (Vec ~type) right (Vec ~type)] (Vec ~type)
+     (loop [index Int 0 result (Vec ~type) left]
+       (if (= index (count right))
+         result
+         (recur (+ index 1) (conj result (nth right index)))))))
+
+(defmacro defvec-project [name input-type output-type binding body]
+  `(defn ~name [values (Vec ~input-type)] (Vec ~output-type)
+     (loop [index Int 0 result (Vec ~output-type) []]
+       (if (= index (count values))
+         result
+         (let [~binding ~input-type (nth values index)]
+           (recur (+ index 1) (conj result ~body)))))))
+
+(defmacro defvec-find-by [name item-type key]
+  `(defn ~name
+     [values (Vec ~item-type) needle String] ~(format-symbol "~a?" item-type)
+     (loop [index Int 0]
+       (if (= index (count values))
+         nil
+         (let [value ~item-type (nth values index)]
+           (if (= needle (~key value))
+             value
+             (recur (+ index 1))))))))
+
+(def BUILTIN-CONTRACTS (Vec FunctionContract)
+  [(->FunctionContract
+    "=" [(->KnownType :int) (->KnownType :int)]
+    (->KnownType :bool) :builtin-argument)
+   (->FunctionContract
+    "+" [(->KnownType :int) (->KnownType :int)]
+    (->KnownType :int) :builtin-argument)
+   (->FunctionContract
+    "-" [(->KnownType :int) (->KnownType :int)]
+    (->KnownType :int) :builtin-argument)
+   (->FunctionContract
+    "subs" [(->KnownType :string) (->KnownType :int)]
+    (->KnownType :string) :builtin-argument)])
+
+(def STRUCTURAL-RULES (Vec RewriteRule)
+  [(->RewriteRule "zero?" "=" 0)
+   (->RewriteRule "dec" "-" 1)
+   (->RewriteRule "inc" "+" 1)])
+
+;; A generated function name is a call head, so it must not collide with the
+;; compiler's front-end combiner registry.
+(def BEAGLE-RESERVED-CALL-HEADS (Vec String)
+  ["do" ":" "if" "let" "letfn" "loop" "with-open" "binding"
+   "for" "doseq" "doto" "unless" "cond" "case" "fn" "defonce"
+   "set!" "defrecord" "defenum" "defscalar" "deftype" "extend-type"
+   "comment" "target-case" "try" "when" "when-not" "if-not" "if-let"
+   "when-let" "if-some" "when-some" "def" "defn" "defn-" "defprotocol"
+   "defunion" "deferror" "defmulti" "defmethod" "match" "condp" "cond->"
+   "cond->>" "as->" ".." "this-as" "some->" "some->>" "recur" "get"
+   "get-or" "has" "assert" "rescue" "await" "fmt" "ms" "check" "claim"
+   "dotimes" "unsafe" "unsafe-js" "unsafe-clj" "unsafe-py" "unsafe-rkt"
+   "unsafe-nix" "unsafe-expr" "inherit" "inherit-from" "rec-attrs"
+   "search-path" "module" "unquote" "unquote-splicing" "quasiquote"
+   "flake-input" "nix/assert" "nix/with-cfg" "with-cfg" "nix/fn-set"
+   "fn-set" "nix/module" "nix/overlay" "overlay" "nix/derivation"
+   "derivation" "nix/flake" "flake" "nix/with" "with" "nix-ident"
+   "js/typeof" "js/delete!" "js/in?" "js/import-meta" "js/export"
+   "js/export-default" "ns" "declare"])
+
+(defvec-append append-constraints Constraint)
+(defvec-append append-obligations UnresolvedObligation)
+(defvec-append append-strings String)
+
+(defn empty-effects [] ParseEffects
+  (->ParseEffects [] [] 0))
+
+(defn merge-effects
+  [left ParseEffects
+   right ParseEffects] ParseEffects
+  (->ParseEffects
+   (append-constraints (parseeffects-constraints left)
+                       (parseeffects-constraints right))
+   (append-obligations (parseeffects-obligations left)
+                       (parseeffects-obligations right))
+   (+ (parseeffects-rewrite-count left)
+      (parseeffects-rewrite-count right))))
+
+(defn effects-add-constraints
+  [effects ParseEffects
+   constraints (Vec Constraint)] ParseEffects
+  (->ParseEffects
+   (append-constraints (parseeffects-constraints effects) constraints)
+   (parseeffects-obligations effects)
+   (parseeffects-rewrite-count effects)))
+
+(defn effects-add-obligations
+  [effects ParseEffects
+   obligations (Vec UnresolvedObligation)] ParseEffects
+  (->ParseEffects
+   (parseeffects-constraints effects)
+   (append-obligations (parseeffects-obligations effects) obligations)
+   (parseeffects-rewrite-count effects)))
+
+(defn effects-add-rewrites
+  [effects ParseEffects
+   count Int] ParseEffects
+  (->ParseEffects
+   (parseeffects-constraints effects)
+   (parseeffects-obligations effects)
+   (+ (parseeffects-rewrite-count effects) count)))
+
+(defn code-label [code DiagnosticCode] String
+  (cond
+    (= code :module-shape) "E_MODULE_SHAPE"
+    (= code :definition-shape) "E_DEFINITION_SHAPE"
+    (= code :expression-shape) "E_EXPRESSION_SHAPE"
+    (= code :binding-shape) "E_BINDING_SHAPE"
+    (= code :arity) "E_ARITY"
+    (= code :type-conflict) "E_TYPE_CONFLICT"
+    (= code :recur-target) "E_RECUR_TARGET"
+    :else "E_RECUR_NONTAIL"))
+
+(defn render-diagnostic [diagnostic Diagnostic] String
+  (let [span SourceSpan (diagnostic-span diagnostic)]
+    (str "clojure-to-beagle[" (code-label (diagnostic-code diagnostic))
+         "] <input>:" (sourcespan-line span) ":" (sourcespan-column span) " "
+         (diagnostic-path diagnostic) ": " (diagnostic-message diagnostic))))
+
+(defn fail-diagnostic! [diagnostic Diagnostic] Any
+  (throw (ex-info (render-diagnostic diagnostic) {:converter-diagnostic true})))
+
+(defn fail-at!
+  [code DiagnosticCode
+   path String
+   message String
+   span SourceSpan] Any
+  (fail-diagnostic! (->Diagnostic code path message span)))
+
+(defn reject! [] Any (throw (ex-info REJECTION {})))
 (defn reject-tagged-reader!
   [_tag Any
    _value Any] Any
   (reject!))
 
-(defn fail-diagnostic! [message String] Any
-  (throw (ex-info message {:converter-diagnostic true})))
+(defn source-span-or
+  [value Any
+   fallback SourceSpan] SourceSpan
+  (let [form-meta (meta value)
+        line (get form-meta :line)
+        column (get form-meta :column)]
+    (if (and (integer? line) (integer? column))
+      (->SourceSpan line column)
+      fallback)))
 
-(defn safe-read-forms! [source String] Any
+(defn source-span! [value Any] SourceSpan
+  (let [span SourceSpan (source-span-or value (->SourceSpan 0 0))]
+    (if (= 0 (sourcespan-line span)) (reject!) span)))
+
+(defn wrap-datum
+  [value Any
+   fallback SourceSpan] ReaderDatum
+  (->ReaderDatum value (source-span-or value fallback)))
+
+(defn safe-read-forms! [source String] (Vec ReaderDatum)
   (try
     (binding [*read-eval* false
               *data-readers* {}
               *default-data-reader-fn* reject-tagged-reader!]
       (let [reader (clojure.lang.LineNumberingPushbackReader.
                     (java.io.StringReader. source))]
-        (loop [forms (Vec Any) []]
+        (loop [forms (Vec ReaderDatum) []]
           (let [form (clojure.core/read {:eof READER-EOF} reader)]
             (if (identical? READER-EOF form)
               forms
-              (recur (conj forms form)))))))
-    (catch Throwable _
-      (reject!))))
+              (recur (conj forms (->ReaderDatum form (source-span! form)))))))))
+    (catch Exception _ (reject!))))
 
-(defn source-span! [form Any] SourceSpan
-  (let [form-meta (meta form)
-        line (get form-meta :line)
-        column (get form-meta :column)]
-    (if (and (integer? line) (integer? column))
-      (->SourceSpan line column)
-      (reject!))))
+(defn datum-count [datum ReaderDatum] Int
+  (count (readerdatum-value datum)))
 
-(defn unresolved-call!
-  [path String
-   form Any] Any
-  (let [span (source-span! form)]
-    (fail-diagnostic!
-     (str "clojure-to-beagle[E_TYPE_UNRESOLVED] <input>:"
-          (sourcespan-line span) ":" (sourcespan-column span) " " path
-          ": no declared contract for call " (str (first form))))))
+(defn datum-at!
+  [datum ReaderDatum
+   index Int] ReaderDatum
+  (if (and (>= index 0) (< index (datum-count datum)))
+    (wrap-datum (nth (readerdatum-value datum) index) (readerdatum-span datum))
+    (fail-at! :expression-shape "datum/index" "index outside source form"
+              (readerdatum-span datum))))
 
-(defn canonical-namespace! [form Any] NamespaceIR
-  (if (and (seq? form)
-           (= 2 (count form))
-           (= "ns" (str (first form)))
-           (symbol? (second form)))
-    (->NamespaceIR (str (second form)))
+(defn datum-tail!
+  [datum ReaderDatum
+   start Int] (Vec ReaderDatum)
+  (loop [index Int start
+         result (Vec ReaderDatum) []]
+    (if (= index (datum-count datum))
+      result
+      (recur (+ index 1) (conj result (datum-at! datum index))))))
+
+(defn datum-seq? [datum ReaderDatum] Boolean
+  (seq? (readerdatum-value datum)))
+(defn datum-vector? [datum ReaderDatum] Boolean
+  (vector? (readerdatum-value datum)))
+(defn datum-symbol? [datum ReaderDatum] Boolean
+  (symbol? (readerdatum-value datum)))
+
+(defn datum-head?!
+  [datum ReaderDatum
+   head String] Boolean
+  (and (datum-seq? datum) (> (datum-count datum) 0)
+       (= head (str (readerdatum-value (datum-at! datum 0))))))
+
+(defn compiler-owned-identifier? [name String] Boolean
+  (and (>= (count name) 8)
+       (= "$beagle$" (subs name 0 8))))
+
+(defn symbol-name!
+  [datum ReaderDatum
+   path String] String
+  (if (datum-symbol? datum)
+    (let [name String (str (readerdatum-value datum))]
+      (if (compiler-owned-identifier? name)
+        (fail-at! :definition-shape path
+                  (str "identifier uses reserved compiler prefix: " name)
+                  (readerdatum-span datum))
+        name))
+    (fail-at! :definition-shape path "expected a symbol" (readerdatum-span datum))))
+
+(defn contains-string?
+  [values (Vec String)
+   needle String] Boolean
+  (loop [index Int 0]
+    (if (= index (count values))
+      false
+      (if (= needle (nth values index)) true (recur (+ index 1))))))
+
+(defn append-unique-strings
+  [left (Vec String)
+   right (Vec String)] (Vec String)
+  (loop [index Int 0
+         result (Vec String) left]
+    (if (= index (count right))
+      result
+      (let [value String (nth right index)]
+        (recur (+ index 1)
+               (if (contains-string? result value) result (conj result value)))))))
+
+(defn unique-strings? [values (Vec String)] Boolean
+  (= (count values) (count (append-unique-strings [] values))))
+
+(defvec-project parameter-names ParameterIR String parameter
+  (parameterir-name parameter))
+
+(defn parse-parameters!
+  [datum ReaderDatum
+   function-name String] (Vec ParameterIR)
+  (if (datum-vector? datum)
+    (loop [index Int 0
+           parameters (Vec ParameterIR) []]
+      (if (= index (datum-count datum))
+        (if (unique-strings? (parameter-names parameters))
+          parameters
+          (fail-at! :binding-shape "function/parameters" "duplicate parameter"
+                    (readerdatum-span datum)))
+        (let [parameter ReaderDatum (datum-at! datum index)
+              name String (symbol-name! parameter "function/parameters")]
+          (if (= name "&")
+            (fail-at! :binding-shape "function/parameters"
+                      "variadic functions are outside this slice"
+                      (readerdatum-span parameter))
+            (recur (+ index 1)
+                   (conj parameters
+                         (->ParameterIR
+                          name
+                          (->TypeVariable (str "fn/" function-name "/param/" name))
+                          (readerdatum-span parameter))))))))
+    (fail-at! :definition-shape "function/parameters"
+              "expected a parameter vector" (readerdatum-span datum))))
+
+(defn parse-raw-function!
+  [datum ReaderDatum
+   declarations-before (Vec String)] RawFunction
+  (if (and (datum-head?! datum "defn") (= 4 (datum-count datum)))
+    (let [name String (symbol-name! (datum-at! datum 1) "function/name")]
+      (->RawFunction name (parse-parameters! (datum-at! datum 2) name)
+                     declarations-before (datum-at! datum 3)
+                     (readerdatum-span datum)))
+    (fail-at! :definition-shape "definition"
+              "expected (defn name [parameters] body)" (readerdatum-span datum))))
+
+(defvec-project function-names RawFunction String function
+  (rawfunction-name function))
+
+(defn declaration-names! [form ReaderDatum] (Vec String)
+  (if (> (datum-count form) 1)
+    (let [items (Vec ReaderDatum) (datum-tail! form 1)]
+      (loop [index Int 0
+             names (Vec String) []]
+        (if (= index (count items))
+          names
+          (recur (+ index 1)
+                 (conj names (symbol-name! (nth items index) "declare"))))))
+    (fail-at! :definition-shape "declare" "declare needs at least one name"
+              (readerdatum-span form))))
+
+(defn validate-declarations!
+  [declarations (Vec String)
+   functions (Vec RawFunction)
+   span SourceSpan] Nil
+  (let [names (Vec String) (function-names functions)]
+    (loop [index Int 0]
+      (if (= index (count declarations))
+        nil
+        (if (contains-string? names (nth declarations index))
+          (recur (+ index 1))
+          (fail-at! :definition-shape "declare"
+                    (str "declaration has no local definition: "
+                         (nth declarations index)) span))))))
+
+(defn parse-raw-module! [forms (Vec ReaderDatum)] RawModule
+  (if (>= (count forms) 2)
+    (let [namespace-form ReaderDatum (first forms)]
+      (if (and (datum-head?! namespace-form "ns") (= 2 (datum-count namespace-form)))
+        (let [namespace-name String (symbol-name! (datum-at! namespace-form 1) "namespace/name")]
+          (loop [index Int 1
+                 declarations (Vec String) []
+                 functions (Vec RawFunction) []]
+            (if (= index (count forms))
+              (let [names (Vec String) (function-names functions)]
+                (if (and (> (count functions) 0)
+                         (unique-strings? names) (unique-strings? declarations))
+                  (do
+                    (validate-declarations! declarations functions
+                                            (readerdatum-span namespace-form))
+                    (->RawModule namespace-name declarations functions))
+                  (fail-at! :module-shape "module/definitions"
+                            "module needs unique function and declaration names"
+                            (readerdatum-span namespace-form))))
+              (let [form ReaderDatum (nth forms index)]
+                (cond
+                  (datum-head?! form "declare")
+                  (recur (+ index 1)
+                         (append-strings declarations (declaration-names! form))
+                         functions)
+                  (datum-head?! form "defn")
+                  (recur (+ index 1) declarations
+                         (conj functions
+                               (parse-raw-function! form declarations)))
+                  :else
+                  (fail-at! :module-shape "module/form"
+                            "only declare and defn are admitted"
+                            (readerdatum-span form)))))))
+        (fail-at! :module-shape "namespace" "expected (ns namespace)"
+                  (readerdatum-span namespace-form))))
     (reject!)))
 
-(defn contains-value? [(values Any) (needle Any)] Boolean
-  (if (empty? values)
-    false
-    (if (= (first values) needle)
-      true
-      (contains-value? (rest values) needle))))
+(defvec-project contract-parameter-terms ParameterIR TypeTerm parameter
+  (parameterir-term parameter))
 
-(defn unique-values? [values Any] Boolean
-  (if (empty? values)
+(defn module-contracts [module RawModule] (Vec FunctionContract)
+  (let [functions (Vec RawFunction) (rawmodule-functions module)]
+    (loop [index Int 0
+           contracts (Vec FunctionContract) []]
+      (if (= index (count functions))
+        contracts
+        (let [function RawFunction (nth functions index)]
+          (recur (+ index 1)
+                 (conj contracts
+                       (->FunctionContract
+                        (rawfunction-name function)
+                        (contract-parameter-terms (rawfunction-parameters function))
+                        (->TypeVariable
+                         (str "fn/" (rawfunction-name function) "/return"))
+                        :local-call))))))))
+
+(defvec-find-by find-contract FunctionContract functioncontract-name)
+
+(defn require-contract!
+  [contracts (Vec FunctionContract)
+   name String
+   span SourceSpan] FunctionContract
+  (let [contract FunctionContract? (find-contract contracts name)]
+    (if (nil? contract)
+      (fail-at! :definition-shape "contract" "missing internal contract" span)
+      contract)))
+
+(defn include-contract
+  [contracts (Vec FunctionContract)
+   contract FunctionContract] (Vec FunctionContract)
+  (if (some? (find-contract contracts (functioncontract-name contract)))
+    contracts
+    (conj contracts contract)))
+
+(defn include-named-contracts!
+  [visible (Vec FunctionContract)
+   names (Vec String)
+   contracts (Vec FunctionContract)
+   span SourceSpan] (Vec FunctionContract)
+  (loop [index Int 0
+         result (Vec FunctionContract) visible]
+    (if (= index (count names))
+      result
+      (recur
+       (+ index 1)
+       (include-contract
+        result (require-contract! contracts (nth names index) span))))))
+
+(defvec-find-by find-rewrite-rule-in RewriteRule rewriterule-callee)
+
+(defn find-rewrite-rule [name String] RewriteRule?
+  (find-rewrite-rule-in STRUCTURAL-RULES name))
+
+(defn validate-call-namespace! [module RawModule] Nil
+  (let [functions (Vec RawFunction) (rawmodule-functions module)]
+    (loop [index Int 0]
+      (if (= index (count functions))
+        nil
+        (let [function RawFunction (nth functions index)
+              name String (rawfunction-name function)]
+          (if (or (some? (find-contract BUILTIN-CONTRACTS name))
+                  (some? (find-rewrite-rule name))
+                  (contains-string? BEAGLE-RESERVED-CALL-HEADS name))
+            (fail-at! :definition-shape "function/name"
+                      (str "function name collides with admitted call: " name)
+                      (rawfunction-span function))
+            (recur (+ index 1))))))))
+
+(defn find-binding
+  [environment (Vec LexicalBinding)
+   name String] LexicalBinding?
+  (loop [index Int (- (count environment) 1)]
+    (if (< index 0)
+      nil
+      (let [binding LexicalBinding (nth environment index)]
+        (if (= name (lexicalbinding-name binding))
+          binding
+          (recur (- index 1)))))))
+
+(defn form-term [form Form] TypeTerm
+  (match form
+    [(IntLiteral _ term _) term]
+    [(StringLiteral _ term _) term]
+    [(BoolLiteral _ term _) term]
+    [(NilLiteral term _) term]
+    [(ReferenceExpr _ term _) term]
+    [(CallExpr _ _ term _) term]
+    [(IfExpr _ _ _ term _) term]
+    [(LetExpr _ _ term _) term]
+    [(LoopExpr _ _ term _) term]
+    [(RecurExpr _ term _) term]
+    [(BlockedExpr _ term _) term]))
+
+(defn normalize-call!
+  [callee String
+   arguments (Vec Form)
+   span SourceSpan] NormalizedCall
+  (let [rule RewriteRule? (find-rewrite-rule callee)]
+    (if (nil? rule)
+      (->NormalizedCall callee arguments 0)
+      (if (= (count arguments) 1)
+        (->NormalizedCall
+         (rewriterule-target rule)
+         [(first arguments)
+          (->IntLiteral (rewriterule-literal rule) (->KnownType :int) span)]
+         1)
+        (fail-at! :arity "expression/rewrite"
+                  (str callee " expects 1 argument(s)") span)))))
+
+(defn term-argument-constraints
+  [arguments (Vec Form)
+   terms (Vec TypeTerm)
+   reason ConstraintReason
+   span SourceSpan] (Vec Constraint)
+  (loop [index Int 0
+         result (Vec Constraint) []]
+    (if (= index (count arguments))
+      result
+      (recur (+ index 1)
+             (conj result
+                   (->Constraint (form-term (nth arguments index))
+                                 (nth terms index) reason span))))))
+
+(declare parse-expression!)
+
+(defn parse-expression-list!
+  [items (Vec ReaderDatum)
+   environment (Vec LexicalBinding)
+   contracts (Vec FunctionContract)
+   owner String
+   path String
+   loop-context LoopContext?] ParsedExpressions
+  (loop [index Int 0
+         forms (Vec Form) []
+         effects ParseEffects (empty-effects)]
+    (if (= index (count items))
+      (->ParsedExpressions forms effects)
+      (let [parsed ParsedExpr (parse-expression! (nth items index) environment contracts owner
+                               (str path "/" index) false loop-context)]
+        (recur (+ index 1)
+               (conj forms (parsedexpr-form parsed))
+               (merge-effects effects (parsedexpr-effects parsed)))))))
+
+(defn resolve-call!
+  [normalized NormalizedCall
+   parsed ParsedExpressions
+   contracts (Vec FunctionContract)
+   owner String
+   path String
+   span SourceSpan] ParsedExpr
+  (let [callee String (normalizedcall-callee normalized)
+        arguments (Vec Form) (normalizedcall-arguments normalized)
+        local FunctionContract? (find-contract contracts callee)
+        contract FunctionContract? (if (some? local)
+                   local (find-contract BUILTIN-CONTRACTS callee))
+        effects ParseEffects (effects-add-rewrites
+                (parsedexpressions-effects parsed)
+                (normalizedcall-rewrite-count normalized))]
+    (if (some? contract)
+      (if (= (count arguments) (count (functioncontract-parameters contract)))
+        (->ParsedExpr
+         (->CallExpr callee arguments (functioncontract-result contract) span)
+         (effects-add-constraints
+          effects (term-argument-constraints
+                   arguments (functioncontract-parameters contract)
+                   (functioncontract-reason contract) span)))
+        (fail-at! :arity path
+                  (str callee " expects "
+                       (count (functioncontract-parameters contract)) " argument(s)")
+                  span))
+      (let [obligation UnresolvedObligation (->UnresolvedObligation :missing-call-contract owner callee span)
+            term TypeTerm (->TypeVariable (str path "/unresolved"))]
+        (->ParsedExpr
+         (->BlockedExpr obligation term span)
+         (effects-add-obligations effects [obligation]))))))
+
+(defn parse-call!
+  [datum ReaderDatum
+   environment (Vec LexicalBinding)
+   contracts (Vec FunctionContract)
+   owner String
+   path String
+   loop-context LoopContext?] ParsedExpr
+  (let [head ReaderDatum (datum-at! datum 0)]
+    (if (datum-symbol? head)
+      (let [callee String (str (readerdatum-value head))]
+        (if (some? (find-binding environment callee))
+          (fail-at! :expression-shape path
+                    (str "lexical binding cannot be used as a call: " callee)
+                    (readerdatum-span head))
+          (let [parsed ParsedExpressions (parse-expression-list!
+                 (datum-tail! datum 1) environment contracts owner
+                 (str path "/argument") loop-context)]
+            (resolve-call!
+             (normalize-call! callee (parsedexpressions-forms parsed)
+                              (readerdatum-span datum))
+             parsed contracts owner path (readerdatum-span datum)))))
+      (fail-at! :expression-shape path "call head must be a symbol"
+                (readerdatum-span head)))))
+
+(defn parse-if!
+  [datum ReaderDatum
+   environment (Vec LexicalBinding)
+   contracts (Vec FunctionContract)
+   owner String
+   path String
+   tail Boolean
+   loop-context LoopContext?] ParsedExpr
+  (if (= 4 (datum-count datum))
+    (let [test ParsedExpr (parse-expression! (datum-at! datum 1) environment contracts owner
+                             (str path "/test") false loop-context)
+          consequent ParsedExpr (parse-expression! (datum-at! datum 2) environment contracts owner
+                             (str path "/then") tail loop-context)
+          alternative ParsedExpr (parse-expression! (datum-at! datum 3) environment contracts owner
+                             (str path "/else") tail loop-context)
+          term TypeTerm (->TypeVariable (str path "/result"))
+          span SourceSpan (readerdatum-span datum)
+          own (Vec Constraint) [(->Constraint (form-term (parsedexpr-form test))
+                         (->KnownType :bool) :branch span)
+           (->Constraint (form-term (parsedexpr-form consequent)) term :branch span)
+           (->Constraint (form-term (parsedexpr-form alternative)) term :branch span)]]
+      (->ParsedExpr
+       (->IfExpr (parsedexpr-form test) (parsedexpr-form consequent)
+                 (parsedexpr-form alternative) term span)
+       (effects-add-constraints
+        (merge-effects
+         (merge-effects (parsedexpr-effects test)
+                        (parsedexpr-effects consequent))
+         (parsedexpr-effects alternative))
+        own)))
+    (fail-at! :expression-shape path "if needs test, then, and else"
+              (readerdatum-span datum))))
+
+(defvec-project local-binding-names LocalBinding String binding
+  (localbinding-name binding))
+
+(defn parse-bindings!
+  [datum ReaderDatum
+   environment (Vec LexicalBinding)
+   contracts (Vec FunctionContract)
+   owner String
+   path String
+   loop-context LoopContext?] ParsedBindings
+  (if (and (datum-vector? datum) (even? (datum-count datum)))
+    (loop [index Int 0
+           bindings (Vec LocalBinding) []
+           next-environment (Vec LexicalBinding) environment
+           effects ParseEffects (empty-effects)]
+      (if (= index (datum-count datum))
+        (if (unique-strings? (local-binding-names bindings))
+          (->ParsedBindings bindings next-environment effects)
+          (fail-at! :binding-shape path "duplicate binding name"
+                    (readerdatum-span datum)))
+        (let [name-datum ReaderDatum (datum-at! datum index)
+              name String (symbol-name! name-datum path)
+              parsed ParsedExpr (parse-expression!
+               (datum-at! datum (+ index 1)) next-environment contracts owner
+               (str path "/" name "/value") false loop-context)
+              term TypeTerm (->TypeVariable (str path "/" name))]
+          (recur (+ index 2)
+                 (conj bindings
+                       (->LocalBinding name term (parsedexpr-form parsed)
+                                       (readerdatum-span name-datum)))
+                 (conj next-environment (->LexicalBinding name term))
+                 (effects-add-constraints
+                  (merge-effects effects (parsedexpr-effects parsed))
+                  [(->Constraint (form-term (parsedexpr-form parsed)) term
+                                 :binding (readerdatum-span name-datum))])))))
+    (fail-at! :binding-shape path "expected an even binding vector"
+              (readerdatum-span datum))))
+
+(defn parse-let!
+  [datum ReaderDatum
+   environment (Vec LexicalBinding)
+   contracts (Vec FunctionContract)
+   owner String
+   path String
+   tail Boolean
+   loop-context LoopContext?] ParsedExpr
+  (if (= 3 (datum-count datum))
+    (let [bindings ParsedBindings (parse-bindings! (datum-at! datum 1) environment contracts owner
+                           (str path "/binding") loop-context)
+          body ParsedExpr (parse-expression! (datum-at! datum 2)
+                             (parsedbindings-environment bindings)
+                             contracts owner (str path "/body") tail loop-context)]
+      (->ParsedExpr
+       (->LetExpr (parsedbindings-bindings bindings) (parsedexpr-form body)
+                  (form-term (parsedexpr-form body)) (readerdatum-span datum))
+       (merge-effects (parsedbindings-effects bindings)
+                      (parsedexpr-effects body))))
+    (fail-at! :expression-shape path "let needs bindings and one body"
+              (readerdatum-span datum))))
+
+(defn parse-loop!
+  [datum ReaderDatum
+   environment (Vec LexicalBinding)
+   contracts (Vec FunctionContract)
+   owner String
+   path String] ParsedExpr
+  (if (= 3 (datum-count datum))
+    (let [bindings ParsedBindings (parse-bindings! (datum-at! datum 1) environment contracts owner
+                           (str path "/binding") nil)]
+      (if (> (count (parsedbindings-bindings bindings)) 0)
+        (let [context LoopContext (->LoopContext (parsedbindings-bindings bindings))
+              body ParsedExpr (parse-expression! (datum-at! datum 2)
+                                 (parsedbindings-environment bindings)
+                                 contracts owner (str path "/body") true context)]
+          (->ParsedExpr
+           (->LoopExpr (parsedbindings-bindings bindings) (parsedexpr-form body)
+                       (form-term (parsedexpr-form body)) (readerdatum-span datum))
+           (merge-effects (parsedbindings-effects bindings)
+                          (parsedexpr-effects body))))
+        (fail-at! :binding-shape path "loop needs at least one binding"
+                  (readerdatum-span datum))))
+    (fail-at! :expression-shape path "loop needs bindings and one body"
+              (readerdatum-span datum))))
+
+(defvec-project loop-terms LocalBinding TypeTerm binding
+  (localbinding-term binding))
+
+(defn parse-recur!
+  [datum ReaderDatum
+   environment (Vec LexicalBinding)
+   contracts (Vec FunctionContract)
+   owner String
+   path String
+   tail Boolean
+   loop-context LoopContext?] ParsedExpr
+  (if (not tail)
+    (fail-at! :recur-nontail path "recur must be in tail position"
+              (readerdatum-span datum))
+    (if-let [context loop-context]
+      (let [parsed ParsedExpressions (parse-expression-list!
+             (datum-tail! datum 1) environment contracts owner
+             (str path "/argument") context)
+            bindings (Vec LocalBinding) (loopcontext-bindings context)]
+        (if (= (count (parsedexpressions-forms parsed)) (count bindings))
+          (->ParsedExpr
+           (->RecurExpr (parsedexpressions-forms parsed) (->KnownType :never)
+                        (readerdatum-span datum))
+           (effects-add-constraints
+            (parsedexpressions-effects parsed)
+            (term-argument-constraints
+             (parsedexpressions-forms parsed) (loop-terms bindings)
+             :recur (readerdatum-span datum))))
+          (fail-at! :arity path "recur arity does not match its loop"
+                    (readerdatum-span datum))))
+      (fail-at! :recur-target path "recur has no enclosing loop"
+                (readerdatum-span datum)))))
+
+(defn parse-expression!
+  [datum ReaderDatum
+   environment (Vec LexicalBinding)
+   contracts (Vec FunctionContract)
+   owner String
+   path String
+   tail Boolean
+   loop-context LoopContext?] ParsedExpr
+  (let [value Any (readerdatum-value datum)
+        span SourceSpan (readerdatum-span datum)]
+    (cond
+      (integer? value)
+      (->ParsedExpr (->IntLiteral value (->KnownType :int) span)
+                    (empty-effects))
+      (string? value)
+      (->ParsedExpr (->StringLiteral value (->KnownType :string) span)
+                    (empty-effects))
+      (or (= true value) (= false value))
+      (->ParsedExpr (->BoolLiteral value (->KnownType :bool) span)
+                    (empty-effects))
+      (nil? value)
+      (->ParsedExpr (->NilLiteral (->KnownType :nil) span)
+                    (empty-effects))
+      (symbol? value)
+      (let [name String (str value)
+            binding LexicalBinding? (find-binding environment name)]
+        (if (some? binding)
+          (->ParsedExpr (->ReferenceExpr name (lexicalbinding-term binding) span)
+                        (empty-effects))
+          (let [obligation UnresolvedObligation (->UnresolvedObligation :unbound-symbol owner name span)
+                term TypeTerm (->TypeVariable (str path "/unbound"))]
+            (->ParsedExpr (->BlockedExpr obligation term span)
+                          (effects-add-obligations
+                           (empty-effects) [obligation])))))
+      (seq? value)
+      (if (= 0 (datum-count datum))
+        (fail-at! :expression-shape path "empty calls are unsupported" span)
+        (cond
+          (datum-head?! datum "if")
+          (parse-if! datum environment contracts owner path tail loop-context)
+          (datum-head?! datum "let")
+          (parse-let! datum environment contracts owner path tail loop-context)
+          (datum-head?! datum "loop")
+          (parse-loop! datum environment contracts owner path)
+          (datum-head?! datum "recur")
+          (parse-recur! datum environment contracts owner path tail loop-context)
+          :else
+          (parse-call! datum environment contracts owner path loop-context)))
+      :else
+      (fail-at! :expression-shape path
+                "literal is outside the admitted algebra" span))))
+
+(defvec-project parameter-environment ParameterIR LexicalBinding parameter
+  (->LexicalBinding (parameterir-name parameter)
+                    (parameterir-term parameter)))
+
+(declare dependencies-of-form)
+
+(defn dependencies-of-forms
+  [forms (Vec Form)
+   local-names (Vec String)] (Vec String)
+  (loop [index Int 0
+         result (Vec String) []]
+    (if (= index (count forms))
+      result
+      (recur (+ index 1)
+             (append-unique-strings
+              result (dependencies-of-form (nth forms index) local-names))))))
+
+(defn dependencies-of-bindings
+  [bindings (Vec LocalBinding)
+   local-names (Vec String)] (Vec String)
+  (loop [index Int 0
+         result (Vec String) []]
+    (if (= index (count bindings))
+      result
+      (recur (+ index 1)
+             (append-unique-strings
+              result
+              (dependencies-of-form
+               (localbinding-value (nth bindings index)) local-names))))))
+
+(defn dependencies-of-form
+  [form Form
+   local-names (Vec String)] (Vec String)
+  (match form
+    [(IntLiteral _ _ _) []]
+    [(StringLiteral _ _ _) []]
+    [(BoolLiteral _ _ _) []]
+    [(NilLiteral _ _) []]
+    [(ReferenceExpr _ _ _) []]
+    [(CallExpr callee arguments _ _)
+     (let [nested (Vec String) (dependencies-of-forms arguments local-names)]
+       (if (contains-string? local-names callee)
+         (append-unique-strings nested [callee])
+         nested))]
+    [(IfExpr test consequent alternative _ _)
+     (dependencies-of-forms [test consequent alternative] local-names)]
+    [(LetExpr bindings body _ _)
+     (append-unique-strings
+      (dependencies-of-bindings bindings local-names)
+      (dependencies-of-form body local-names))]
+    [(LoopExpr bindings body _ _)
+     (append-unique-strings
+      (dependencies-of-bindings bindings local-names)
+      (dependencies-of-form body local-names))]
+    [(RecurExpr arguments _ _)
+     (dependencies-of-forms arguments local-names)]
+    [(BlockedExpr _ _ _) []]))
+
+(defn parse-module-functions!
+  [module RawModule
+   contracts (Vec FunctionContract)] ParsedModule
+  (let [raw-functions (Vec RawFunction) (rawmodule-functions module)
+        local-names (Vec String) (function-names raw-functions)]
+    (loop [index Int 0
+           functions (Vec FunctionIR) []
+           visible-contracts (Vec FunctionContract) []
+           effects ParseEffects (empty-effects)]
+      (if (= index (count raw-functions))
+        (->ParsedModule functions effects)
+        (let [raw-function RawFunction (nth raw-functions index)
+              contract FunctionContract (require-contract! contracts (rawfunction-name raw-function)
+                                 (rawfunction-span raw-function))
+              declared-contracts (Vec FunctionContract) (include-named-contracts!
+                                  visible-contracts
+                                  (rawfunction-declarations-before raw-function)
+                                  contracts (rawfunction-span raw-function))
+              callable-contracts (Vec FunctionContract) (include-contract
+                                  declared-contracts contract)
+              parsed ParsedExpr (parse-expression!
+               (rawfunction-body raw-function)
+               (parameter-environment (rawfunction-parameters raw-function))
+               callable-contracts (rawfunction-name raw-function)
+               (str "fn/" (rawfunction-name raw-function) "/body") true nil)
+              function FunctionIR (->FunctionIR
+               (rawfunction-name raw-function) (rawfunction-parameters raw-function)
+               (functioncontract-result contract) (parsedexpr-form parsed)
+               (dependencies-of-form (parsedexpr-form parsed) local-names)
+               (rawfunction-span raw-function))]
+          (recur
+           (+ index 1)
+           (conj functions function)
+           callable-contracts
+           (effects-add-constraints
+            (merge-effects effects (parsedexpr-effects parsed))
+            [(->Constraint (form-term (parsedexpr-form parsed))
+                           (functioncontract-result contract)
+                           :return (rawfunction-span raw-function))])))))))
+
+(defvec-find-by find-assignment TypeAssignment typeassignment-variable)
+
+(defn bind-type!
+  [state SolverState
+   variable String
+   value ScalarType
+   span SourceSpan] SolverState
+  (if (= value :never)
+    state
+    (let [existing TypeAssignment? (find-assignment (solverstate-assignments state) variable)]
+      (if (nil? existing)
+        (->SolverState
+         (conj (solverstate-assignments state) (->TypeAssignment variable value))
+         true)
+        (if (= value (typeassignment-value existing))
+          state
+          (fail-at! :type-conflict variable
+                    (str "inferred both " (typeassignment-value existing)
+                         " and " value) span))))))
+
+(defn unify!
+  [state SolverState
+   constraint Constraint] SolverState
+  (let [left TypeTerm (constraint-left constraint)
+        right TypeTerm (constraint-right constraint)
+        span SourceSpan (constraint-span constraint)]
+    (match left
+      [(KnownType left-value)
+       (match right
+         [(KnownType right-value)
+          (if (or (= left-value right-value)
+                  (= left-value :never) (= right-value :never))
+            state
+            (fail-at! :type-conflict "constraint"
+                      (str "cannot unify " left-value " with " right-value) span))]
+         [(TypeVariable right-name)
+          (bind-type! state right-name left-value span)])]
+      [(TypeVariable left-name)
+       (match right
+         [(KnownType right-value)
+          (bind-type! state left-name right-value span)]
+         [(TypeVariable right-name)
+          (let [left-value TypeAssignment? (find-assignment (solverstate-assignments state) left-name)
+                right-value TypeAssignment? (find-assignment (solverstate-assignments state) right-name)]
+            (cond
+              (some? left-value)
+              (bind-type! state right-name (typeassignment-value left-value) span)
+              (some? right-value)
+              (bind-type! state left-name (typeassignment-value right-value) span)
+              :else state))])])))
+
+(defn solve-pass!
+  [constraints (Vec Constraint)
+   initial SolverState] SolverState
+  (loop [index Int 0
+         state SolverState initial]
+    (if (= index (count constraints))
+      state
+      (recur (+ index 1) (unify! state (nth constraints index))))))
+
+(defn solve-constraints! [constraints (Vec Constraint)] SolverState
+  (loop [remaining Int (+ 1 (count constraints))
+         assignments (Vec TypeAssignment) []]
+    (let [next SolverState (solve-pass! constraints (->SolverState assignments false))]
+      (if (or (= remaining 0) (not (solverstate-changed next)))
+        next
+        (recur (- remaining 1) (solverstate-assignments next))))))
+
+(defn resolved-scalar
+  [term TypeTerm
+   assignments (Vec TypeAssignment)] ScalarType?
+  (match term
+    [(KnownType value) value]
+    [(TypeVariable name)
+     (let [assignment TypeAssignment? (find-assignment assignments name)]
+       (if (nil? assignment) nil (typeassignment-value assignment)))]))
+
+(defn type-obligation
+  [owner String
+   term TypeTerm
+   span SourceSpan
+   assignments (Vec TypeAssignment)] UnresolvedObligation?
+  (if (some? (resolved-scalar term assignments))
+    nil
+    (match term
+      [(KnownType _) nil]
+      [(TypeVariable name)
+       (->UnresolvedObligation :unresolved-type owner name span)])))
+
+(declare form-binding-type-obligations)
+
+(defn forms-binding-type-obligations
+  [owner String
+   forms (Vec Form)
+   assignments (Vec TypeAssignment)] (Vec UnresolvedObligation)
+  (loop [index Int 0
+         result (Vec UnresolvedObligation) []]
+    (if (= index (count forms))
+      result
+      (recur
+       (+ index 1)
+       (append-obligations
+        result
+        (form-binding-type-obligations
+         owner (nth forms index) assignments))))))
+
+(defn bindings-type-obligations
+  [owner String
+   bindings (Vec LocalBinding)
+   assignments (Vec TypeAssignment)] (Vec UnresolvedObligation)
+  (loop [index Int 0
+         result (Vec UnresolvedObligation) []]
+    (if (= index (count bindings))
+      result
+      (let [binding LocalBinding (nth bindings index)
+            own UnresolvedObligation? (type-obligation
+             owner (localbinding-term binding) (localbinding-span binding)
+             assignments)
+            nested (Vec UnresolvedObligation) (form-binding-type-obligations
+                    owner (localbinding-value binding) assignments)
+            with-own (Vec UnresolvedObligation) (if (nil? own)
+                       result (conj result own))]
+        (recur (+ index 1)
+               (append-obligations with-own nested))))))
+
+(defn form-binding-type-obligations
+  [owner String
+   form Form
+   assignments (Vec TypeAssignment)] (Vec UnresolvedObligation)
+  (match form
+    [(IntLiteral _ _ _) []]
+    [(StringLiteral _ _ _) []]
+    [(BoolLiteral _ _ _) []]
+    [(NilLiteral _ _) []]
+    [(ReferenceExpr _ _ _) []]
+    [(CallExpr _ arguments _ _)
+     (forms-binding-type-obligations owner arguments assignments)]
+    [(IfExpr test consequent alternative _ _)
+     (forms-binding-type-obligations
+      owner [test consequent alternative] assignments)]
+    [(LetExpr bindings body _ _)
+     (append-obligations
+      (bindings-type-obligations owner bindings assignments)
+      (form-binding-type-obligations owner body assignments))]
+    [(LoopExpr bindings body _ _)
+     (append-obligations
+      (bindings-type-obligations owner bindings assignments)
+      (form-binding-type-obligations owner body assignments))]
+    [(RecurExpr arguments _ _)
+     (forms-binding-type-obligations owner arguments assignments)]
+    [(BlockedExpr _ _ _) []]))
+
+(defn unresolved-type-obligations
+  [functions (Vec FunctionIR)
+   assignments (Vec TypeAssignment)] (Vec UnresolvedObligation)
+  (loop [function-index Int 0
+         result (Vec UnresolvedObligation) []]
+    (if (= function-index (count functions))
+      result
+      (let [function FunctionIR (nth functions function-index)
+            parameters (Vec ParameterIR) (functionir-parameters function)
+            with-parameters (Vec UnresolvedObligation) (loop [index Int 0
+                                                              current (Vec UnresolvedObligation) result]
+                                                         (if (= index (count parameters))
+                current
+                (let [parameter ParameterIR (nth parameters index)
+                      obligation UnresolvedObligation? (type-obligation
+                       (functionir-name function) (parameterir-term parameter)
+                       (parameterir-span parameter) assignments)]
+                  (recur (+ index 1)
+                         (if (nil? obligation) current (conj current obligation))))))
+            with-bindings (Vec UnresolvedObligation) (append-obligations
+                           with-parameters
+                           (form-binding-type-obligations
+                            (functionir-name function)
+                            (functionir-body function) assignments))
+            return-obligation UnresolvedObligation? (type-obligation (functionir-name function) (functionir-result function)
+                             (functionir-span function) assignments)]
+        (recur (+ function-index 1)
+               (if (nil? return-obligation)
+                 with-bindings
+                 (conj with-bindings return-obligation)))))))
+
+(defvec-project dependency-graph FunctionIR DependencyNode function
+  (->DependencyNode (functionir-name function)
+                    (functionir-dependencies function)))
+
+(defn graph-neighbors
+  [graph (Vec DependencyNode)
+   name String] (Vec String)
+  (loop [index Int 0]
+    (if (= index (count graph))
+      []
+      (let [node DependencyNode (nth graph index)]
+        (if (= name (dependencynode-name node))
+          (dependencynode-dependencies node)
+          (recur (+ index 1)))))))
+
+(defn graph-reachable?
+  [graph (Vec DependencyNode)
+   current String
+   target String
+   visited (Vec String)] Boolean
+  (if (= current target)
     true
-    (and (not (contains-value? (rest values) (first values)))
-         (unique-values? (rest values)))))
+    (if (contains-string? visited current)
+      false
+      (let [neighbors (Vec String) (graph-neighbors graph current)
+            next-visited (Vec String) (conj visited current)]
+        (loop [index Int 0]
+          (if (= index (count neighbors))
+            false
+            (if (graph-reachable? graph (nth neighbors index) target next-visited)
+              true
+              (recur (+ index 1)))))))))
 
-(defn valid-arity? [arity Any] Boolean
-  (and (seq? arity)
-       (= 2 (count arity))
-       (vector? (first arity))
-       (every? symbol? (first arity))
-       (unique-values? (first arity))
-       (seq? (second arity))))
+(defn component-for
+  [seed String
+   names (Vec String)
+   graph (Vec DependencyNode)] (Vec String)
+  (loop [index Int 0
+         result (Vec String) []]
+    (if (= index (count names))
+      result
+      (let [candidate String (nth names index)]
+        (recur (+ index 1)
+               (if (and (graph-reachable? graph seed candidate [])
+                        (graph-reachable? graph candidate seed []))
+                 (conj result candidate)
+                 result))))))
 
-(defn infer-param-type [(parameter Any) (body Any)] String
-  ;; Conservative, syntax-directed inference for the M3 surface.  Unknown
-  ;; parameters remain String, which is the useful default for source code
-  ;; conversion and still leaves unsupported calls to the checker.
-  (if (and (seq? body)
-           (= "+" (str (first body)))
-           (contains-value? (rest body) parameter))
-    "Int"
-    "String"))
+(defn remove-names
+  [names (Vec String)
+   removed (Vec String)] (Vec String)
+  (loop [index Int 0
+         result (Vec String) []]
+    (if (= index (count names))
+      result
+      (let [name String (nth names index)]
+        (recur (+ index 1)
+               (if (contains-string? removed name) result (conj result name)))))))
 
-(declare render-params)
+(defn dependency-sccs
+  [names (Vec String)
+   graph (Vec DependencyNode)] (Vec DependencyScc)
+  (loop [remaining (Vec String) names
+         result (Vec DependencyScc) []]
+    (if (= 0 (count remaining))
+      result
+      (let [seed String (first remaining)
+            members (Vec String) (component-for seed names graph)
+            recurrent Boolean (or (> (count members) 1)
+                (contains-string? (graph-neighbors graph seed) seed))]
+        (recur (remove-names remaining members)
+               (conj result (->DependencyScc members recurrent)))))))
 
-(defn render-arities [arities Any] String
-  (if (empty? arities)
-    ")\n"
-    (let [arity (first arities)
-          params (first arity)
-          body (second arity)
-          typed-params (render-params params body)
-          return-type (if (and (seq? body)
-                               (or (= "+" (str (first body)))
-                                   (= "-" (str (first body)))
-                                   (= "*" (str (first body)))
-                                   (= "/" (str (first body)))))
-                        "Int" "String")]
-      (str "  ([" typed-params "] " return-type "\n    "
-           (pr-str body) ")\n"
-           (render-arities (rest arities))))))
+(defn migrate-source! [source String] MigrationResult
+  (let [module RawModule (parse-raw-module! (safe-read-forms! source))
+        _ Nil (validate-call-namespace! module)
+        contracts (Vec FunctionContract) (module-contracts module)
+        parsed ParsedModule (parse-module-functions! module contracts)
+        effects ParseEffects (parsedmodule-effects parsed)
+        solver SolverState (solve-constraints! (parseeffects-constraints effects))
+        assignments (Vec TypeAssignment) (solverstate-assignments solver)
+        obligations (Vec UnresolvedObligation) (append-obligations
+          (parseeffects-obligations effects)
+          (unresolved-type-obligations (parsedmodule-functions parsed) assignments))
+        graph (Vec DependencyNode) (dependency-graph (parsedmodule-functions parsed))
+        names (Vec String) (function-names (rawmodule-functions module))]
+    (->MigrationResult
+     module (parsedmodule-functions parsed) graph (dependency-sccs names graph)
+     assignments obligations (parseeffects-rewrite-count effects))))
 
-(defn render-params [(params Any) (body Any)] String
-  (if (empty? params)
+(defn scalar-label [type ScalarType] String
+  (cond
+    (= type :int) "Int"
+    (= type :string) "String"
+    (= type :bool) "Bool"
+    (= type :nil) "Nil"
+    :else "Never"))
+
+(defn resolved-type!
+  [term TypeTerm
+   assignments (Vec TypeAssignment)
+   span SourceSpan] ScalarType
+  (let [resolved ScalarType? (resolved-scalar term assignments)]
+    (if (nil? resolved)
+      (fail-at! :type-conflict "render/type" "unresolved type reached renderer" span)
+      resolved)))
+
+(declare render-form!)
+
+(defn render-form-list!
+  [forms (Vec Form)
+   assignments (Vec TypeAssignment)] String
+  (loop [index Int 0
+         result String ""]
+    (if (= index (count forms))
+      result
+      (recur (+ index 1)
+             (str result (if (= index 0) "" " ")
+                  (render-form! (nth forms index) assignments))))))
+
+(defn render-bindings!
+  [bindings (Vec LocalBinding)
+   assignments (Vec TypeAssignment)] String
+  (loop [index Int 0
+         result String ""]
+    (if (= index (count bindings))
+      result
+      (let [binding LocalBinding (nth bindings index)]
+        (recur
+         (+ index 1)
+         (str result (if (= index 0) "" " ")
+              (localbinding-name binding) " "
+              (scalar-label
+               (resolved-type! (localbinding-term binding) assignments
+                               (localbinding-span binding))) " "
+              (render-form! (localbinding-value binding) assignments)))))))
+
+(defn render-form!
+  [form Form
+   assignments (Vec TypeAssignment)] String
+  (match form
+    [(IntLiteral value _ _) (str value)]
+    [(StringLiteral value _ _) (pr-str value)]
+    [(BoolLiteral value _ _) (str value)]
+    [(NilLiteral _ _) "nil"]
+    [(ReferenceExpr name _ _) name]
+    [(CallExpr callee arguments _ _)
+     (str "(" callee
+          (if (= 0 (count arguments))
+            "" (str " " (render-form-list! arguments assignments))) ")")]
+    [(IfExpr test consequent alternative _ _)
+     (str "(if " (render-form! test assignments) " "
+          (render-form! consequent assignments) " "
+          (render-form! alternative assignments) ")")]
+    [(LetExpr bindings body _ _)
+     (str "(let [" (render-bindings! bindings assignments) "] "
+          (render-form! body assignments) ")")]
+    [(LoopExpr bindings body _ _)
+     (str "(loop [" (render-bindings! bindings assignments) "] "
+          (render-form! body assignments) ")")]
+    [(RecurExpr arguments _ _)
+     (str "(recur " (render-form-list! arguments assignments) ")")]
+    [(BlockedExpr obligation _ span)
+     (fail-at! :type-conflict "render/blocked"
+               (str "unresolved " (unresolvedobligation-subject obligation)) span)]))
+
+(defn render-parameters!
+  [parameters (Vec ParameterIR)
+   assignments (Vec TypeAssignment)] String
+  (loop [index Int 0
+         result String ""]
+    (if (= index (count parameters))
+      result
+      (let [parameter ParameterIR (nth parameters index)]
+        (recur
+         (+ index 1)
+         (str result (if (= index 0) "" " ")
+              (parameterir-name parameter) " "
+              (scalar-label
+               (resolved-type! (parameterir-term parameter) assignments
+                               (parameterir-span parameter)))))))))
+
+(defn render-function!
+  [function FunctionIR
+   assignments (Vec TypeAssignment)] String
+  (str "(defn " (functionir-name function) " ["
+       (render-parameters! (functionir-parameters function) assignments) "] "
+       (scalar-label
+        (resolved-type! (functionir-result function) assignments
+                        (functionir-span function))) "\n  "
+       (render-form! (functionir-body function) assignments) ")\n"))
+
+(defn join-strings [values (Vec String)] String
+  (loop [index Int 0
+         result String ""]
+    (if (= index (count values))
+      result
+      (recur (+ index 1)
+             (str result (if (= index 0) "" " ") (nth values index))))))
+
+(defn render-declarations [declarations (Vec String)] String
+  (if (= 0 (count declarations))
     ""
-    (str " " (first params) " " (infer-param-type (first params) body)
-         (render-params (rest params) body))))
+    (str "(declare " (join-strings declarations) ")\n\n")))
 
-(defn canonical-multi! [form Any] FunctionIR
-  (if (and (seq? form) (= "defn" (str (first form)))
-           (symbol? (second form)) (> (count form) 2)
-           (let [arities (rest (rest form))
-                 arity-counts (map (fn [arity Any] Int (count (first arity))) arities)]
-             (and (every? valid-arity? arities)
-                  (unique-values? arity-counts))))
-    (let [name (str (second form))
-          arities (rest (rest form))
-          rendered (str "(defn " name "\n" (render-arities arities))]
-      (->FunctionIR name rendered "" (->BindingIR "" "" "" 0 "Any" (source-span! form))
-                    "multi" "Any" []))
-    (reject!)))
+(defn render-module! [migration MigrationResult] String
+  (let [module RawModule (migrationresult-module migration)
+        functions (Vec FunctionIR) (migrationresult-functions migration)
+        assignments (Vec TypeAssignment) (migrationresult-assignments migration)]
+    (loop [index Int 0
+           result String (str "#lang beagle/clj\n\n(ns " (rawmodule-namespace module) ")\n\n"
+                (render-declarations (rawmodule-declarations module)))]
+      (if (= index (count functions))
+        result
+        (recur (+ index 1)
+               (str result (if (= index 0) "" "\n")
+                    (render-function! (nth functions index) assignments)))))))
 
-(defn canonical-function! [form Any] FunctionIR
-  (if (and (seq? form) (> (count form) 2)
-           (seq? (nth form 2)))
-    (canonical-multi! form)
-  (if (and (seq? form)
-           (= 4 (count form))
-           (= "defn" (str (first form)))
-           (symbol? (second form))
-           (vector? (nth form 2))
-           (= 2 (count (nth form 2)))
-           (symbol? (first (nth form 2)))
-           (symbol? (second (nth form 2)))
-           (not= (first (nth form 2)) (second (nth form 2)))
-           (seq? (nth form 3))
-           (= 3 (count (nth form 3)))
-           (= "let" (str (first (nth form 3))))
-           (vector? (second (nth form 3)))
-           (= 2 (count (second (nth form 3))))
-           (symbol? (first (second (nth form 3))))
-           (seq? (second (second (nth form 3))))
-           (= 3 (count (second (second (nth form 3)))))
-           (symbol? (first (second (second (nth form 3)))))
-           (seq? (nth (nth form 3) 2))
-           (= 3 (count (nth (nth form 3) 2)))
-           (symbol? (first (nth (nth form 3) 2))))
-    (let [parameters (nth form 2)
-          string-parameter (first parameters)
-          integer-parameter (second parameters)
-          let-form (nth form 3)
-          bindings (second let-form)
-          binding-name (first bindings)
-          binding-value (second bindings)
-          result (nth let-form 2)]
-      (if (not= "+" (str (first binding-value)))
-        (unresolved-call! "function/body/let/binding/value" binding-value)
-        (if (not= "subs" (str (first result)))
-          (unresolved-call! "function/body/let/result" result)
-          (if (and (= integer-parameter (second binding-value))
-                   (integer? (nth binding-value 2))
-                   (= string-parameter (second result))
-                   (= binding-name (nth result 2))
-                   (not= binding-name string-parameter)
-                   (not= binding-name integer-parameter))
-            (let [binding-span SourceSpan (source-span! binding-value)
-                  result-span SourceSpan (source-span! result)
-                  constraints (Vec ConstraintIR) [(->ConstraintIR
-                    "function/parameters/0"
-                    (str string-parameter)
-                    "String"
-                    "builtin:subs/argument-0"
-                    result-span)
-                   (->ConstraintIR
-                    "function/parameters/1"
-                    (str integer-parameter)
-                    "Int"
-                    "builtin:+/argument-0"
-                    binding-span)
-                   (->ConstraintIR
-                    "function/body/let/binding"
-                    (str binding-name)
-                    "Int"
-                    "builtin:+/return"
-                    binding-span)
-                   (->ConstraintIR
-                    "function/return"
-                    (str (second form))
-                    "String"
-                    "builtin:subs/return"
-                    result-span)]]
-              (->FunctionIR
-               (str (second form))
-               (str string-parameter)
-               (str integer-parameter)
-               (->BindingIR
-                (str binding-name)
-                "+"
-                (str integer-parameter)
-                (nth binding-value 2)
-                "Int"
-                binding-span)
-               "subs"
-               "String"
-               constraints))
-            (reject!)))))
-    (reject!))))
+(defn obligation-label [kind ObligationKind] String
+  (cond
+    (= kind :missing-call-contract) "missing-call-contract"
+    (= kind :unbound-symbol) "unbound-symbol"
+    :else "unresolved-type"))
 
-(defn canonicalize! [forms Any] ModuleIR
-  (if (and (vector? forms) (= 2 (count forms)))
-    (->ModuleIR (canonical-namespace! (first forms))
-                (canonical-function! (second forms)))
-    (reject!)))
+(defn render-obligation [obligation UnresolvedObligation] String
+  (let [span SourceSpan (unresolvedobligation-span obligation)]
+    (str "clojure-to-beagle[E_UNRESOLVED_OBLIGATION] <input>:"
+         (sourcespan-line span) ":" (sourcespan-column span)
+         " owner=" (unresolvedobligation-owner obligation)
+         " kind=" (obligation-label (unresolvedobligation-kind obligation))
+         " subject=" (unresolvedobligation-subject obligation))))
 
-(defn emit-beagle [module ModuleIR] String
-  (let [namespace (moduleir-namespace module)
-        function (moduleir-function module)
-        binding (functionir-binding function)]
-    (if (= "multi" (functionir-result-operator function))
-      (str "#lang beagle/clj\n\n"
-           "(ns " (namespaceir-name namespace) ")\n\n"
-           (functionir-string-parameter function))
-      (str "#lang beagle/clj\n\n"
-           "(ns " (namespaceir-name namespace) ")\n\n"
-           "(defn " (functionir-name function)
-           " [" (functionir-string-parameter function) " String "
-           (functionir-integer-parameter function) " Int] "
-           (functionir-result-type function) "\n"
-           "  (let [" (bindingir-name binding) " "
-           (bindingir-inferred-type binding) " (" (bindingir-operator binding) " "
-           (bindingir-parameter binding) " " (bindingir-literal binding) ")]\n"
-           "    (" (functionir-result-operator function) " "
-           (functionir-string-parameter function) " "
-           (bindingir-name binding) ")))\n"))))
+(defn migration-or-fail! [source String] MigrationResult
+  (let [migration MigrationResult (migrate-source! source)
+        obligations (Vec UnresolvedObligation) (migrationresult-obligations migration)]
+    (if (= 0 (count obligations))
+      migration
+      (throw (ex-info (render-obligation (first obligations))
+                      {:converter-diagnostic true})))))
 
-(defn diagnostic-message [error Any] String
+(defn render-sccs [sccs (Vec DependencyScc)] String
+  (loop [index Int 0
+         result String "["]
+    (if (= index (count sccs))
+      (str result "]")
+      (let [scc DependencyScc (nth sccs index)]
+        (recur (+ index 1)
+               (str result (if (= index 0) "" " ")
+                    "{:members ["
+                    (join-strings (dependencyscc-members scc))
+                    "] :recurrent " (dependencyscc-recurrent scc) "}"))))))
+
+(defn render-report [migration MigrationResult] String
+  (str "{:namespace \"" (rawmodule-namespace (migrationresult-module migration))
+       "\" :functions " (count (migrationresult-functions migration))
+       " :sccs " (render-sccs (migrationresult-sccs migration))
+       " :rewrites " (migrationresult-rewrite-count migration)
+       " :obligations " (count (migrationresult-obligations migration)) "}\n"))
+
+(defn caught-message [error Exception] String
   (if (= true (get (ex-data error) :converter-diagnostic))
     (ex-message error)
     REJECTION))
 
-(defn -main [& args] Nil
+(defn render-preserved-source! [source String] String
+  (do
+    (safe-read-forms! source)
+    (str "#lang beagle/clj\n\n" source)))
+
+(defn -main [& (args (Vec String))] Nil
   (try
-    (if (= 1 (count args))
-      (print (emit-beagle (canonicalize! (safe-read-forms! (slurp (first args))))))
+    (cond
+      (and (= 1 (count args)) (= "--reserved-heads" (first args)))
+      (println (join-strings BEAGLE-RESERVED-CALL-HEADS))
+      (= 1 (count args))
+      (print (render-module! (migration-or-fail! (slurp (first args)))))
+      (and (= 2 (count args)) (= "--preserve" (first args)))
+      (print (render-preserved-source! (slurp (second args))))
+      (and (= 2 (count args)) (= "--report" (first args)))
+      (print (render-report (migrate-source! (slurp (second args)))))
+      :else
       (throw (ex-info "usage" {})))
-    (catch Throwable error
-      (binding [*out* *err*]
-        (println (diagnostic-message error)))
+    (catch Exception error
+      (binding [*out* *err*] (println (caught-message error)))
       (System/exit 2))))
 
 (apply -main *command-line-args*)

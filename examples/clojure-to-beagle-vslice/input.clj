@@ -1,5 +1,13 @@
-(ns demo.offset)
+(ns demo.parity)
 
-(defn tail-offset [text amount]
-  (let [offset (+ amount 1)]
-    (subs text offset)))
+(declare odd-step)
+
+(defn even-step [n]
+  (if (zero? n)
+    true
+    (odd-step (dec n))))
+
+(defn odd-step [n]
+  (if (zero? n)
+    false
+    (even-step (dec n))))
