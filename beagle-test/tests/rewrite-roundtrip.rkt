@@ -57,7 +57,7 @@
                             "(def v [#?@(:clj [1] :default [])]) (def f #(+ %1 %2))"))
   ;; re-reading the rewritten text yields the same datums the reader produced
   (check-equal? (read-all (rewrite-result-rewritten res))
-                (read-all "(def v [#?@(:clj [1] :default [])]) (def f (fn [%1 %2] (+ %1 %2)))")))
+                (read-all "(def v [#?@(:clj [1] :default [])]) (def f (fn [%1 Any %2 Any] Any (+ %1 %2)))")))
 
 (test-case "case-to-match preserves keyword and string dispatch shape"
   (define res

@@ -40,7 +40,7 @@
 
 (test-case "reader: #(…) fn-shorthand reads as a real fn (not symbol # + list)"
   (check-equal? (read-src "(def f #(inc %))")
-                '((def f (fn (#%brackets %1) (inc %1))))))
+                '((def f (fn (#%brackets %1 Any) Any (inc %1))))))
 
 (test-case "reader: ^meta reads as #%meta (not a mangled symbol)"
   (check-equal? (read-src "(def ^:dynamic *x* 1)")

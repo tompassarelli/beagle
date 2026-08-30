@@ -132,7 +132,7 @@
 (test-case "portable vector HOFs preserve a game-shaped polymorphic call chain"
   (check-equal?
    (type->string (hash-ref STDLIB-PORTABLE 'mapv))
-   "(forall [A B] (Fn [(Fn [A] B) (Vec A)] (Vec B)))")
+   "(forall [A B] (Fn [(Fn [A] B) (U (Vec A) (List A))] (Vec B)))")
   (check-equal?
    (type->string (hash-ref STDLIB-PORTABLE 'filterv))
    "(forall [A] (Fn [(Fn [A] Any) (Vec A)] (Vec A)))")
