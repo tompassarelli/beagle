@@ -1494,6 +1494,73 @@
 (struct record-update-contract (record-name validator-symbol field-order)
   #:transparent)
 
+;; A checked AST node may carry more than one independent semantic fact. Keep
+;; the common one-contract case direct, and bundle only genuine coexistence so
+;; existing program values remain compact. Consumers must select the contract
+;; kind they own instead of trusting the node's primary table value.
+(struct semantic-contract-bundle (contracts) #:transparent)
+
+(define (semantic-contract-kind contract)
+  (cond
+    [(regex-contract? contract) 'regex]
+    [(dynamic-contract? contract) 'dynamic]
+    [(collection-contract? contract) 'collection]
+    [(allocation-contract? contract) 'allocation]
+    [(error-contract? contract) 'error]
+    [(error-payload-key-contract? contract) 'error-payload-key]
+    [(binding-constraint-contract? contract) 'binding-constraint]
+    [(js-host-access-contract? contract) 'js-host-access]
+    [(record-field-access-contract? contract) 'record-field-access]
+    [(record-update-contract? contract) 'record-update]
+    [else
+     (error 'semantic-contract-kind
+            "unsupported semantic contract: ~v"
+            contract)]))
+
+(define (semantic-contracts-at table node)
+  (define entry (and table (hash-ref table node #f)))
+  (cond
+    [(semantic-contract-bundle? entry)
+     (semantic-contract-bundle-contracts entry)]
+    [entry (list entry)]
+    [else '()]))
+
+(define (semantic-contract-ref table node predicate [failure #f])
+  (define found
+    (for/first ([contract (in-list (semantic-contracts-at table node))]
+                #:when (predicate contract))
+      contract))
+  (if found
+      found
+      (if (procedure? failure) (failure) failure)))
+
+(define (semantic-contract-set! table node contract)
+  (define kind (semantic-contract-kind contract))
+  (define retained
+    (filter (lambda (prior)
+              (not (eq? (semantic-contract-kind prior) kind)))
+            (semantic-contracts-at table node)))
+  (define contracts (append retained (list contract)))
+  (hash-set!
+   table
+   node
+   (if (= (length contracts) 1)
+       contract
+       (semantic-contract-bundle contracts)))
+  contract)
+
+(define (semantic-contract-table-entries table)
+  (for*/list ([(node entry) (in-hash table)]
+              [contract
+               (in-list
+                (if (semantic-contract-bundle? entry)
+                    (semantic-contract-bundle-contracts entry)
+                    (list entry)))])
+    (cons node contract)))
+
+(define (semantic-contract-table-values table)
+  (map cdr (semantic-contract-table-entries table)))
+
 (struct program (namespace
                  forms
                  macros
@@ -1663,6 +1730,12 @@
  (struct-out js-host-access-contract)
  (struct-out record-field-access-contract)
  (struct-out record-update-contract)
+ (struct-out semantic-contract-bundle)
+ semantic-contracts-at
+ semantic-contract-ref
+ semantic-contract-set!
+ semantic-contract-table-entries
+ semantic-contract-table-values
  (struct-out program)
  ;; Nix AST
  (struct-out nix-inherit) (struct-out nix-inherit-from) (struct-out nix-with)

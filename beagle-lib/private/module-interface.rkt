@@ -256,9 +256,10 @@
      (interface-constraint expression #f #f)]
     [else
      (define proof
-       (hash-ref
+       (semantic-contract-ref
         (program-semantic-contracts prog)
         parameter
+        binding-constraint-contract?
         #f))
      (unless (and (binding-constraint-contract? proof)
                   (binding-constraint-contract-synchronous? proof))

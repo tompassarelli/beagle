@@ -887,12 +887,13 @@
 (define (store-regex-contract! node contract)
   (define table (current-semantic-contracts))
   (when (and table node contract)
-    (hash-set! table node contract))
+    (semantic-contract-set! table node contract))
   contract)
 
 (define (regex-construction-contract e)
   (or (and (current-semantic-contracts)
-           (hash-ref (current-semantic-contracts) e #f))
+           (semantic-contract-ref
+            (current-semantic-contracts) e regex-contract?))
       (cond
     [(regex-lit? e)
      (store-regex-contract!
@@ -912,7 +913,8 @@
 
 (define (regex-contract-for-expr e)
   (or (and (current-semantic-contracts)
-           (hash-ref (current-semantic-contracts) e #f))
+           (semantic-contract-ref
+            (current-semantic-contracts) e regex-contract?))
       (and (symbol? e) (hash-ref (current-regex-bindings) e #f))
       (regex-construction-contract e)))
 
@@ -1016,7 +1018,7 @@
                    (type->string (regex-contract-match-type contract)))))
         (store-regex-contract! value contract)
         (hash-set! bindings name contract)
-        (hash-set! table form contract)))
+        (semantic-contract-set! table form contract)))
     (when (defn-form? form)
       (define body (defn-form-body form))
       (define return-contract
@@ -1269,7 +1271,7 @@
     (cond
       [(dynamic-type? ty)
        (define contract (make-dynamic-contract ty owner))
-       (hash-set! table ty contract)
+       (semantic-contract-set! table ty contract)
        (for ([alt (in-list (type-app-args ty))])
          (record-type-node! alt owner))]
       [(type-app? ty)
@@ -1305,8 +1307,8 @@
         (cond
           [(dynamic-type? ty)
            (define contract (make-dynamic-contract ty node))
-           (hash-set! table ty contract)
-           (when node (hash-set! table node contract))
+           (semantic-contract-set! table ty contract)
+           (when node (semantic-contract-set! table node contract))
            (for ([alt (in-list (type-app-args ty))]) (walk alt))]
           [(type-app? ty) (for ([arg (in-list (type-app-args ty))]) (walk arg))]
           [(type-union? ty) (for ([alt (in-list (type-union-alts ty))]) (walk alt))]
@@ -1424,8 +1426,8 @@
       [(collection-type? t)
        (define contract
          (make-collection-contract t owner #:extern extern-name))
-       (hash-set! table t contract)
-       (when owner (hash-set! table owner contract))
+       (semantic-contract-set! table t contract)
+       (when owner (semantic-contract-set! table owner contract))
        (for ([arg (in-list (type-app-args t))])
          (walk-type! arg #f extern-name))]
       [(type-app? t)
@@ -1712,14 +1714,14 @@
                    'repair ":raises AllocationError")))
         (define contract
           (allocation-contract (allocation-region target form failure) failure))
-        (hash-set! table form contract)
+        (semantic-contract-set! table form contract)
         ;; Keep the effect visible on transitive call nodes too. A function
-        ;; node can simultaneously carry a typed-error contract, whose later
-        ;; checker pass owns the node's primary slot; call-site facts preserve
-        ;; the allocation ABI without conflating the two contracts.
+        ;; node can simultaneously carry a typed-error contract; the bundled
+        ;; entry preserves both, while call-site facts preserve the allocation
+        ;; ABI at each allocating expression.
         (for ([expr (in-list (append allocating-exprs
                                      allocating-local-calls))])
-          (hash-set! table expr contract)))))
+          (semantic-contract-set! table expr contract)))))
 
 ;; --- typed errors and payloads ----------------------------------------------
 
@@ -1813,7 +1815,7 @@
       layout
       (error-mode (program-target prog)))))
   (for ([(name form) (in-hash local-definitions)])
-    (hash-set! table form (hash-ref contracts name)))
+    (semantic-contract-set! table form (hash-ref contracts name)))
   (define raising-functions (make-hash))
   ;; Effects cross the module boundary under the exact names consumers use.
   (for ([import (in-list (program-imported-module-interfaces prog))])
@@ -1849,16 +1851,15 @@
       (declared-error-contract
        (defn-form-raises form) contracts form))
     (when contract
-      (hash-set! table form contract)
+      (semantic-contract-set! table form contract)
       (hash-set! raising-functions (defn-form-name form) contract)))
   (current-error-definitions definitions)
   (current-raising-functions raising-functions))
 
 (define (error-contract-for-node node)
   (and (current-semantic-contracts)
-       (hash-ref (current-semantic-contracts) node #f)
-       (let ([contract (hash-ref (current-semantic-contracts) node)])
-         (and (error-contract? contract) contract))))
+       (semantic-contract-ref
+        (current-semantic-contracts) node error-contract?)))
 
 (define (raising-call-contract e)
   (and (call-form? e)
@@ -1909,7 +1910,8 @@
 (define (record-error-payload-key! field pair node)
   (define table (current-semantic-contracts))
   (define key (error-payload-pair-keyword pair))
-  (define prior (hash-ref table field #f))
+  (define prior
+    (semantic-contract-ref table field error-payload-key-contract?))
   (when (and (error-payload-key-contract? prior)
              (not (eq? (error-payload-key-contract-keyword prior) key)))
     (error-contract-error
@@ -1925,7 +1927,7 @@
       (symbol->string (error-payload-key-contract-keyword prior))
       'second-key (symbol->string key)
       'repair "use one canonical host keyword for each throwable field")))
-  (hash-set! table field (error-payload-key-contract key)))
+  (semantic-contract-set! table field (error-payload-key-contract key)))
 
 (define (variant-fields-without-message variant)
   (filter (lambda (field) (not (eq? (param-name field) 'message)))
@@ -2097,8 +2099,8 @@
                    (type-mismatch-details (param-type field) actual)
                    'member (symbol->string (car variant))
                    'field (symbol->string (param-name field))))))
-             (hash-set! table e current-contract)
-             (hash-set! table (car parts) current-contract)]))]
+             (semantic-contract-set! table e current-contract)
+             (semantic-contract-set! table (car parts) current-contract)]))]
     [(check-expr? e)
      (define inner (check-expr-expr e))
      (define contract (raising-call-contract inner))
@@ -2115,8 +2117,8 @@
            'repair (format ":raises ~a"
                            (type->string
                             (error-contract-error-type uncovered))))))
-       (hash-set! table e contract)
-       (hash-set! table inner contract))
+       (semantic-contract-set! table e contract)
+       (semantic-contract-set! table inner contract))
      (if contract
          (for ([arg (in-list (call-form-args inner))])
            (check-error-expr! arg env))
@@ -2127,8 +2129,8 @@
      (define inner (rescue-form-expr e))
      (define contract (raising-call-contract inner))
      (when contract
-       (hash-set! table e contract)
-       (hash-set! table inner contract))
+       (semantic-contract-set! table e contract)
+       (semantic-contract-set! table inner contract))
      (if contract
          (for ([arg (in-list (call-form-args inner))])
            (check-error-expr! arg env))
@@ -2150,7 +2152,7 @@
                 'raised (type->string (error-contract-error-type uncovered))
                 'repair "(check (call ...)), (rescue (call ...) ...), or a covering try/catch"))
               (begin
-                (hash-set! table e contract)
+                (semantic-contract-set! table e contract)
                 (for ([arg (in-list (call-form-args e))])
                   (check-error-expr! arg env)))))]
     [(call-form? e)
@@ -2678,11 +2680,10 @@
     (define proof
       (binding-constraint-contract #t sync-proof))
     (define table (current-semantic-contracts))
-    ;; Semantic contracts are single-valued per AST node. Store only on the
-    ;; complete declaration owner: a predicate expression may already own a
-    ;; record-access/update or payload-key representation contract.
+    ;; Store on the complete declaration owner. Independent facts coexist in
+    ;; the semantic-contract entry and consumers select their owned kind.
     (when (and table owner)
-      (hash-set! table owner proof))))
+      (semantic-contract-set! table owner proof))))
 
 (define (param-or-destr-type p)
   (cond
@@ -6573,7 +6574,7 @@
          (error 'check "typed record access lacks its enclosing program"))
        (define contracts (current-semantic-contracts))
        (when contracts
-         (hash-set!
+         (semantic-contract-set!
           contracts e
           (record-field-access-contract
            (program-record-runtime-name-ref prog nominal-name nominal-name)))))
@@ -6632,7 +6633,7 @@
                    'declared-fields declared-order
                    'registered-fields (or registered-order '()))
            #:src (src-for e)))
-        (hash-set!
+        (semantic-contract-set!
          (current-semantic-contracts)
          e
          (record-update-contract
@@ -7474,7 +7475,7 @@
              (memq fn-name '(aget aset))
              (pair? arg-types)
              (current-semantic-contracts))
-    (hash-set!
+    (semantic-contract-set!
      (current-semantic-contracts)
      call-node
      (js-host-access-contract

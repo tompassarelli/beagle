@@ -20,12 +20,18 @@
 
 (define (binding-constraint-proof binding)
   (and (current-js-semantic-contracts)
-       (hash-ref (current-js-semantic-contracts) binding #f)))
+       (semantic-contract-ref
+        (current-js-semantic-contracts)
+        binding
+        binding-constraint-contract?)))
 
 (define (error-payload-keyword field)
   (define contract
     (and (current-js-semantic-contracts)
-         (hash-ref (current-js-semantic-contracts) field #f)))
+         (semantic-contract-ref
+          (current-js-semantic-contracts)
+          field
+          error-payload-key-contract?)))
   (if (error-payload-key-contract? contract)
       (error-payload-key-contract-keyword contract)
       (string->symbol (format ":~a" (param-name field)))))
@@ -170,7 +176,10 @@
   (define contract
     (and (current-js-semantic-contracts)
          call-node
-         (hash-ref (current-js-semantic-contracts) call-node #f)))
+         (semantic-contract-ref
+          (current-js-semantic-contracts)
+          call-node
+          js-host-access-contract?)))
   (define root-kind
     (if (js-host-access-contract? contract)
         (js-host-access-contract-root-kind contract)
@@ -1742,7 +1751,10 @@
 ;; an identifier and hope it matches the runtime import.
 (define (build-record-validator-reference-table prog)
   (for/fold ([table (hasheq)])
-            ([contract (in-hash-values (program-semantic-contracts prog))]
+            ([contract
+              (in-list
+               (semantic-contract-table-values
+                (program-semantic-contracts prog)))]
              #:when
              (and (record-update-contract? contract)
                   (record-update-contract-validator-symbol contract)))
@@ -2329,8 +2341,10 @@
   (define importer-ns (symbol->string (program-namespace prog)))
   (define rs (program-requires prog))
   (define used-unqualified-record-validators
-    (for/set ([(node contract)
-               (in-hash (program-semantic-contracts prog))]
+    (for/set ([contract
+               (in-list
+                (semantic-contract-table-values
+                 (program-semantic-contracts prog)))]
               #:when
               (and (record-update-contract? contract)
                    (record-update-runtime-validator contract)
@@ -3193,7 +3207,8 @@
      (define inner (emit-expr (check-expr-expr e)))
      (define contract
        (and (current-js-semantic-contracts)
-            (hash-ref (current-js-semantic-contracts) e #f)))
+            (semantic-contract-ref
+             (current-js-semantic-contracts) e error-contract?)))
      (if (error-contract? contract)
          inner
          (iife
@@ -3206,7 +3221,8 @@
                           "_err"))
      (define contract
        (and (current-js-semantic-contracts)
-            (hash-ref (current-js-semantic-contracts) e #f)))
+            (semantic-contract-ref
+             (current-js-semantic-contracts) e error-contract?)))
      (if (error-contract? contract)
          (let* ([variant (car (error-contract-payload-layout contract))]
                 [member (car variant)]
@@ -3419,7 +3435,8 @@
             (format "(~a~a)" (hash-ref JS-UNARY-OPS fn-sym)
                     (emit-expr (car args))))]
        [(and (current-js-semantic-contracts)
-             (hash-ref (current-js-semantic-contracts) e #f)
+             (semantic-contract-ref
+              (current-js-semantic-contracts) e regex-contract?)
              (= (length args) 3)
              (qualified-ref? fn-sym)
              (eq? (qualified-ref-name fn-sym) 'replace))
@@ -3429,7 +3446,8 @@
          (emit-expr (car args))
          (emit-expr (caddr args)))]
        [(and (current-js-semantic-contracts)
-             (hash-ref (current-js-semantic-contracts) e #f)
+             (semantic-contract-ref
+              (current-js-semantic-contracts) e regex-contract?)
              (= (length args) 2)
              (qualified-ref? fn-sym)
              (eq? (qualified-ref-name fn-sym) 'split))
@@ -3697,7 +3715,8 @@
       [else #f]))
   (define contract
     (and (current-js-semantic-contracts)
-         (hash-ref (current-js-semantic-contracts) e #f)))
+         (semantic-contract-ref
+          (current-js-semantic-contracts) e record-update-contract?)))
   (define statically-record?
     (and record-name
          (hash-has-key? (current-js-record-fields) record-name)))

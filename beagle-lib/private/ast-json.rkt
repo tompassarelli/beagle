@@ -139,7 +139,10 @@
       wire
       (let ([contract
              (and (current-json-semantic-contracts)
-                  (hash-ref (current-json-semantic-contracts) owner #f))])
+                  (semantic-contract-ref
+                   (current-json-semantic-contracts)
+                   owner
+                   binding-constraint-contract?))])
         (when (and constraint
                    (not (and (binding-constraint-contract? contract)
                              (binding-constraint-contract-synchronous?
@@ -521,12 +524,10 @@
          wire
          (let ([contract
                 (and (current-json-semantic-contracts)
-                     (hash-ref (current-json-semantic-contracts) e #f))])
-           (when (and contract (not (record-field-access-contract? contract)))
-             (error
-              'beagle-ast-json
-              "kw-access node has invalid checked record-field contract: ~v"
-              contract))
+                     (semantic-contract-ref
+                      (current-json-semantic-contracts)
+                      e
+                      record-field-access-contract?))])
            (hash-set
             wire
             'recordFieldAccess
@@ -587,11 +588,9 @@
     [(with-form? e)
      (define semantic-contracts (current-json-semantic-contracts))
      (define contract
-       (and semantic-contracts (hash-ref semantic-contracts e #f)))
-     (when (and contract (not (record-update-contract? contract)))
-       (error 'beagle-ast-json
-              "with node has invalid checked record-update contract: ~v"
-              contract))
+       (and semantic-contracts
+            (semantic-contract-ref
+             semantic-contracts e record-update-contract?)))
      (define wire
        (hasheq 'node "with"
                'target (expr->json (with-form-target e))

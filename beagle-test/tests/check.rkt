@@ -2,6 +2,7 @@
 
 (require rackunit
          racket/file
+         racket/list
          (for-syntax racket/base)
          beagle/private/module-overlay-check
          beagle/private/module-source-root
@@ -1809,6 +1810,32 @@ BEAGLE
   (list 'require (br 'clojure.string ':as 'str))
   '(defn f [(s String)] String
      (first (str/split s (#%regex ",")))))
+
+(test-case "allocating function may return a typed dynamic Regex"
+  (define prog
+    (parse-program
+     (map
+      (lambda (form) (datum->syntax #f form))
+      (list
+       '(define-target clj)
+       (list
+        'defn 'section-pattern (br (list 'section 'String))
+        '(Regex (HVec String String))
+        '(re-pattern (str "^\\[" section "\\.([^]]+)\\]$")))))))
+  (check-not-exn (lambda () (type-check! prog)))
+  (define form (car (program-forms prog)))
+  (define regex-expr (last (defn-form-body form)))
+  (define pattern-expr (car (call-form-args regex-expr)))
+  (define contracts (program-semantic-contracts prog))
+  (check-true
+   (regex-contract?
+    (semantic-contract-ref contracts regex-expr regex-contract?)))
+  (check-true
+   (allocation-contract?
+    (semantic-contract-ref contracts form allocation-contract?)))
+  (check-true
+   (allocation-contract?
+    (semantic-contract-ref contracts pattern-expr allocation-contract?))))
 
 ;; index-of / last-index-of accept the optional 3-arg from-index (Int) form, as in
 ;; Clojure. Regression for the extern arity fix (was: "expected 2 arg(s), got 3").

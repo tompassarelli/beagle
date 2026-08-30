@@ -107,7 +107,10 @@
 (define (error-payload-keyword field)
   (define contract
     (and (current-clj-semantic-contracts)
-         (hash-ref (current-clj-semantic-contracts) field #f)))
+         (semantic-contract-ref
+          (current-clj-semantic-contracts)
+          field
+          error-payload-key-contract?)))
   (if (error-payload-key-contract? contract)
       (error-payload-key-contract-keyword contract)
       (string->symbol (format ":~a" (param-name field)))))
@@ -595,8 +598,10 @@ CLJ
     import))
 
 (define (used-unqualified-record-validators prog)
-  (for/set ([(node contract)
-             (in-hash (program-semantic-contracts prog))]
+  (for/set ([contract
+             (in-list
+              (semantic-contract-table-values
+               (program-semantic-contracts prog)))]
             #:when
             (and (record-update-contract? contract)
                  (symbol?
@@ -1035,7 +1040,8 @@ CLJ
      (define inner (emit-expr (check-expr-expr e)))
      (define contract
        (and (current-clj-semantic-contracts)
-            (hash-ref (current-clj-semantic-contracts) e #f)))
+            (semantic-contract-ref
+             (current-clj-semantic-contracts) e error-contract?)))
      (if (error-contract? contract)
          inner
          (format
@@ -1051,7 +1057,8 @@ CLJ
      (define err-name (or (rescue-form-err-name e) '_))
      (define contract
        (and (current-clj-semantic-contracts)
-            (hash-ref (current-clj-semantic-contracts) e #f)))
+            (semantic-contract-ref
+             (current-clj-semantic-contracts) e error-contract?)))
      (if (error-contract? contract)
          (let* ([variant (car (error-contract-payload-layout contract))]
                 [member (car variant)]
@@ -1355,9 +1362,10 @@ CLJ
     (format "(assoc ~a ~a)" target-str (string-join update-strs " ")))
   (define missing-contract (gensym 'missing-record-update-contract))
   (define contract
-    (hash-ref
+    (semantic-contract-ref
      (current-clj-semantic-contracts)
      e
+     record-update-contract?
      missing-contract))
   (cond
     [(record-update-contract? contract)
@@ -1909,7 +1917,10 @@ CLJ
 
 (define (binding-constraint-proof binding)
   (and (current-clj-semantic-contracts)
-       (hash-ref (current-clj-semantic-contracts) binding #f)))
+       (semantic-contract-ref
+        (current-clj-semantic-contracts)
+        binding
+        binding-constraint-contract?)))
 
 (define (emit-guarded-binding-value binding predicate-name raw-name)
   (define proof (binding-constraint-proof binding))

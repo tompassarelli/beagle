@@ -131,8 +131,10 @@
                   NON-RUNTIME-INTERFACE-KINDS))))
 
 (define (used-unqualified-record-validators prog)
-  (for/seteq ([(node contract)
-               (in-hash (program-semantic-contracts prog))]
+  (for/seteq ([contract
+               (in-list
+                (semantic-contract-table-values
+                 (program-semantic-contracts prog)))]
               #:when
               (and (record-update-contract? contract)
                    (record-update-contract-validator-symbol contract)
@@ -210,7 +212,10 @@
   (define prog (current-nix-program))
   (define contracts (and prog (program-semantic-contracts prog)))
   (define contract
-    (and access-node contracts (hash-ref contracts access-node #f)))
+    (and access-node
+         contracts
+         (semantic-contract-ref
+          contracts access-node record-field-access-contract?)))
   (when (and contract (not (record-field-access-contract? contract)))
     (error 'emit-nix
            "keyword access has invalid checked representation contract: ~v"
@@ -325,7 +330,10 @@
   (define owner
     (hash-ref (current-nix-constraint-owners) binding binding))
   (and (current-nix-semantic-contracts)
-       (hash-ref (current-nix-semantic-contracts) owner #f)))
+       (semantic-contract-ref
+        (current-nix-semantic-contracts)
+        owner
+        binding-constraint-contract?)))
 
 ;; A constraint is executable compiler output, so syntax alone is not enough
 ;; authority to emit it. The checker owns the positive proof that the predicate
@@ -2199,7 +2207,9 @@
   (define prog (current-nix-program))
   (define semantic-contracts (and prog (program-semantic-contracts prog)))
   (define contract
-    (and semantic-contracts (hash-ref semantic-contracts e #f)))
+    (and semantic-contracts
+         (semantic-contract-ref
+          semantic-contracts e record-update-contract?)))
   (when (and contract (not (record-update-contract? contract)))
     (error 'emit-nix "with-form has invalid record-update contract: ~v" contract))
   (define record-update?
