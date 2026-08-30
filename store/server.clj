@@ -20,7 +20,8 @@
            [java.time Instant]
            [java.util.concurrent ArrayBlockingQueue LinkedBlockingQueue
             ThreadFactory ThreadPoolExecutor TimeUnit]
-           [java.util.concurrent.atomic AtomicLong]))
+           [java.util.concurrent.atomic AtomicLong]
+           [java.util.zip CRC32]))
 
 (load-file "database.clj")
 (load-file "writer_authority.clj")
@@ -1801,21 +1802,30 @@
                  (if (keyword? code) code :rpc/validation-failed)
                  (or (.getMessage error) "validation failed"))])))))
 
+(defn- checkpoint-image-path [db]
+  (str (:log db) ".snapshot"))
+
 (defn- write-checkpoint-image!
-  "Publish one exact manifest-last packed snapshot at the commit-sequencer
-   durability barrier. STORELOG remains the sole authority."
+  "Write one exact JVM snapshot at the commit-sequencer durability barrier.
+   The STORELOG remains authoritative; FRI binds the image to its canonical
+   prefix and atomically installs the derived file beside it."
   [db snapshot]
-  (let [{:keys [version watermark created-at page-sha256 bytes]}
-        (database/checkpoint-packed! db)]
-    (when-not (= version (:version snapshot))
-      (server-fail! :rpc/checkpoint-unavailable
-                    "packed checkpoint crossed the sequenced snapshot boundary"
-                    {:expected (:version snapshot) :actual version}))
+  (let [version (:version snapshot)
+        {:keys [valid-bytes fingerprint space-id]}
+        (database/triple-log-prefix-source! (:log db) version)
+        binding (fri/source-binding space-id fingerprint valid-bytes)
+        path (checkpoint-image-path db)
+        _ (fri/write-fri!
+           (term-store/dump-term-store (atom (:root snapshot)))
+           path binding)
+        ^bytes bytes (java.nio.file.Files/readAllBytes
+                      (.toPath (io/file path)))
+        crc (doto (CRC32.) (.update bytes))]
     {:version version
-     :watermark watermark
-     :created-at created-at
-     :crc (Long/parseLong (subs page-sha256 0 8) 16)
-     :bytes bytes}))
+     :watermark valid-bytes
+     :created-at (System/currentTimeMillis)
+     :crc (.getValue crc)
+     :bytes (alength bytes)}))
 
 (defn- checkpoint-payload! [request snapshot]
   (require-unit! (t/rpc-request-payload-value request))

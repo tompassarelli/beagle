@@ -37,6 +37,8 @@
 
 (def ^String page-suffix ".pages")
 
+(def checkpoint-retention-count 2)
+
 (def atom-offsets-section 1)
 
 (def atom-payload-section 2)
@@ -495,7 +497,7 @@
   (.write out bytes)
   nil))
 
-(declare read-manifest! hex-bytes!)
+(declare read-manifest! hex-bytes! prune-checkpoints!)
 
 (defn- manifest-bytes! [^CheckpointManifest manifest]
   (let [^ByteArrayOutputStream out (ByteArrayOutputStream.)]
@@ -582,6 +584,7 @@
    ^CheckpointManifest manifest (->CheckpointManifest manifest-path component (checkpointsource-space-id source) revision (t/termstoredump-next-sequence tail) schema-id (checkpointsource-log-valid-bytes source) (checkpointsource-log-prefix-sha256 source) page-sha atoms triples transactions operations (:active-count active) (:run-count active) mapped-bytes)]
   (atomic-move! temporary final-page)
   (write-manifest-last! manifest-path manifest)
+  (prune-checkpoints! directory)
   manifest)))
 
 (defn- ensure-remaining! [^ByteBuffer buffer amount ^String context]
@@ -662,6 +665,35 @@
   (let [^File folder (File. directory)
    files (if (.isDirectory folder) (or (.listFiles folder) (make-array File 0)) (make-array File 0))]
   (mapv (fn [^File file] (.getPath file)) (sort-by (fn [^File file] (.getName file)) (fn [left right] (compare right left)) (filter (fn [^File file] (some? (re-matches #"checkpoint-[0-9]{19}\.manifest" (.getName file)))) files)))))
+
+(defn- valid-manifests! [paths]
+  (loop [remaining (seq paths)
+   valid []]
+  (if (nil? remaining) valid (let [manifest (try
+  (read-manifest! (first remaining))
+  (catch Throwable _error
+    nil))]
+  (recur (next remaining) (if (nil? manifest) valid (conj valid manifest)))))))
+
+(defn- manifest-identities [manifests]
+  (loop [remaining (seq manifests)
+   paths #{}
+   components #{}]
+  (if (nil? remaining) {:paths paths :components components} (let [^CheckpointManifest manifest (first remaining)]
+  (recur (next remaining) (conj paths (checkpointmanifest-path manifest)) (conj components (checkpointmanifest-component manifest)))))))
+
+(defn- prune-checkpoints! [^String directory]
+  (let [^File folder (File. directory)
+   candidates (candidate-manifests directory)
+   retained (vec (take checkpoint-retention-count (valid-manifests! candidates)))
+   identities (manifest-identities retained)
+   paths (:paths identities)
+   components (:components identities)]
+  (doseq [manifest-path candidates]
+  (if (not (contains? paths manifest-path)) (Files/deleteIfExists (.toPath (File. manifest-path))) nil))
+  (doseq [file (filterv (fn [^File candidate] (some? (re-matches #"checkpoint-[0-9]{19}-[0-9a-f]{16}\.pages" (.getName candidate)))) (vec (or (.listFiles folder) (make-array File 0))))]
+  (if (not (contains? components (.getName file))) (Files/deleteIfExists (.toPath file)) nil))
+  nil))
 
 (defn ^CheckpointSource manifest-source! [^CheckpointManifest manifest]
   (checkpoint-source! (checkpointmanifest-space-id manifest) (checkpointmanifest-revision manifest) (checkpointmanifest-log-valid-bytes manifest) (checkpointmanifest-log-prefix-sha256 manifest)))

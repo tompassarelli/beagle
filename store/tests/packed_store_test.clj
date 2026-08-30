@@ -282,6 +282,52 @@
 (check! "interrupted pages-only publication is ignored"
         (= (:manifest prior-checkpoint) (:active-manifest storage)))
 
+;; Successful publication keeps the newest recovery fallback while removing
+;; every older manifest and every pages file that neither retained manifest
+;; names. Repeated checkpoints must therefore converge on a fixed file count.
+(def retention-checkpoints
+  (mapv
+   (fn [position]
+     (database/assert!
+      reopened
+      (t/triple (str "retention-left-" position)
+                :retention-edge
+                (str "retention-right-" position))
+      {})
+     (database/checkpoint-packed! reopened))
+   (range 3)))
+
+(def retained-manifests
+  (packed/candidate-manifests (.getPath checkpoint-directory)))
+(def retained-records
+  (mapv packed/read-manifest! retained-manifests))
+(def retained-components
+  (set (map packed/checkpointmanifest-component retained-records)))
+(def retained-revisions
+  (set (map packed/checkpointmanifest-revision retained-records)))
+(def expected-retained-revisions
+  (set (map :version (take-last packed/checkpoint-retention-count
+                                retention-checkpoints))))
+(def retained-pages
+  (->> (or (.listFiles checkpoint-directory)
+           (make-array java.io.File 0))
+       (filter #(re-matches
+                 #"checkpoint-[0-9]{19}-[0-9a-f]{16}\.pages"
+                 (.getName ^java.io.File %)))
+       (map #(.getName ^java.io.File %))
+       set))
+
+(check! "repeated checkpoints retain exactly the newest fallback pair"
+        (and (= packed/checkpoint-retention-count
+                (count retained-manifests))
+             (= expected-retained-revisions retained-revisions)))
+(check! "checkpoint pruning removes every orphan packed page"
+        (and (= retained-components retained-pages)
+             (not (.exists
+                   (java.io.File.
+                    checkpoint-directory
+                    "checkpoint-9999999999999999999-deadbeefdeadbeef.pages")))))
+
 (when (some (fn [[_ ok]] (not ok)) @checks)
   (System/exit 1))
 

@@ -4,7 +4,6 @@
          '[store.rpc :as wire]
          '[store.datalog :as datalog]
          '[store.kernel :as kernel]
-         '[store.packed :as packed]
          '[store.query :as query]
          '[store.rt :as rt]
          '[store.store :as term-store]
@@ -274,21 +273,16 @@
     (let [checkpoint (request! port space :rpc/checkpoint wire/rpc-unit)
           [version watermark created-at crc bytes]
           (fields (payload checkpoint) :rpc/checkpoint 5)
-          manifest-path (first (packed/candidate-manifests
-                                (str log-path ".packed")))
-          manifest (packed/read-manifest! manifest-path)
-          image (io/file (.getParent (io/file manifest-path))
-                         (packed/checkpointmanifest-component manifest))
+          image (io/file (str log-path ".snapshot"))
           source (database/triple-log-prefix-source! log-path version)
-          prefix (packed/open-checkpoint!
-                  manifest-path
-                  (packed/checkpoint-source!
-                   (:space-id source) version (:valid-bytes source)
-                   (:fingerprint source)))
-          restored (term-store/new-packed-term-store
-                    prefix term-store/default-tail-row-limit
-                    term-store/default-tail-byte-limit 0)]
-      (check! "JVM checkpoint is a sequencer-consistent packed image"
+          cache (fri/open-fri!
+                 (.getPath image)
+                 (fri/source-binding (:space-id source)
+                                     (:fingerprint source)
+                                     (:valid-bytes source)))
+          restored (term-store/new-term-store space)]
+      (fri/restore-store! cache restored)
+      (check! "JVM checkpoint is a sequencer-consistent derived image"
               (and (nil? (error-code checkpoint))
                    (= 1 version (t/rpcresponse-served-version checkpoint))
                    (pos? watermark)
@@ -297,14 +291,7 @@
                    (pos? bytes)
                    (.isFile image)
                    (= bytes (.length image))
-                   (= version (packed/checkpointmanifest-revision manifest))
-                   (= watermark
-                      (packed/checkpointmanifest-log-valid-bytes manifest))
-                   (= crc
-                      (Long/parseLong
-                       (subs (packed/checkpointmanifest-page-sha256 manifest)
-                             0 8)
-                       16))
+                   (= watermark (fri/source-position cache))
                    (= (database/live-propositions! @server/active-store)
                       (database/live-propositions! {:term-store restored
                                                    :space-id space
