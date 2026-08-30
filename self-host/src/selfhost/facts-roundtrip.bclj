@@ -492,7 +492,7 @@
         "next"
         (get atom-r "pos"))
       :else
-      (let [result (rd/read-datum! src p)]
+      (let [result (rd/read-datum src p)]
         (assoc (result-leaf src p result) "next" (get result "pos"))))))
 
 (defn- shift-node-location

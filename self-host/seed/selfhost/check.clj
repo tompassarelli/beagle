@@ -123,6 +123,8 @@
 
 (def FILTERV-POLY (make-poly ["A"] (make-fn [(make-fn [(make-var "A")] nil ANY) ANY] nil (make-app "Vec" [(make-var "A")])) nil))
 
+(def CONCAT-POLY (make-poly ["A"] (make-fn [(make-app "Vec" [(make-var "A")])] (make-union [(make-app "Vec" [(make-var "A")]) NIL-TYPE]) (make-app "Vec" [(make-var "A")])) nil))
+
 (def JS-ATOM-POLY (make-poly ["A"] (make-fn [(make-var "A")] nil (make-app "Atom" [(make-var "A")])) nil))
 
 (def JS-DEREF-POLY (make-poly ["A"] (make-fn [(make-app "Atom" [(make-var "A")])] nil (make-var "A")) nil))
@@ -321,6 +323,7 @@
   (and (app-type? actual) (app-type? expected) (= (get actual "name") "JsMap") (= (get expected "name") "JsMap")) (and (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args")))))
   (and (app-type? actual) (= (get actual "name") "HVec") (app-type? expected) (= (get expected "name") "Vec") (= 1 (count (get expected "args")))) (every? (fn [a] (type-compatible? a (nth (get expected "args") 0))) (get actual "args"))
   (dynamic-type? expected) (if (dynamic-type? actual) (and (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args"))))) (boolean (some (fn [alt] (type-compatible? actual alt)) (get expected "args"))))
+  (and (app-type? actual) (= (get actual "name") "Regex") (prim? expected) (= (get expected "name") "Regex")) true
   (and (app-type? actual) (app-type? expected)) (and (= (get actual "name") (get expected "name")) (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-compatible? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args")))))
   :else false))
 
@@ -363,6 +366,9 @@
   (= (count remaining) 1) (nth remaining 0)
   :else (make-union remaining)))
   :else current-type))
+
+(defn truthy-result-type [type]
+  (if (nil-type? type) INFERENCE-BOTTOM (remove-from-union type NIL-TYPE)))
 
 (defn infer-literal-type [e]
   (let [kind (get e "kind")]
@@ -478,7 +484,7 @@
 
 (def JS-BUILTIN-MEMBER-CONTRACTS {"Math" {"sqrt" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "pow" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil FLOAT-TYPE) "exp" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "atan" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "atan2" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil FLOAT-TYPE) "floor" (make-fn [NUMBER-TYPE] nil INT-TYPE) "ceil" (make-fn [NUMBER-TYPE] nil INT-TYPE) "min" (make-poly ["A"] (make-fn [] (make-var "A") (make-var "A")) {"A" NUMBER-TYPE}) "max" (make-poly ["A"] (make-fn [] (make-var "A") (make-var "A")) {"A" NUMBER-TYPE}) "PI" FLOAT-TYPE "round" (make-fn [NUMBER-TYPE] nil INT-TYPE) "sin" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "cos" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "tan" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "abs" (make-poly ["A"] (make-fn [(make-var "A")] nil (make-var "A")) {"A" NUMBER-TYPE})} "String" {"indexOf" (make-fn [(make-prim "String")] nil INT-TYPE) "trim" (make-fn [] nil (make-prim "String")) "slice" (make-fn [] NUMBER-TYPE (make-prim "String"))} "Date" {"now" (make-fn [] nil INT-TYPE)} "performance" {"now" (make-fn [] nil FLOAT-TYPE)} "Map" {"size" INT-TYPE "get" (make-fn [(make-var "K")] nil (make-union [(make-var "V") NIL-TYPE])) "set" (make-fn [(make-var "K") (make-var "V")] nil (make-app "JsMap" [(make-var "K") (make-var "V")]))} "Canvas" {"getBoundingClientRect" (make-fn [] nil (make-prim "JsDomRect"))} "PointerEvent" {"clientX" FLOAT-TYPE "clientY" FLOAT-TYPE} "DOMRect" {"left" FLOAT-TYPE "top" FLOAT-TYPE "width" FLOAT-TYPE "height" FLOAT-TYPE}})
 
-(def STDLIB {"true" (make-prim "Bool") "false" (make-prim "Bool") "int?" (make-fn [ANY] nil (make-prim "Bool")) "nil?" (make-fn [ANY] nil (make-prim "Bool")) "some?" (make-fn [ANY] nil (make-prim "Bool")) "string?" (make-fn [ANY] nil (make-prim "Bool")) "number?" (make-fn [ANY] nil (make-prim "Bool")) "integer?" (make-fn [ANY] nil (make-prim "Bool")) "keyword?" (make-fn [ANY] nil (make-prim "Bool")) "symbol?" (make-fn [ANY] nil (make-prim "Bool")) "boolean?" (make-fn [ANY] nil (make-prim "Bool")) "float?" (make-fn [ANY] nil (make-prim "Bool")) "map?" (make-fn [ANY] nil (make-prim "Bool")) "vector?" (make-fn [ANY] nil (make-prim "Bool")) "empty?" (make-fn [ANY] nil (make-prim "Bool")) "not" (make-fn [(make-prim "Bool")] nil (make-prim "Bool")) "=" (make-fn [ANY] ANY (make-prim "Bool")) "not=" (make-fn [ANY] ANY (make-prim "Bool")) ">" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) ">=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<=" (make-fn [NUMBER-TYPE NUMBER-TYPE] NUMBER-TYPE (make-prim "Bool")) "and" (make-fn [] ANY ANY) "or" (make-fn [] ANY ANY) "+" (make-fn [] NUMBER-TYPE ANY) "-" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "*" (make-fn [] NUMBER-TYPE ANY) "/" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "quot" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "mod" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "max" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "min" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "inc" (make-fn [NUMBER-TYPE] nil INT-TYPE) "dec" (make-fn [NUMBER-TYPE] nil INT-TYPE) "count" (make-fn [ANY] nil (make-prim "Int")) "int" (make-fn [ANY] nil (make-prim "Int")) "bigint" (make-fn [ANY] nil (make-prim "Int")) "double" (make-fn [ANY] nil (make-prim "Float")) "monotonic-nanoseconds" (make-fn [] nil (make-prim "Int")) ["qualified-ref" "bgl" "sha256-utf8" nil] (make-fn [(make-prim "String")] nil (make-prim "String")) "str" (make-fn [] ANY (make-prim "String")) "get" (make-fn [ANY ANY] ANY ANY) "get-in" (make-fn [ANY ANY] ANY ANY) "assoc" (make-fn [ANY ANY ANY] ANY ANY) "assoc-in" (make-fn [ANY ANY ANY] nil ANY) "update" (make-fn [ANY ANY ANY] ANY ANY) "dissoc" (make-fn [ANY ANY] ANY ANY) "conj" (make-fn [ANY] ANY ANY) "cons" (make-fn [ANY ANY] nil ANY) "into" (make-fn [ANY ANY] ANY ANY) "vec" (make-fn [ANY] nil ANY) "vals" (make-fn [ANY] nil ANY) "keys" (make-fn [ANY] nil ANY) "first" VEC-ACCESS-POLY "second" VEC-ACCESS-POLY "rest" (make-fn [ANY] nil ANY) "nth" NTH-POLY "reduce" (make-fn [ANY ANY] ANY ANY) "map" (make-fn [ANY] ANY ANY) "mapv" MAPV-POLY "filter" (make-fn [ANY ANY] nil ANY) "filterv" FILTERV-POLY "remove" (make-fn [ANY ANY] nil ANY) "some" (make-fn [ANY ANY] nil ANY) "every?" (make-fn [ANY ANY] nil (make-prim "Bool")) "range" (make-fn [] INT-TYPE (make-app "List" [INT-TYPE]))})
+(def STDLIB {"true" (make-prim "Bool") "false" (make-prim "Bool") "int?" (make-fn [ANY] nil (make-prim "Bool")) "nil?" (make-fn [ANY] nil (make-prim "Bool")) "some?" (make-fn [ANY] nil (make-prim "Bool")) "string?" (make-fn [ANY] nil (make-prim "Bool")) "number?" (make-fn [ANY] nil (make-prim "Bool")) "integer?" (make-fn [ANY] nil (make-prim "Bool")) "keyword?" (make-fn [ANY] nil (make-prim "Bool")) "symbol?" (make-fn [ANY] nil (make-prim "Bool")) "boolean?" (make-fn [ANY] nil (make-prim "Bool")) "float?" (make-fn [ANY] nil (make-prim "Bool")) "map?" (make-fn [ANY] nil (make-prim "Bool")) "vector?" (make-fn [ANY] nil (make-prim "Bool")) "empty?" (make-fn [ANY] nil (make-prim "Bool")) "not" (make-fn [ANY] nil (make-prim "Bool")) "=" (make-fn [ANY] ANY (make-prim "Bool")) "not=" (make-fn [ANY] ANY (make-prim "Bool")) ">" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) ">=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<=" (make-fn [NUMBER-TYPE NUMBER-TYPE] NUMBER-TYPE (make-prim "Bool")) "and" (make-fn [] ANY ANY) "or" (make-fn [] ANY ANY) "+" (make-fn [] NUMBER-TYPE ANY) "-" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "*" (make-fn [] NUMBER-TYPE ANY) "/" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "quot" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "mod" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "max" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "min" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "inc" (make-fn [NUMBER-TYPE] nil INT-TYPE) "dec" (make-fn [NUMBER-TYPE] nil INT-TYPE) "count" (make-fn [ANY] nil (make-prim "Int")) "long" (make-fn [ANY] nil (make-prim "Int")) "int" (make-fn [ANY] nil (make-prim "Int")) "bigint" (make-fn [ANY] nil (make-prim "Int")) "double" (make-fn [ANY] nil (make-prim "Float")) "monotonic-nanoseconds" (make-fn [] nil (make-prim "Int")) ["qualified-ref" "bgl" "sha256-utf8" nil] (make-fn [(make-prim "String")] nil (make-prim "String")) "str" (make-fn [] ANY (make-prim "String")) "get" (make-fn [ANY ANY] ANY ANY) "get-in" (make-fn [ANY ANY] ANY ANY) "assoc" (make-fn [ANY ANY ANY] ANY ANY) "assoc-in" (make-fn [ANY ANY ANY] nil ANY) "update" (make-fn [ANY ANY ANY] ANY ANY) "dissoc" (make-fn [ANY ANY] ANY ANY) "conj" (make-fn [ANY] ANY ANY) "cons" (make-fn [ANY ANY] nil ANY) "concat" CONCAT-POLY "into" (make-fn [ANY ANY] ANY ANY) "vec" (make-fn [ANY] nil ANY) "vals" (make-fn [ANY] nil ANY) "keys" (make-fn [ANY] nil ANY) "first" VEC-ACCESS-POLY "second" VEC-ACCESS-POLY "rest" (make-fn [ANY] nil ANY) "nth" NTH-POLY "reduce" (make-fn [ANY ANY] ANY ANY) "map" (make-fn [ANY] ANY ANY) "mapv" MAPV-POLY "filter" (make-fn [ANY ANY] nil ANY) "filterv" FILTERV-POLY "remove" (make-fn [ANY ANY] nil ANY) "some" (make-fn [ANY ANY] nil ANY) "every?" (make-fn [ANY ANY] nil (make-prim "Bool")) "range" (make-fn [] INT-TYPE (make-app "List" [INT-TYPE]))})
 
 (def NIX-STDLIB {"==" (make-fn [ANY ANY] nil BOOL-TYPE) "!=" (make-fn [ANY ANY] nil BOOL-TYPE) "++" (make-poly ["A"] (let [items (make-app "Vec" [(make-var "A")])]
   (make-fn [items] items items)) nil) "//" (let [attrs (make-app "Map" [ANY ANY])]
@@ -495,6 +501,14 @@
   (if (nil? contracts) env (let [qualified (reduce (fn [out member] (reference-map-assoc out (make-qualified-ref prefix member namespace) (get contracts member))) env (ordered-keys contracts))]
   (if (vector? referred) (reduce (fn [out member] (let [contract (get contracts member)]
   (if (nil? contract) out (assoc out member contract)))) qualified referred) qualified))))) {} requires))
+
+(defn project-declared-extern-aliases [env externs requires]
+  (reduce (fn [projected require-spec] (let [namespace (get require-spec "ns")
+   alias (get require-spec "alias")]
+  (if (and (string? alias) (not= alias namespace)) (reduce (fn [out external] (let [declared (string-qualified-reference (get external "name"))]
+  (if (and (qualified-reference? declared) (= (get declared "qualifier") namespace)) (let [alias-ref (make-qualified-ref alias (get declared "name") namespace)
+   existing (reference-map-ref out alias-ref nil)]
+  (if (or (nil? existing) (any-type? existing)) (reference-map-assoc out alias-ref (get external "type")) out)) out))) projected externs) projected))) env requires))
 
 (def BUFFER-FLOAT-TYPE (make-app "Buffer" [FLOAT-TYPE]))
 
@@ -1747,12 +1761,15 @@
   (doseq [a call-args]
   (infer-expr! a env))
   ANY)))
-  (and (= (get e "node") "call") (or (= (call-fn-name e) "and") (= (call-fn-name e) "or"))) (do
-  (reduce (fn [acc a] (let [env* (merge env acc)]
-  (infer-expr! a env*)
-  (let [tn (test-narrowings a env*)]
-  (merge acc (get tn (if (= (call-fn-name e) "and") "then" "else")))))) {} (get e "args"))
-  ANY)
+  (and (= (get e "node") "call") (or (= (call-fn-name e) "and") (= (call-fn-name e) "or"))) (let [and? (= (call-fn-name e) "and")
+   result (reduce (fn [state a] (let [narrowings (get state "narrowings")
+   env* (merge env narrowings)
+   argument-type (infer-expr! a env*)
+   tn (test-narrowings a env*)]
+  {"narrowings" (merge narrowings (get tn (if and? "then" "else"))) "types" (conj (get state "types") argument-type)})) {"narrowings" {} "types" []} (get e "args"))
+   result-types (get result "types")
+   joined-result-types (if and? result-types (map-indexed (fn [index type] (if (= index (- (count result-types) 1)) type (truthy-result-type type))) result-types))]
+  (if (= (count joined-result-types) 0) (if and? BOOL-TYPE NIL-TYPE) (merge-types-list joined-result-types)))
   (and (= (get e "node") "call") (let [fn-name (call-fn-name e)]
   (or (= fn-name "nth") (= fn-name "first") (= fn-name "second"))) (> (count (get e "args")) 0) (let [tt (infer-expr! (nth (get e "args") 0) env)]
   (and (app-type? tt) (= (get tt "name") "HVec")))) (let [fn-name (call-fn-name e)
@@ -1834,6 +1851,7 @@
    base-stdlib (target-stdlib (get prog "target"))
    target-stdlib (merge base-stdlib (hosted-require-contracts (get prog "requires" [])))
    env-with-externs (if (not (nil? externs)) (reduce (fn [env ext] (reference-map-assoc env (get ext "name") (get ext "type"))) target-stdlib externs) target-stdlib)
+   env-with-externs (project-declared-extern-aliases env-with-externs externs (get prog "requires" []))
    dyn-from-defs (reduce (fn [acc f] (if (and (= (get f "node") "def") (= (get f "dynamic") true)) (assoc acc (get f "name") true) acc)) {} forms)
    dyn-from-externs (reduce (fn [acc extern] (if (= true (get extern "dynamic")) (assoc acc (get extern "name") true) acc)) dyn-from-defs externs)
    dyn-vars (if (= (get prog "target") "clj") (reduce (fn [acc ^String nm] (assoc acc nm true)) dyn-from-externs CLJ-BUILTIN-DYNAMIC-VARS) dyn-from-externs)
@@ -2908,6 +2926,24 @@
    env (extend-with-params! {} [parameter] nil)]
   (json-eq (infer-expr! {"node" "ref" "name" "x" "refersTo" "lexical:test:3:0:x"} env) (make-prim "String"))))
   (expect! "infer: ref missing => Any" (any-type? (infer-expr! (make-ref "y") {})))
+  (expect! "stdlib: <= accepts a third numeric argument" (let [body (make-call "<=" [(make-lit "number" 0) (make-lit "number" 1) (make-lit "number" 2)])
+   prog (make-prog [(make-defn-node "ordered" [] BOOL-TYPE [body])])]
+  (= (count (check-program! prog)) 0)))
+  (expect! "stdlib: into accepts its three-argument transducer arity" (let [body (make-call "into" [(make-vec-node []) (make-call "map" [(make-ref "inc")]) (make-vec-node [(make-lit "number" 1)])])
+   prog (make-prog [(make-defn-node "collected" [] ANY [body])])]
+  (= (count (check-program! prog)) 0)))
+  (expect! "stdlib: long narrows a dynamic host value to Int" (let [body (make-call "-" [(make-call "long" [(make-ref "dynamic-value")]) (make-lit "number" 1)])
+   prog (make-prog [(make-defn-node "difference" [(make-param "dynamic-value" ANY)] INT-TYPE [body])])]
+  (= (count (check-program! prog)) 0)))
+  (expect! "reader shorthand callback keeps Clojure truthiness and map arguments" (let [callback {"node" "fn" "params" [(make-param "%1" ANY)] "rest" false "ret" ANY "body" [(make-call "not" [(make-lit "string" "match")])]}
+   body (make-call "map" [callback (make-vec-node [(make-lit "number" 1)]) (make-vec-node [(make-lit "number" 2)])])
+   prog (make-prog [(make-defn-node "paired" [] ANY [body])])]
+  (= (count (check-program! prog)) 0)))
+  (expect! "concat accepts a nullable trailing vector" (let [vec-string (make-app "Vec" [(make-prim "String")])
+   maybe-vec (make-union [vec-string NIL-TYPE])
+   body (make-call "concat" [(make-ref "head") (make-ref "tail")])
+   prog (make-prog [(make-defn-node "append-optional" [(make-param "head" vec-string) (make-param "tail" maybe-vec)] vec-string [body])])]
+  (= (count (check-program! prog)) 0)))
   (expect! "js-member: nominal record property is typed" (let [record (make-record-node "Person" [(make-param "age" (make-prim "Int"))])
    body (make-js-get-node (make-ref "person") (make-js-selector "age"))
    prog (make-prog [record (make-defn-node "age-of" [(make-param "person" (make-prim "Person"))] (make-prim "Int") [body])])]
@@ -3101,18 +3137,18 @@
   (expect! "call: correct args" (let [prog {"namespace" "test" "target" "js" "forms" [(make-def-node "r" (make-prim "Int") (make-call "add" [(make-lit "number" 1) (make-lit "number" 2)]))] "externs" [{"name" "add" "type" (make-fn [(make-prim "Int") (make-prim "Int")] nil (make-prim "Int"))}] "requires" []}
    result (type-check! prog)]
   (= (get result "count") 0)))
+  (expect! "required alias projects a qualified declare-extern contract" (let [now-type (make-fn [] nil (make-prim "Int"))
+   state-now (make-qualified-ref "state" "now" nil)
+   call {"node" "call" "fn" state-now "args" []}
+   prog {"namespace" "test" "target" "clj" "forms" [(make-def-node "result" (make-prim "Int") call)] "externs" [{"name" "north.dashboard.state/now" "type" now-type}] "requires" [{"ns" "north.dashboard.state" "alias" "state" "refer" false}]}
+   result (type-check! prog)]
+  (= (get result "count") 0)))
   (expect! "call: wrong arg type" (let [prog {"namespace" "test" "target" "js" "forms" [(make-def-node "r" nil (make-call "add" [(make-lit "string" "x") (make-lit "number" 2)]))] "externs" [{"name" "add" "type" (make-fn [(make-prim "Int") (make-prim "Int")] nil (make-prim "Int"))}] "requires" []}
    result (type-check! prog)]
   (> (get result "count") 0)))
   (expect! "call: wrong arity" (let [prog {"namespace" "test" "target" "js" "forms" [(make-def-node "r" nil (make-call "add" [(make-lit "number" 1)]))] "externs" [{"name" "add" "type" (make-fn [(make-prim "Int") (make-prim "Int")] nil (make-prim "Int"))}] "requires" []}
    result (type-check! prog)]
   (> (get result "count") 0)))
-  (expect! "stdlib call: into accepts transducer collection arity" (let [prog (make-prog [(make-def-node "r" ANY (make-call "into" [(make-lit "string" "target") (make-lit "string" "transducer") (make-lit "string" "collection")]))])
-   result (type-check! prog)]
-  (= (get result "count") 0)))
-  (expect! "stdlib call: chained <= accepts trailing numeric arguments" (let [prog (make-prog [(make-def-node "r" nil (make-call "<=" [(make-lit "float" 0.0) (make-lit "float" 0.5) (make-lit "float" 1.0)]))])
-   result (type-check! prog)]
-  (= (get result "count") 0)))
   (expect! "buffer primitive: double-array wrong arity" (let [prog (assoc (make-prog [(make-def-node "r" nil (make-call "double-array" []))]) "target" "core")]
   (> (get (type-check! prog) "count") 0)))
   (expect! "buffer primitive: alength wrong arity" (let [prog (assoc (make-prog [(make-def-node "r" nil (make-call "alength" []))]) "target" "core")]

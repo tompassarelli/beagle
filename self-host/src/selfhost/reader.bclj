@@ -318,14 +318,17 @@
 
 ;; --- delimited list reader ---------------------------------------------------
 
-;; read-delimited! <-> read-datum! are mutually recursive; forward-declare so the
-;; Clojure/SCI target (which resolves top-to-bottom) can compile them.
-(declare read-datum!)
+;; The contextual reader pair is mutually recursive; forward-declare so the
+;; Clojure/SCI target (which resolves top-to-bottom) can compile it. Thread the
+;; anonymous-function nesting bit as data so ordinary datum reads stay pure and
+;; reentrant.
+(declare read-datum-with-context)
 
-(defn read-delimited!
+(defn read-delimited-with-context
   [src String
    pos Int
-   close String] Any
+   close String
+   reading-fn-shorthand Bool] Any
   (let [len (count src)]
     (loop [p Int (skip-ws src pos)
            items (Vec Any) []]
@@ -337,7 +340,7 @@
         (= (char-at src p) close)
           (make-result items (+ p 1))
         :else
-          (let [result (read-datum! src p)]
+          (let [result (read-datum-with-context src p reading-fn-shorthand)]
             (if (nil? result)
               (make-result items p)
               (recur (skip-ws src (get result "pos"))
@@ -411,30 +414,35 @@
 
 ;; --- hash dispatch (#{ #" #r etc.) -------------------------------------------
 
-(defn read-hash-dispatch!
+(defn read-hash-dispatch-with-context
   [src String
-   pos Int] Any
+   pos Int
+   reading-fn-shorthand Bool] Any
   (let [len (count src)]
     (if (>= (+ pos 1) len)
       (make-result "#" (+ pos 1))
       (let [nxt (char-at src (+ pos 1))]
         (cond
           (= nxt "{")
-            (let [result (read-delimited! src (+ pos 2) "}")]
+            (let [result (read-delimited-with-context
+                           src (+ pos 2) "}" reading-fn-shorthand)]
               (make-result (into [SET-TAG] (get result "value"))
                            (get result "pos")))
           (= nxt "(")
             (do
-              (reject-nested-fn-shorthand!)
-              (reset! READING-FN-SHORTHAND true)
-              (let [result (try
-                             (read-delimited! src (+ pos 2) ")")
-                             (finally (reset! READING-FN-SHORTHAND false)))]
+              (when reading-fn-shorthand
+                (throw
+                  (ex-info
+                    "beagle reader: nested #(...) is not supported; use an explicit fn for the inner function"
+                    {})))
+              (let [result (read-delimited-with-context
+                             src (+ pos 2) ")" true)]
                 (make-result
                   (fn-shorthand->fn (get result "value"))
                   (get result "pos"))))
           (= nxt "'")
-            (let [inner (read-datum! src (+ pos 2))]
+            (let [inner (read-datum-with-context
+                          src (+ pos 2) reading-fn-shorthand)]
               (if (nil? inner)
                 (do (selfhost.rt/eprint
                       "beagle reader: unexpected EOF after `#'` (Var quote needs a following name)\n")
@@ -451,24 +459,28 @@
 
 ;; --- main datum reader -------------------------------------------------------
 
-(defn read-datum!
+(defn read-datum-with-context
   [src String
-   pos Int] Any
+   pos Int
+   reading-fn-shorthand Bool] Any
   (let [p (skip-ws src pos)
         len (count src)]
     (if (>= p len) nil
       (let [ch (char-at src p)]
         (cond
           (= ch "(")
-            (read-delimited! src (+ p 1) ")")
+            (read-delimited-with-context
+              src (+ p 1) ")" reading-fn-shorthand)
 
           (= ch "[")
-            (let [result (read-delimited! src (+ p 1) "]")]
+            (let [result (read-delimited-with-context
+                           src (+ p 1) "]" reading-fn-shorthand)]
               (make-result (into [BRACKET-TAG] (get result "value"))
                            (get result "pos")))
 
           (= ch "{")
-            (let [result (read-delimited! src (+ p 1) "}")]
+            (let [result (read-delimited-with-context
+                           src (+ p 1) "}" reading-fn-shorthand)]
               (make-result (into [MAP-TAG] (get result "value"))
                            (get result "pos")))
 
@@ -476,23 +488,26 @@
             (read-string-literal src p)
 
           (= ch "#")
-            (read-hash-dispatch! src p)
+            (read-hash-dispatch-with-context src p reading-fn-shorthand)
 
           (= ch "'")
-            (let [inner (read-datum! src (+ p 1))]
+            (let [inner (read-datum-with-context
+                          src (+ p 1) reading-fn-shorthand)]
               (if (nil? inner)
                 (make-result ["quote" nil] (+ p 1))
                 (make-result ["quote" (get inner "value")] (get inner "pos"))))
 
           (= ch "`")
-            (let [inner (read-datum! src (+ p 1))]
+            (let [inner (read-datum-with-context
+                          src (+ p 1) reading-fn-shorthand)]
               (if (nil? inner)
                 (make-result ["quasiquote" nil] (+ p 1))
                 (make-result ["quasiquote" (get inner "value")]
                              (get inner "pos"))))
 
           (= ch "@")
-            (let [inner (read-datum! src (+ p 1))]
+            (let [inner (read-datum-with-context
+                          src (+ p 1) reading-fn-shorthand)]
               (if (nil? inner)
                 (make-result ["deref" nil] (+ p 1))
                 (make-result ["deref" (get inner "value")] (get inner "pos"))))
@@ -501,14 +516,16 @@
           ;; syntax-quote unquote (reader-impl.rkt unquote-reader).
           (= ch "~")
             (if (= (char-at src (+ p 1)) "@")
-              (let [inner (read-datum! src (+ p 2))]
+              (let [inner (read-datum-with-context
+                            src (+ p 2) reading-fn-shorthand)]
                 (if (nil? inner)
                   (do (selfhost.rt/eprint
                         "beagle reader: unexpected EOF after `~@` (unquote-splicing needs a following datum)\n")
                       (make-result ["unquote-splicing" nil] (+ p 2)))
                   (make-result ["unquote-splicing" (get inner "value")]
                                (get inner "pos"))))
-              (let [inner (read-datum! src (+ p 1))]
+              (let [inner (read-datum-with-context
+                            src (+ p 1) reading-fn-shorthand)]
                 (if (nil? inner)
                   (do (selfhost.rt/eprint
                         "beagle reader: unexpected EOF after `~` (unquote needs a following datum)\n")
@@ -517,12 +534,14 @@
 
           ;; `^META FORM` -> (#%meta META FORM) (reader-impl.rkt meta-reader).
           (= ch "^")
-            (let [meta-r (read-datum! src (+ p 1))]
+            (let [meta-r (read-datum-with-context
+                           src (+ p 1) reading-fn-shorthand)]
               (if (nil? meta-r)
                 (do (selfhost.rt/eprint
                       "beagle reader: unexpected EOF after `^` (metadata needs a value and a target form)\n")
                     nil)
-                (let [form-r (read-datum! src (get meta-r "pos"))]
+                (let [form-r (read-datum-with-context
+                               src (get meta-r "pos") reading-fn-shorthand)]
                   (if (nil? form-r)
                     (do (selfhost.rt/eprint
                           "beagle reader: unexpected EOF after `^` metadata (needs a target form to attach to)\n")
@@ -552,6 +571,11 @@
                   text (get sym-result "value")]
               (make-result (classify-atom text)
                            (get sym-result "pos"))))))))
+
+(defn read-datum
+  [src String
+   pos Int] Any
+  (read-datum-with-context src pos false))
 
 ;; --- syntax reader ----------------------------------------------------------
 ;; The datum reader above remains the compatibility surface for dependency
@@ -884,7 +908,7 @@
            datums (Vec Any) []]
       (if (>= p (count src))
         {"target" target "datums" datums}
-        (let [result (read-datum! src p)]
+        (let [result (read-datum src p)]
           (if (nil? result)
             {"target" target "datums" datums}
             (recur (skip-ws src (get result "pos"))
@@ -1196,8 +1220,8 @@
   (expect! "read-program: explicit define-target present -> no double injection"
     (= (read-program "#lang beagle/js\n(define-target js)\n(ns app)")
        [["define-target" "js"] ["ns" "app"]]))
-  (expect! "read-datum! returns value+pos"
-    (let [r (read-datum! "42 rest" 0)]
+  (expect! "read-datum returns value+pos"
+    (let [r (read-datum "42 rest" 0)]
       (and (= (get r "value") 42) (= (get r "pos") 2))))
   (expect! "syntax reader keeps exact caller bytes and child span"
     (let [source "#lang beagle/clj\n(identity (+ 1 2))"

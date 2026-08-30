@@ -1126,6 +1126,7 @@
    "inc"      (make-fn [NUMBER-TYPE] nil INT-TYPE)
    "dec"      (make-fn [NUMBER-TYPE] nil INT-TYPE)
    "count"    (make-fn [ANY] nil (make-prim "Int"))
+   "long"     (make-fn [ANY] nil (make-prim "Int"))
    "int"      (make-fn [ANY] nil (make-prim "Int"))
    "bigint"   (make-fn [ANY] nil (make-prim "Int"))
    "double"   (make-fn [ANY] nil (make-prim "Float"))
@@ -1242,6 +1243,37 @@
                 referred)
               qualified)))))
     {}
+    requires))
+
+(defn project-declared-extern-aliases
+  [env Any
+   externs Any
+   requires Any] Any
+  (reduce
+    (fn
+      [projected Any
+       require-spec Any] Any
+      (let [namespace (get require-spec "ns")
+            alias (get require-spec "alias")]
+        (if (and (string? alias) (not= alias namespace))
+          (reduce
+            (fn
+              [out Any
+               external Any] Any
+              (let [declared (string-qualified-reference (get external "name"))]
+                (if (and (qualified-reference? declared)
+                         (= (get declared "qualifier") namespace))
+                  (let [alias-ref (make-qualified-ref
+                                    alias (get declared "name") namespace)
+                        existing (reference-map-ref out alias-ref nil)]
+                    (if (or (nil? existing) (any-type? existing))
+                      (reference-map-assoc out alias-ref (get external "type"))
+                      out))
+                  out)))
+            projected
+            externs)
+          projected)))
+    env
     requires))
 
 (def BUFFER-FLOAT-TYPE Any
@@ -4181,6 +4213,8 @@
                                        env (get ext "name") (get ext "type")))
                                    target-stdlib externs)
                            target-stdlib)
+        env-with-externs (project-declared-extern-aliases
+                           env-with-externs externs (get prog "requires" []))
         dyn-from-defs (reduce (fn
                                 [acc Any
                                  f Any] Any
@@ -6680,6 +6714,16 @@
                  [(make-defn-node "collected" [] ANY [body])])]
       (= (count (check-program! prog)) 0)))
 
+  (expect! "stdlib: long narrows a dynamic host value to Int"
+    (let [body (make-call "-"
+                 [(make-call "long" [(make-ref "dynamic-value")])
+                  (make-lit "number" 1)])
+          prog (make-prog
+                 [(make-defn-node "difference"
+                    [(make-param "dynamic-value" ANY)]
+                    INT-TYPE [body])])]
+      (= (count (check-program! prog)) 0)))
+
   (expect! "reader shorthand callback keeps Clojure truthiness and map arguments"
     (let [callback {"node" "fn"
                     "params" [(make-param "%1" ANY)]
@@ -7344,6 +7388,19 @@
                            (make-call "add" [(make-lit "number" 1) (make-lit "number" 2)]))]
                 "externs" [{"name" "add" "type" (make-fn [(make-prim "Int") (make-prim "Int")] nil (make-prim "Int"))}]
                 "requires" []}
+          result (type-check! prog)]
+      (= (get result "count") 0)))
+  (expect! "required alias projects a qualified declare-extern contract"
+    (let [now-type (make-fn [] nil (make-prim "Int"))
+          state-now (make-qualified-ref "state" "now" nil)
+          call {"node" "call" "fn" state-now "args" []}
+          prog {"namespace" "test" "target" "clj"
+                "forms" [(make-def-node "result" (make-prim "Int") call)]
+                "externs" [{"name" "north.dashboard.state/now"
+                            "type" now-type}]
+                "requires" [{"ns" "north.dashboard.state"
+                             "alias" "state"
+                             "refer" false}]}
           result (type-check! prog)]
       (= (get result "count") 0)))
   (expect! "call: wrong arg type"

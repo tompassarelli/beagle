@@ -27,8 +27,6 @@
 
 (def PARAMETRIC-CTORS ["Vec" "List" "Set" "Map" "Promise" "NixType" "Arr" "Ptr" "Atom" "HVec" "Regex" "Buffer" "JsMap"])
 
-(def BUILTIN-PARAMETRIC-APPLICATION-ARITIES {"Regex" 1 "Buffer" 1 "JsMap" 2})
-
 (defn make-prim [^String name]
   {"kind" "prim" "name" name})
 
@@ -153,6 +151,7 @@
   (and (app-type? actual) (app-type? expected) (= (get actual "name") "JsMap") (= (get expected "name") "JsMap")) (and (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args")))))
   (and (app-type? actual) (= (get actual "name") "HVec") (app-type? expected) (= (get expected "name") "Vec") (= 1 (count (get expected "args")))) (every? (fn [a] (type-compatible? a (nth (get expected "args") 0))) (get actual "args"))
   (and (app-type? expected) (= (get expected "name") "Dyn")) (if (and (app-type? actual) (= (get actual "name") "Dyn")) (and (= (count (get actual "args")) (count (get expected "args"))) (every? (fn [i] (type-invariant-equal? (nth (get actual "args") i) (nth (get expected "args") i))) (range (count (get actual "args"))))) (boolean (some (fn [alt] (type-compatible? actual alt)) (get expected "args"))))
+  (and (app-type? actual) (= (get actual "name") "Regex") (prim? expected) (= (get expected "name") "Regex")) true
   (and (app-type? actual) (app-type? expected)) (and (= (get actual "name") (get expected "name")) (= (count (get actual "args")) (count (get expected "args"))) (every? identity (map-indexed (fn [i a] (type-compatible? a (nth (get expected "args") i))) (get actual "args"))))
   :else false))
 
@@ -191,10 +190,7 @@
    bounds (reduce (fn [acc e] (if (and (vector? e) (= (count e) 3) (= (nth e 1) "<:") (string? (nth e 0))) (assoc acc (nth e 0) (varize-type (parse-type! (nth e 2)) vars)) acc)) {} raw-vars)]
   (if reserved? (invalid-type! "forall type parameter cannot declare `Fn`; Fn is the built-in function type constructor") (make-poly vars (varize-type (parse-type! (nth t 2)) vars) (if (= (count bounds) 0) nil bounds))))
   (and (vector? t) (> (count t) 1) (= (nth t 0) "U")) (make-union (mapv parse-type! (subvec t 1)))
-  (and (vector? t) (> (count t) 0) (string? (nth t 0)) (or (= (nth t 0) "Dyn") (>= (index-of2 PARAMETRIC-CTORS (nth t 0)) 0) (= (get user-parametric (nth t 0)) true))) (let [name (nth t 0)
-   expected (get BUILTIN-PARAMETRIC-APPLICATION-ARITIES name)
-   actual (- (count t) 1)]
-  (if (and (not (nil? expected)) (not (= expected actual))) (invalid-type! (str "type " name " expects " expected " argument" (if (= expected 1) "" "s") ", got " actual)) (make-app name (mapv parse-type! (subvec t 1)))))
+  (and (vector? t) (> (count t) 0) (string? (nth t 0)) (or (= (nth t 0) "Dyn") (>= (index-of2 PARAMETRIC-CTORS (nth t 0)) 0) (= (get user-parametric (nth t 0)) true))) (make-app (nth t 0) (mapv parse-type! (subvec t 1)))
   (and (string? t) (> (count t) 1) (= (char-at t (- (count t) 1)) "?")) (let [base (substring2 t 0 (- (count t) 1))]
   (make-union [(parse-type! base) (make-prim "Nil")]))
   (and (string? t) (= t "Number")) (make-union [(make-prim "Int") (make-prim "Float")])
@@ -313,10 +309,6 @@
   (expect! "tc: poly unwrap" (type-compatible? (make-prim "String") (make-poly ["T"] (make-prim "String") nil)))
   (expect! "pt: prim" (= (parse-type! "String") (make-prim "String")))
   (expect! "pt: app Vec" (= (parse-type! ["Vec" "String"]) (make-app "Vec" [(make-prim "String")])))
-  (expect! "pt: shaped Regex app" (= (parse-type! ["Regex" ["HVec" "String" "String"]]) (make-app "Regex" [(make-app "HVec" [(make-prim "String") (make-prim "String")])])))
-  (expect! "pt: shaped Regex exact arity" (let [before (count (type-parse-errors))
-   invalid (parse-type! ["Regex" "String" "String"])]
-  (and (= (get invalid "kind") "invalid") (= (count (type-parse-errors)) (+ before 1)))))
   (expect! "pt: union" (= (parse-type! ["U" "String" "Nil"]) (make-union [(make-prim "String") (make-prim "Nil")])))
   (expect! "pt: nullable sugar" (= (parse-type! "String?") (make-union [(make-prim "String") (make-prim "Nil")])))
   (expect! "pt: Number alias" (= (parse-type! "Number") (make-union [(make-prim "Int") (make-prim "Float")])))
@@ -340,6 +332,7 @@
   (expect! "tc: (HVec Int String) <: (Vec Any)" (type-compatible? (make-app "HVec" [(make-prim "Int") (make-prim "String")]) (make-app "Vec" [(make-prim "Any")])))
   (expect! "tc: (HVec Int String) NOT <: (Vec Int)" (not (type-compatible? (make-app "HVec" [(make-prim "Int") (make-prim "String")]) (make-app "Vec" [(make-prim "Int")]))))
   (expect! "tc: (Vec Int) NOT <: (HVec Int)" (not (type-compatible? (make-app "Vec" [(make-prim "Int")]) (make-app "HVec" [(make-prim "Int")]))))
+  (expect! "tc: shaped Regex is compatible with primitive Regex" (type-compatible? (make-app "Regex" [(make-app "HVec" [(make-prim "String") (make-prim "String")])]) (make-prim "Regex")))
   (expect! "pt: bounded forall (T <: Number)" (= (parse-type! ["forall" ["#%brackets" ["T" "<:" "Number"]] ["Fn" ["#%brackets" "T"] "T"]]) (make-poly ["T"] (make-fn [(make-var "T")] nil (make-var "T")) {"T" (make-union [(make-prim "Int") (make-prim "Float")])})))
   (expect! "ts: bounded forall render" (= (type->string (make-poly ["T"] (make-fn [(make-var "T")] nil (make-var "T")) {"T" (make-union [(make-prim "Int") (make-prim "Float")])})) "(forall [(T <: Number)] (Fn [T] T))"))
   (expect! "pt: unbounded forall var-izes body" (= (parse-type! ["forall" ["#%brackets" "T"] ["Fn" ["#%brackets" "T"] "T"]]) (make-poly ["T"] (make-fn [(make-var "T")] nil (make-var "T")) nil)))
