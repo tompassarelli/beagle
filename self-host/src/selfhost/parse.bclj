@@ -3719,6 +3719,38 @@
 (defn- meta-name? [d Any] Bool
   (and (vector? d) (= (count d) 3) (= (nth d 0) "#%meta") (string? (nth d 2))))
 
+(defn- meta-flag?
+  [mv Any
+   flag String] Bool
+  (cond
+    (= mv flag)
+    true
+    (map-tagged? mv)
+    (let [kvs (map-body mv)
+          n (count kvs)]
+      (loop [i Int 0]
+        (cond
+          (>= (+ i 1) n)
+          false
+          (and (= (nth kvs i) flag) (= (nth kvs (+ i 1)) true))
+          true
+          :else
+          (recur (+ i 2)))))
+    :else
+    false))
+
+(defn- meta-async? [mv Any] Bool
+  (meta-flag? mv ":async"))
+
+(defn- meta-private? [mv Any] Bool
+  (and (not (= mv ":async"))
+    (or (not (meta-async? mv)) (meta-flag? mv ":private"))))
+
+(defn- wrap-authored-async
+  [mv Any
+   form Any] Any
+  (if (meta-async? mv) (assoc form "async" true) form))
+
 ;; --- def/defonce arms (docstring + ^:dynamic recorded on the node) -------------
 ;; `^:dynamic` on a def name: the metadata value is either the keyword
 ;; `:dynamic` (shorthand) or a #%map carrying `:dynamic true` (longhand);
@@ -3896,7 +3928,13 @@
             (vector? (nth rest-items 1)))
           (parse-defn-tail! name-form (subvec rest-items 2) priv0 d)
           (meta-name? name-form)
-          (parse-defn-tail! (nth name-form 2) (subvec rest-items 1) true d)
+          (let [mv (nth name-form 1)]
+            (wrap-authored-async mv
+              (parse-defn-tail!
+                (nth name-form 2)
+                (subvec rest-items 1)
+                (meta-private? mv)
+                d)))
           (string? name-form)
           (if (and (>= (count rest-items) 3) (vector? (nth rest-items 1)) (= (count (nth rest-items 1)) 2) (= (nth (nth rest-items 1) 0) "#%string"))
             (parse-defn-tail! name-form (subvec rest-items 2) priv0 d)
@@ -5121,14 +5159,21 @@
                 :else
                 nil)
               (= head "defn")
-              (when (and (>= (count d) 3) (string? (nth d 1)))
-                (let [after (subvec d 2)]
+              (let [name-form (nth d 1)
+                    name (if (meta-name? name-form)
+                           (nth name-form 2)
+                           name-form)
+                    public? (or (string? name-form)
+                              (and (meta-name? name-form)
+                                (not (meta-private? (nth name-form 1)))))]
+                (when (and (>= (count d) 3) public?)
+                  (let [after (subvec d 2)]
                   (if (and (>= (count after) 3) (bracketed? (nth after 0)))
-                    (emit! (nth d 1)
+                    (emit! name
                       (make-fn-type (import-fn-ptypes! (nth after 0))
                         (import-fn-rest! (nth after 0))
                         (parse-type* (nth after 1))))
-                    nil)))
+                    nil))))
               :else
               nil)))))
     (deref out)))
@@ -5954,6 +5999,16 @@
   (expect! "defn- private"
     (let [node (parse-expr* ["defn-" "helper" [BRACKET-TAG "x" "Any"] "Any" "x"])]
       (and (= (get node "node") "defn") (= (get node "private") true))))
+  (expect! "authored async defn preserves ownership and remains public"
+    (let [node (parse-expr*
+                 ["defn" ["#%meta" ":async" "fetch-value"]
+                  [BRACKET-TAG "url" "String"]
+                  ["Promise" "String"]
+                  ["await" ["fetch" "url"]]])]
+      (and (= (get node "node") "defn")
+        (= (get node "name") "fetch-value")
+        (= (get node "private") false)
+        (= (get node "async") true))))
   (expect! "with form"
     (let [node (parse-expr* ["with" "point" [BRACKET-TAG ":x" 10] [BRACKET-TAG ":y" 20]])]
       (and (= (get node "node") "with") (= (count (get node "updates")) 2))))

@@ -593,7 +593,7 @@
   (loop [proofs assumed]
   (let [next (reduce (fn [out name] (let [form (get local-definitions name)
    clauses (callable-form-clauses form)
-   synchronous? (every? (fn [clause] (callable-clause-synchronous? clause proofs)) clauses)]
+   synchronous? (and (not (= (get form "async") true)) (every? (fn [clause] (callable-clause-synchronous? clause proofs)) clauses))]
   (assoc out name synchronous?))) proofs (ordered-keys local-definitions))]
   (if (= next proofs) next (recur next))))))
 
@@ -2009,6 +2009,42 @@
   (check-method-body! method env "js/method"))
   nil)
 
+(defn ^Boolean authored-async? [form]
+  (= (get form "async") true))
+
+(defn ^Boolean promise-type? [type]
+  (and (app-type? type) (= (get type "name") "Promise") (= (count (get type "args")) 1)))
+
+(defn check-authored-async-contract! [form]
+  (if (authored-async? form) (do
+  (doseq [clause (callable-form-clauses form)]
+  (if (not (promise-type? (get clause "ret"))) (do
+  (emit-diag! (str "beagle: defn " (get form "name") " marked ^:async must declare (Promise T), got " (type->string (get clause "ret")))))))))
+  nil)
+
+(defn check-authored-await-ownership-from! [value ^Boolean owned?]
+  (cond
+  (vector? value) (doseq [item value]
+  (check-authored-await-ownership-from! item owned?))
+  (map? value) (let [node (get value "node")]
+  (cond
+  (= node "await") (do
+  (if (not owned?) (do
+  (emit-diag! "bare await is only valid inside a ^:async defn")))
+  (check-authored-await-ownership-from! (get value "expr") owned?))
+  (or (= node "defn") (= node "defn-multi")) (do
+  (check-authored-async-contract! value)
+  (doseq [item (vals value)]
+  (check-authored-await-ownership-from! item (authored-async? value))))
+  (= node "quoted") nil
+  :else (doseq [item (vals value)]
+  (check-authored-await-ownership-from! item owned?))))
+  :else nil)
+  nil)
+
+(defn check-authored-await-ownership! [form]
+  (check-authored-await-ownership-from! form false))
+
 (defn check-form! [form env]
   (let [node (get form "node")]
   (cond
@@ -2685,6 +2721,7 @@
   (check-declared-module-contract! checked-input (get inferred "types"))
   (check-core-function-abis! checked-input (get inferred "types"))
   (doseq [form (get checked-input "forms")]
+  (check-authored-await-ownership! form)
   (check-form! form env))
   (check-nix-free-dotted! checked-input)
   (check-qualified-resolution! checked-input env)
@@ -3376,7 +3413,7 @@
    diagnostics (check-program! prog)]
   (diagnostics-include? diagnostics "not proven synchronous")))
   (expect! "constraint: checked callable synchronization export owns both effects" (let [sync-fn (make-defn-node "sync?" [(make-param "x" (make-prim "Int"))] BOOL-TYPE [(make-lit "bool" true)])
-   async-fn (make-defn-node "async?" [(make-param "x" (make-prim "Int"))] BOOL-TYPE [{"node" "await" "expr" (make-ref "x")}])
+   async-fn (assoc (make-defn-node "async?" [(make-param "x" (make-app "Promise" [BOOL-TYPE]))] (make-app "Promise" [BOOL-TYPE]) [{"node" "await" "expr" (make-ref "x")}]) "async" true)
    prog (make-prog [sync-fn async-fn])
    diagnostics (check-program! prog)
    exported (export-checked-callable-synchronization! prog)]
@@ -3470,6 +3507,15 @@
    exported (export-checked-record-contracts! prog)
    contract (nth exported 0)]
   (and (= (count diagnostics) 0) (= (get contract "name") "Constrained") (= (get contract "field-order") [":x"]) (= (get contract "constrained") true) (= (get contract "synchronous") true) (= (get contract "validator") "test/$beagle$record$Constrained$validate"))))
+  (expect! "authored async owns await and requires a Promise return" (let [promise-int (make-app "Promise" [(make-prim "Int")])
+   await-value {"node" "await" "expr" (make-ref "pending")}
+   valid (assoc (make-defn-node "valid" [(make-param "pending" promise-int)] promise-int [await-value]) "async" true)
+   invalid-return (assoc (make-defn-node "invalid-return" [] (make-prim "Int") [(make-lit "number" 1)]) "async" true)
+   unowned (make-defn-node "unowned" [(make-param "pending" promise-int)] (make-prim "Int") [await-value])
+   valid-diagnostics (check-program! (make-prog [valid]))
+   invalid-return-diagnostics (check-program! (make-prog [invalid-return]))
+   unowned-diagnostics (check-program! (make-prog [unowned]))]
+  (and (= (count valid-diagnostics) 0) (diagnostics-include? invalid-return-diagnostics "marked ^:async must declare (Promise T)") (diagnostics-include? unowned-diagnostics "bare await is only valid inside a ^:async defn"))))
   (doseq [f (deref failures)]
   (selfhost.rt/eprint (str "  FAIL: " f "\n")))
   (println (str "  CHECK: " (count (deref passes)) " passed, " (count (deref failures)) " failed"))

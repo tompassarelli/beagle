@@ -1,0 +1,8 @@
+#lang beagle/js
+
+(ns selfhost.fixtures.js-parity-authored-async)
+
+(declare-extern fetch-value (Fn [String] (Promise String)))
+
+(defn ^:async fetch-one [url String] (Promise String)
+  (await (fetch-value url)))

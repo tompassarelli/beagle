@@ -1824,6 +1824,27 @@
 (defn- ^Boolean meta-name? [d]
   (and (vector? d) (= (count d) 3) (= (nth d 0) "#%meta") (string? (nth d 2))))
 
+(defn- ^Boolean meta-flag? [mv ^String flag]
+  (cond
+  (= mv flag) true
+  (map-tagged? mv) (let [kvs (map-body mv)
+   n (count kvs)]
+  (loop [i 0]
+  (cond
+  (>= (+ i 1) n) false
+  (and (= (nth kvs i) flag) (= (nth kvs (+ i 1)) true)) true
+  :else (recur (+ i 2)))))
+  :else false))
+
+(defn- ^Boolean meta-async? [mv]
+  (meta-flag? mv ":async"))
+
+(defn- ^Boolean meta-private? [mv]
+  (and (not (= mv ":async")) (or (not (meta-async? mv)) (meta-flag? mv ":private"))))
+
+(defn- wrap-authored-async [mv form]
+  (if (meta-async? mv) (assoc form "async" true) form))
+
 (defn- ^Boolean meta-dynamic? [mv]
   (cond
   (= mv ":dynamic") true
@@ -1891,6 +1912,7 @@
   (and (string? head) (str/starts-with? head "unsafe-")) (err! (str "(" head " \"...\") is not supported — beagle has no verbatim escape hatch; add a typed stdlib entry or a sibling target-language file instead"))
   (= head "fmt") (err! "(fmt ...) is not supported — use str / format")
   (and (= head "js/typeof") (= (count rest-items) 1)) (make-js-typeof (parse-expr* (nth rest-items 0)))
+  (= head "js/throw") (if (= (count rest-items) 1) {"node" "static-call" "qualifier" "js" "name" "throw" "providerId" nil "args" [(parse-expr* (nth rest-items 0))]} (err! "js/throw expects exactly one value"))
   (= head "new") (if (>= (count rest-items) 1) (make-js-new (parse-expr* (nth rest-items 0)) (mapv parse-expr* (subvec rest-items 1))) (err! "new expects a constructor and optional arguments"))
   (= head "js/delete!") (if (= (count rest-items) 2) (make-js-delete (parse-expr* (nth rest-items 0)) (parse-js-member-key (nth rest-items 1))) (err! "js/delete! expects exactly a receiver and member key"))
   (= head "js/in?") (if (= (count rest-items) 2) (make-js-in (parse-expr* (nth rest-items 0)) (parse-js-member-key (nth rest-items 1))) (err! "js/in? expects exactly a receiver and member key"))
@@ -1900,7 +1922,8 @@
    priv0 false]
   (cond
   (and (string? name-form) (not (keyword-sym? name-form)) (string-datum? (nth rest-items 1)) (>= (count rest-items) 3) (vector? (nth rest-items 1))) (parse-defn-tail! name-form (subvec rest-items 2) priv0 d)
-  (meta-name? name-form) (parse-defn-tail! (nth name-form 2) (subvec rest-items 1) true d)
+  (meta-name? name-form) (let [mv (nth name-form 1)]
+  (wrap-authored-async mv (parse-defn-tail! (nth name-form 2) (subvec rest-items 1) (meta-private? mv) d)))
   (string? name-form) (if (and (>= (count rest-items) 3) (vector? (nth rest-items 1)) (= (count (nth rest-items 1)) 2) (= (nth (nth rest-items 1) 0) "#%string")) (parse-defn-tail! name-form (subvec rest-items 2) priv0 d) (parse-defn-tail! name-form (subvec rest-items 1) priv0 d))
   :else (err! (str "malformed defn: " (str d)))))
   (and (= head "defn-") (>= (count rest-items) 2)) (cond
@@ -2495,9 +2518,12 @@
   (and (>= (count d) 3) (meta-name? (nth d 1))) (let [nm (nth (nth d 1) 2)]
   (if (= (count d) 4) (emit! nm (parse-type* (nth d 2))) (emit! nm (make-prim "Any"))))
   :else nil)
-  (= head "defn") (if (and (>= (count d) 3) (string? (nth d 1))) (do
+  (= head "defn") (let [name-form (nth d 1)
+   name (if (meta-name? name-form) (nth name-form 2) name-form)
+   public? (or (string? name-form) (and (meta-name? name-form) (not (meta-private? (nth name-form 1)))))]
+  (if (and (>= (count d) 3) public?) (do
   (let [after (subvec d 2)]
-  (if (and (>= (count after) 3) (bracketed? (nth after 0))) (emit! (nth d 1) (make-fn-type (import-fn-ptypes! (nth after 0)) (import-fn-rest! (nth after 0)) (parse-type* (nth after 1)))) nil))))
+  (if (and (>= (count after) 3) (bracketed? (nth after 0))) (emit! name (make-fn-type (import-fn-ptypes! (nth after 0)) (import-fn-rest! (nth after 0)) (parse-type* (nth after 1)))) nil)))))
   :else nil))))))
   (deref out)))
 
@@ -2757,6 +2783,8 @@
   (expect! "js/delete! receiver-first" (= (get (parse-expr* ["js/delete!" "obj" ".field"]) "node") "js-delete"))
   (expect! "js/in? receiver-first" (= (get (parse-expr* ["js/in?" "obj" ".field"]) "node") "js-in"))
   (expect! "js/typeof" (= (get (parse-expr* ["js/typeof" "obj"]) "node") "js-typeof"))
+  (expect! "js/throw" (let [node (parse-expr* ["js/throw" "problem"])]
+  (and (= (get node "node") "static-call") (= (get node "qualifier") "js") (= (get node "name") "throw") (= (count (get node "args")) 1))))
   (expect! "kw-access without default — false (ast-json parity)" (let [node (parse-expr* [":name" "m"])]
   (and (= (get node "node") "kw-access") (= (get node "kw") ":name") (= (get node "default") false))))
   (expect! "kw-access with default" (let [node (parse-expr* [":name" "m" "fallback"])]
@@ -2851,6 +2879,8 @@
   (and (= (get node "node") "call") (= (get (get node "fn") "node") "ref") (= (get (get node "fn") "name") "println"))))
   (expect! "defn- private" (let [node (parse-expr* ["defn-" "helper" [BRACKET-TAG "x" "Any"] "Any" "x"])]
   (and (= (get node "node") "defn") (= (get node "private") true))))
+  (expect! "authored async defn preserves ownership and remains public" (let [node (parse-expr* ["defn" ["#%meta" ":async" "fetch-value"] [BRACKET-TAG "url" "String"] ["Promise" "String"] ["await" ["fetch" "url"]]])]
+  (and (= (get node "node") "defn") (= (get node "name") "fetch-value") (= (get node "private") false) (= (get node "async") true))))
   (expect! "with form" (let [node (parse-expr* ["with" "point" [BRACKET-TAG ":x" 10] [BRACKET-TAG ":y" 20]])]
   (and (= (get node "node") "with") (= (count (get node "updates")) 2))))
   (expect! "parse-params! structural typed" (let [result (parse-params! [BRACKET-TAG ["x" "Int"] ["y" "String"]])]
