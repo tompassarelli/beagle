@@ -1,5 +1,10 @@
 # Durable sole-writer benchmark methodology
 
+The development decision rule and the boundary between observed and unproven
+performance claims are in `store:bench/PERFORMANCE_ACCEPTANCE.md`. This harness
+is one measurement surface for that contract; running it once does not by
+itself pass the performance gate.
+
 This benchmark compares durable stores with one authoritative writer and
 concurrent readers. `store:bench/in-class/scenario-contract.edn` defines the
 workload. Corpus sizes are live Triple counts and must be positive multiples of
@@ -42,7 +47,10 @@ Boot and cold-query measurements happen first. Each adapter then runs 30
 durable warmup writes and 10 warmup joins; those results are discarded. The
 sustained and mixed phases follow in that order.
 
-Each run executes every adapter/size pair twice in alternating adapter order.
+The default diagnostic run executes every adapter/size pair twice in alternating
+adapter order. A performance acceptance run uses three baseline/candidate pairs
+as required by `store:bench/PERFORMANCE_ACCEPTANCE.md`; override `BENCH_RUNS`
+accordingly and preserve the raw rows from both revisions.
 The report records range variance as `(max - min) / mean`. It also records the
 Beagle Store revision, UTC time, kernel, CPU, memory, load, Python and SQLite versions,
 corpus sizes, and run count. The corpus has no random input, so

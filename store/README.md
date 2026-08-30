@@ -96,6 +96,10 @@ primitive or a code type. See the [naming ledger](docs/naming.md).
   `withdrawal`, recursion, filters, arithmetic, and aggregates.
 - [Ontology](docs/ontology.md) — modeling rules, the canonical normalized example, profiles, and semantic hints.
 - [Guarantees](docs/guarantees.md) — guarantees, concurrency, workload envelope, and client obligations.
+- Performance acceptance — `store:bench/PERFORMANCE_ACCEPTANCE.md` defines the
+  development resource and regression gate, existing evidence limits, and the
+  boundary for future competitor claims; it is not a user-facing latency
+  guarantee.
 - [Naming ledger](docs/naming.md) — durable naming verdicts and rejected alternatives.
 - [Bun Store RPC client](clients/bun/README.md) — the complete direct builder and application data plane.
 - [Isolation and deployment](docs/isolation-and-deployment.md) — trust domains, the three deployment shapes, and the wasm embed contract.
