@@ -32,6 +32,8 @@ export type {
   PageResponse,
   RequestOptions,
   PagedRequestOptions,
+  ScanAllOptions,
+  ScanAllResult,
   SinceSelector,
   QueryOptions,
   WriteOptions,
@@ -78,6 +80,7 @@ export {
   tripleQuery,
   storeTransportCheckpoint,
   storeRpcDeclaredPacketBytes,
+  scanAll,
 } from '@tompassarelli/beagle-store-rpc';
 
 import type {

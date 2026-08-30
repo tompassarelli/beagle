@@ -43,6 +43,8 @@
 (def bc-get-used Any (atom false))        ; exact core.js import demanded by kw-access poly reads
 (def bc-range-used Any (atom false))      ; exact core.js import demanded by range
 (def bc-record-instance-used Any (atom false)) ; exact core.js import demanded by instance?
+(def runtime-call-uses Any (atom {}))      ; core.js name -> demanded named import
+(def host-call-uses Any (atom {}))         ; host.js name -> demanded named import
 (def inline-scope Any (atom {}))         ; names inlined in return/stmt position
 (def ctx Any (atom "stmt"))              ; "stmt" | "expr" (only doseq reads it)
 (def checked-program-ref Any (atom false))
@@ -1144,7 +1146,9 @@
                (str "export { " factory " as " (js-string-lit member) " };")]))
           members)))))
 
-(defn emit-named-public-esm-form! [f Any emitted String] String
+(defn emit-named-public-esm-form!
+  [f Any
+   emitted String] String
   (let [authored (get f "name")]
     (str emitted "\nexport { " (mangle-name authored) " as "
       (js-string-lit authored) " };")))
@@ -1313,6 +1317,18 @@
 (defn emit-args-list [args Any] String
   (str/join ", " (mapv emit-expr*! args)))
 
+(defn demand-runtime-call!
+  [name String
+   args Any] String
+  (swap! runtime-call-uses assoc name true)
+  (str "$$bc$" name "(" (emit-args-list args) ")"))
+
+(defn demand-host-call!
+  [name String
+   args Any] String
+  (swap! host-call-uses assoc name true)
+  (str "$$bh$" name "(" (emit-args-list args) ")"))
+
 (defn emit-core-call!
   [fn-sym String
    args Any] Any
@@ -1400,6 +1416,21 @@
       (= fn-sym "fn?") (if (= n 1) (str "(typeof " a0 " === 'function')") nil)
       (= fn-sym "integer?") (if (= n 1) (str "Number.isInteger(" a0 ")") nil)
       (= fn-sym "vector?") (if (= n 1) (str "Array.isArray(" a0 ")") nil)
+      (= fn-sym "map?")
+        (if (= n 1)
+          (str "(() => { const _x = " a0
+               "; return typeof _x === 'object' && _x !== null && !Array.isArray(_x); })()")
+          nil)
+      (= fn-sym "js-obj") (demand-host-call! "js_obj" args)
+      (= fn-sym "aset") (if (>= n 3) (demand-host-call! "aset" args) nil)
+      (= fn-sym "map-indexed")
+        (if (= n 2) (demand-runtime-call! "map_indexed" args) nil)
+      (= fn-sym "re-matches")
+        (if (= n 2)
+          (str "(() => { const _r = " a0
+               ", _f = _r.flags.replace(/[gy]/g, \"\") + (_r.flags.includes(\"u\") ? \"\" : \"u\"), _m = "
+               a1 ".match(new RegExp(\"^(?:\" + _r.source + \")$\", _f)); return _m == null ? null : (_m.length === 1 ? _m[0] : Array.from(_m, _x => _x ?? null)); })()")
+          nil)
       (= fn-sym "subs")
         (cond (= n 2) (str a0 ".substring(" a1 ")")
               (= n 3) (str a0 ".substring(" a1 ", " a2 ")")
@@ -2971,6 +3002,8 @@
   (reset! bc-get-used false)
   (reset! bc-range-used false)
   (reset! bc-record-instance-used false)
+  (reset! runtime-call-uses {})
+  (reset! host-call-uses {})
   (reset! inline-scope {})
   (reset! ctx "stmt")
   (reset! checked-program-ref
@@ -2986,6 +3019,8 @@
                    (or (= (get f "node") "def") (= (get f "node") "defonce"))) forms)))
     (let [body (str/join "\n\n" (mapv (fn [f Any] String (reset! ctx "stmt") (emit-form! f)) forms))
           header (emit-module-header prog)
+          demanded-runtime-bindings (mapv (fn [name String] String (str name " as $$bc$" name))
+              (sort (keys (deref runtime-call-uses))))
           runtime-bindings (into
                              (if (some? (str/index-of body "$$bc$equiv"))
                                ["equivV as $$bc$equiv"] [])
@@ -2993,13 +3028,20 @@
                                (if (deref bc-get-used) ["get as $$bc$get"] [])
                                (into
                                  (if (deref bc-range-used) ["range as $$bc$range"] [])
-                                 (if (deref bc-record-instance-used)
-                                   ["record_instance_p as $$bc$record_instance_p"]
-                                   []))))
+                                 (into
+                                   (if (deref bc-record-instance-used)
+                                     ["record_instance_p as $$bc$record_instance_p"]
+                                     [])
+                                   demanded-runtime-bindings))))
           runtime-import (if (= 0 (count runtime-bindings)) ""
                            (str "import { " (str/join ", " runtime-bindings)
-                                " } from 'beagle/core.js';\n"))]
-      (str header runtime-import "\n" body "\n")))))
+                                " } from 'beagle/core.js';\n"))
+          host-bindings (mapv (fn [name String] String (str name " as $$bh$" name))
+              (sort (keys (deref host-call-uses))))
+          host-import (if (= 0 (count host-bindings)) ""
+                        (str "import { " (str/join ", " host-bindings)
+                             " } from 'beagle/host.js';\n"))]
+      (str header runtime-import host-import "\n" body "\n")))))
 
 ;; --- self-tests ---------------------------------------------------------------
 
@@ -3046,6 +3088,8 @@
   (reset! bc-get-used false)
   (reset! bc-range-used false)
   (reset! bc-record-instance-used false)
+  (reset! runtime-call-uses {})
+  (reset! host-call-uses {})
   (reset! inline-scope {})
   (reset! ctx "stmt")
   (reset! checked-program-ref false)

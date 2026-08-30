@@ -1,0 +1,96 @@
+#lang beagle/js
+
+(ns store.scan-all)
+
+;; StoreClient is a foreign JS capability. Pagination policy and drainage stay
+;; typed here; the generated module receives only the protocol limit and the
+;; package's existing typed-error constructor from the codec module.
+
+(defn scan-request-options
+  [page-size Any
+   cursor Any
+   signal Any] Any
+  (let [page Any (.fromEntries Object
+                   (if (some? cursor)
+                     [["limit" page-size] ["cursor" cursor]]
+                     [["limit" page-size]]))]
+    (.fromEntries Object
+      (if (some? signal)
+        [["page" page] ["signal" signal]]
+        [["page" page]]))))
+
+(defn scan-result
+  [triples Any
+   served-version Any
+   pages Int] Any
+  (.fromEntries Object
+    [["result" triples]
+     ["servedVersion" served-version]
+     ["pages" pages]]))
+
+(defn ^:async drain-scan
+  [client Any
+   pattern Any
+   options Any
+   scan-page (Fn [Any Any Any] (Promise Any))
+   max-page-limit Int
+   fail-page (Fn [String] Any)] (Promise Any)
+  (let [requested-page-size Any (.-pageSize options)
+        page-size Any (if (some? requested-page-size)
+                          requested-page-size
+                          max-page-limit)
+        signal Any (.-signal options)]
+    (loop [cursor Any nil
+           seen-cursors Any []
+           pinned-version Any nil
+           pages Int 0
+           triples Any []]
+      (let [response Any (await (scan-page client pattern
+                                  (scan-request-options page-size cursor signal)))
+            page Any (.-page response)
+            served-version Any (.-servedVersion response)
+            chunk Any (.-result response)]
+        (when-not (some? page)
+            (fail-page "scan response has no page metadata"))
+          (when-not (some? served-version)
+            (fail-page "scan response has no servedVersion"))
+          (when-not (.isArray Array chunk)
+            (fail-page "scan response result is not an array"))
+          (when (and (some? pinned-version)
+                     (not (.is Object pinned-version served-version)))
+            (fail-page "scan continuation changed its pinned servedVersion"))
+          (let [done Any (.-done page)
+                next-cursor Any (.-nextCursor page)
+                next-pages Int (+ pages 1)
+                next-triples Any (.concat triples chunk)
+                next-version Any (if (some? pinned-version)
+                                   pinned-version
+                                   served-version)]
+            (when-not (or (true? done) (false? done))
+              (fail-page "scan response page.done is not boolean"))
+            (if done
+              (do
+                (when (some? next-cursor)
+                  (fail-page "complete scan page retained a continuation cursor"))
+                (scan-result next-triples next-version next-pages))
+              (do
+                (when-not (some? next-cursor)
+                  (fail-page "incomplete scan page has no continuation cursor"))
+                (let [cursor-key String (.stringify JSON next-cursor)]
+                  (when (.includes seen-cursors cursor-key)
+                    (fail-page "scan continuation cursor repeated before completion"))
+                  (recur next-cursor
+                         (.concat seen-cursors [cursor-key])
+                         next-version
+                         next-pages
+                         next-triples)))))))))
+
+(js/export
+  (defn scan-all
+    [client Any
+     pattern Any
+     options Any
+     scan-page (Fn [Any Any Any] (Promise Any))
+     max-page-limit Int
+     fail-page (Fn [String] Any)] (Promise Any)
+    (drain-scan client pattern options scan-page max-page-limit fail-page)))

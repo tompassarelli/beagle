@@ -17,6 +17,17 @@ import {
 
 const modulePath = process.env.BEAGLE_STORE_CLI_MODULE
   ?? new URL('./beagle-store-cli.js', import.meta.url).pathname;
+const checkoutRuntime = new URL('../../beagle-lib/lib/', import.meta.url);
+if (await Bun.file(new URL('beagle/core.js', checkoutRuntime)).exists()) {
+  Bun.plugin({
+    name: 'beagle-checkout-runtime',
+    setup(build) {
+      build.onResolve({ filter: /^beagle\// }, ({ path }) => ({
+        path: new URL(path, checkoutRuntime).pathname,
+      }));
+    },
+  });
+}
 globalThis.host_call = (bridge, operation, arguments_) =>
   bridge.call(operation, arguments_);
 globalThis.host_get = (value, key) => value?.[key];

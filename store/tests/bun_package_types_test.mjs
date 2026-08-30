@@ -62,6 +62,7 @@ test('packed Bun consumer accepts the public declaration surface', async () => {
 import {
   STORERPC_MAX_BATCH_ACTIONS,
   STORERPC_VERSION,
+  scanAll,
   storeNativeCheckpoint,
   keywordTerm,
 } from '@tompassarelli/beagle-store-rpc';
@@ -71,10 +72,19 @@ import type {
   MutationActionResult,
   Occurrence,
   OccurrenceCoordinateTerm,
+  ScanAllOptions,
+  ScanAllResult,
   Term,
 } from '@tompassarelli/beagle-store-rpc';
-import { storeClient as storeTransportClient } from '@tompassarelli/beagle-store-rpc/core';
-import type { StoreTransport } from '@tompassarelli/beagle-store-rpc/core';
+import {
+  scanAll as scanAllCore,
+  storeClient as storeTransportClient,
+} from '@tompassarelli/beagle-store-rpc/core';
+import type {
+  ScanAllOptions as CoreScanAllOptions,
+  ScanAllResult as CoreScanAllResult,
+  StoreTransport,
+} from '@tompassarelli/beagle-store-rpc/core';
 import {
   SCHEMA_MAX_BATCH_ACTIONS,
   SCHEMA_MAX_READ_PAGES,
@@ -97,6 +107,17 @@ const embedded: StoreClient = storeTransportClient({
   transport,
 });
 const schema = schemaClient(store);
+const scanOptions: ScanAllOptions = {
+  pageSize: 128n,
+  signal: new AbortController().signal,
+};
+const coreScanOptions: CoreScanAllOptions = { pageSize: '64' };
+const scanResult: Promise<ScanAllResult> = scanAll(store, {}, scanOptions);
+const coreScanResult: Promise<CoreScanAllResult> = scanAllCore(
+  embedded,
+  {},
+  coreScanOptions,
+);
 const state: Term = keywordTerm('draft');
 const update: UpdateUniqueMutation = {
   identity: { predicate: keywordTerm('page/slug'), value: 'home' },
@@ -171,6 +192,8 @@ void stateChanged;
 void action;
 void proposition;
 void embedded;
+void scanResult;
+void coreScanResult;
 `);
 
     run(Bun.argv[0], [

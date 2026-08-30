@@ -2,6 +2,7 @@ import {
   default_transport_deadline_ms,
   transport_deadline_ms,
 } from './transport-deadline.js';
+import { "scan-all" as scan_all } from './scan-all.js';
 
 const MAGIC = Uint8Array.of(0x53, 0x54, 0x4f, 0x52, 0x45, 0x52, 0x50, 0x43);
 const HEADER_BYTES = 26;
@@ -1368,4 +1369,16 @@ export function storeClient({
     leaseRelease: (fence, options = {}) => call('rpc/lease-release', term(fence), options),
     leaseCheck: (fence, options = {}) => call('rpc/lease-check', term(fence), options),
   });
+}
+
+/** Drain one cursor-pinned scan without widening the Store operation set. */
+export function scanAll(client, pattern = {}, options = {}) {
+  return scan_all(
+    client,
+    pattern,
+    options,
+    (store, scanPattern, requestOptions) => store.scan(scanPattern, requestOptions),
+    MAX_PAGE_LIMIT,
+    message => fail(message, 'client/invalid-page'),
+  );
 }

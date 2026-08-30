@@ -6,6 +6,7 @@ import { resolve } from 'node:path';
 import {
   STORERPC_MAX_BATCH_ACTIONS,
   STORERPC_VERSION,
+  StoreProtocolError,
   StoreRpcError,
   float64Term,
   float64Value,
@@ -15,6 +16,7 @@ import {
   integerTerm,
   keywordTerm,
   lowerQueryPlan,
+  scanAll,
   stringTerm,
   tripleQuery,
   tripleTerm,
@@ -152,6 +154,104 @@ async function startServer(port, log, space) {
     },
   };
 }
+
+test('scanAll drains one pinned scan with exact cursor and signal identity', async () => {
+  const signal = new AbortController().signal;
+  const pattern = { t2: keywordTerm('title') };
+  const cursor = tripleTerm('cursor', keywordTerm('page'), 1);
+  const first = tripleTerm('@doc-a', keywordTerm('title'), 'A');
+  const second = tripleTerm('@doc-b', keywordTerm('title'), 'B');
+  const calls = [];
+  const client = {
+    async scan(actualPattern, options) {
+      calls.push({ pattern: actualPattern, options });
+      if (calls.length === 1) {
+        return {
+          servedVersion: 17n,
+          result: [first],
+          page: { ordinal: 0, nextCursor: cursor, done: false },
+        };
+      }
+      return {
+        servedVersion: 17n,
+        result: [second],
+        page: { ordinal: 1, nextCursor: null, done: true },
+      };
+    },
+  };
+
+  const drained = await scanAll(client, pattern, { signal });
+  assert.deepEqual(drained, {
+    result: [first, second],
+    servedVersion: 17n,
+    pages: 2,
+  });
+  assert.equal(calls.length, 2);
+  assert.strictEqual(calls[0].pattern, pattern);
+  assert.strictEqual(calls[1].pattern, pattern);
+  assert.equal(calls[0].options.page.limit, 4096);
+  assert.equal('cursor' in calls[0].options.page, false);
+  assert.strictEqual(calls[1].options.page.cursor, cursor);
+  assert.strictEqual(calls[0].options.signal, signal);
+  assert.strictEqual(calls[1].options.signal, signal);
+});
+
+test('scanAll rejects malformed or stalled continuations', async () => {
+  const invalidPage = error => error instanceof StoreProtocolError
+    && error.code === 'client/invalid-page';
+
+  await assert.rejects(
+    scanAll({
+      scan: async () => ({
+        servedVersion: 1n,
+        result: [],
+        page: { ordinal: 0, nextCursor: null, done: false },
+      }),
+    }),
+    invalidPage,
+  );
+
+  let versionCall = 0;
+  await assert.rejects(
+    scanAll({
+      scan: async () => {
+        versionCall += 1;
+        return versionCall === 1
+          ? {
+              servedVersion: 1n,
+              result: [],
+              page: { ordinal: 0, nextCursor: integerTerm(1), done: false },
+            }
+          : {
+              servedVersion: 2n,
+              result: [],
+              page: { ordinal: 1, nextCursor: null, done: true },
+            };
+      },
+    }),
+    invalidPage,
+  );
+
+  let cursorCall = 0;
+  const repeated = integerTerm(7);
+  await assert.rejects(
+    scanAll({
+      scan: async () => {
+        cursorCall += 1;
+        return {
+          servedVersion: 3n,
+          result: [],
+          page: {
+            ordinal: cursorCall - 1,
+            nextCursor: repeated,
+            done: false,
+          },
+        };
+      },
+    }),
+    invalidPage,
+  );
+});
 
 async function exerciseClient(store) {
   await check('native checkpoint is fixed and separate from the data client object', async () => {

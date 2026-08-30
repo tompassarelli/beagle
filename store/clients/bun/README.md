@@ -19,7 +19,7 @@ source commit. Once the tarball is downloaded, installation needs no registry
 or network access:
 
 ```console
-$ bun add --offline /path/to/tompassarelli-beagle-store-rpc-0.5.0.tgz
+$ bun add --offline /path/to/tompassarelli-beagle-store-rpc-0.5.1.tgz
 ```
 
 The client package version is independent of the containing Beagle Store release tag;
@@ -157,6 +157,25 @@ do {
 
 The cursor pins the original snapshot; a continuation reports that pinned
 `servedVersion` even when newer writes have committed.
+
+`scanAll` drains that same cursor-pinned operation when the caller needs the
+complete snapshot in memory:
+
+```js
+import { scanAll } from '@tompassarelli/beagle-store-rpc';
+
+const snapshot = await scanAll(
+  store,
+  { t2: keywordTerm('title') },
+  { pageSize: 200, signal: abortController.signal },
+);
+
+console.log(snapshot.result, snapshot.servedVersion, snapshot.pages);
+```
+
+The helper reuses the supplied client, forwards each cursor and `AbortSignal`
+unchanged, rejects a stalled or version-skewed continuation, and adds no Store
+operation. It defaults to the protocol's 4096-row page ceiling.
 
 ## Term representation
 

@@ -23,46 +23,111 @@
       index
       (recur (+ index 1)))))
 
+(defn edn-whitespace? [ch String] Bool
+  (or (= ch " ") (= ch "\n") (= ch "\r") (= ch "\t") (= ch ",")))
+
+(defn quoted-token-end
+  [text String
+   start Int] Int
+  (loop [index Int (+ start 1)
+         escaped Bool false]
+    (if (>= index (count text))
+      index
+      (let [ch String (subs text index (+ index 1))]
+        (cond
+          escaped (recur (+ index 1) false)
+          (= ch "\\") (recur (+ index 1) true)
+          (= ch "\"") (+ index 1)
+          :else (recur (+ index 1) false))))))
+
+(defn item-start [stack Any] Any
+  (if (= 0 (count stack))
+    ["" stack false]
+    (let [last-index Int (- (count stack) 1)
+          state String (nth stack last-index)
+          parent Any (.slice stack 0 last-index)]
+      (cond
+        (= state "array-first") ["" (conj parent "array-next") false]
+        (= state "array-next") ["," stack false]
+        (= state "map-first") ["" (conj parent "map-value") true]
+        (= state "map-next") ["," (conj parent "map-value") true]
+        (= state "map-value") ["" (conj parent "map-next") false]
+        :else ["" stack false]))))
+
+(defn close-container [stack Any] Any
+  (if (= 0 (count stack))
+    stack
+    (.slice stack 0 (- (count stack) 1))))
+
 (defn edn-json
   [text String
    term-mode Bool] String
   (loop [index Int 0
          output String ""
-         quoted Bool false
-         escaped Bool false]
+         stack Any []]
     (if (>= index (count text))
       output
       (let [ch String (subs text index (+ index 1))]
-        (if quoted
-          (recur (+ index 1)
-                 (str output ch)
-                 (if escaped true (not (= ch "\"")))
-                 (if escaped false (= ch "\\")))
-          (cond
-            (= ch "\"")
-            (recur (+ index 1) (str output ch) true false)
+        (cond
+          (edn-whitespace? ch)
+          (recur (+ index 1) output stack)
 
-            (= ch "(")
-            (recur (+ index 1) (str output "[") false false)
+          (= ch "{")
+          (let [started Any (item-start stack)]
+            (recur (+ index 1)
+                   (str output (nth started 0) "{")
+                   (conj (nth started 1) "map-first")))
 
-            (= ch ")")
-            (recur (+ index 1) (str output "]") false false)
+          (= ch "}")
+          (recur (+ index 1) (str output "}") (close-container stack))
 
-            (= ch ":")
-            (let [end Int (token-end text (+ index 1))
-                  token String (subs text (+ index 1) end)
-                  value String (if term-mode (str "$kw:" token) token)]
-              (recur end (str output (.stringify JSON value)) false false))
+          (or (= ch "[") (= ch "("))
+          (let [started Any (item-start stack)]
+            (recur (+ index 1)
+                   (str output (nth started 0) "[")
+                   (conj (nth started 1) "array-first")))
 
-            (and term-mode (not (delimiter? ch)))
-            (let [end Int (token-end text index)
-                  token String (subs text index end)]
-              (recur end
-                     (str output (.stringify JSON (str "$atom:" token)))
-                     false false))
+          (or (= ch "]") (= ch ")"))
+          (recur (+ index 1) (str output "]") (close-container stack))
 
-            :else
-            (recur (+ index 1) (str output ch) false false)))))))
+          (= ch "\"")
+          (let [end Int (quoted-token-end text index)
+                started Any (item-start stack)]
+            (recur end
+                   (str output
+                        (nth started 0)
+                        (subs text index end)
+                        (if (nth started 2) ":" ""))
+                   (nth started 1)))
+
+          (= ch ":")
+          (let [end Int (token-end text (+ index 1))
+                token String (subs text (+ index 1) end)
+                value String (if term-mode (str "$kw:" token) token)
+                started Any (item-start stack)]
+            (recur end
+                   (str output
+                        (nth started 0)
+                        (.stringify JSON value)
+                        (if (nth started 2) ":" ""))
+                   (nth started 1)))
+
+          (not (delimiter? ch))
+          (let [end Int (token-end text index)
+                token String (subs text index end)
+                value String (if term-mode
+                               (.stringify JSON (str "$atom:" token))
+                               token)
+                started Any (item-start stack)]
+            (recur end
+                   (str output
+                        (nth started 0)
+                        value
+                        (if (nth started 2) ":" ""))
+                   (nth started 1)))
+
+          :else
+          (recur (+ index 1) (str output ch) stack))))))
 
 (defn structural-query-keyword? [context String] Bool
   (or (= context "find") (= context "rel") (= context "var")

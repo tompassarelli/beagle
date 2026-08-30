@@ -46,6 +46,10 @@
 
 (def bc-record-instance-used (atom false))
 
+(def runtime-call-uses (atom {}))
+
+(def host-call-uses (atom {}))
+
 (def inline-scope (atom {}))
 
 (def ctx (atom "stmt"))
@@ -635,6 +639,10 @@
   (str/join "\n" (vec (apply concat (mapv (fn [^String member] (let [factory (mangle-name member)]
   [(str "export { " factory " as " (js-string-lit (str "->" member)) " };") (str "export { " factory " as " (js-string-lit member) " };")])) members)))))
 
+(defn ^String emit-named-public-esm-form! [f ^String emitted]
+  (let [authored (get f "name")]
+  (str emitted "\nexport { " (mangle-name authored) " as " (js-string-lit authored) " };")))
+
 (defn ^String emit-public-esm-form! [f]
   (let [node (get f "node")
    emitted (emit-form* f)]
@@ -642,6 +650,7 @@
   (= node "record") (str emitted "\n\n" (emit-record-public-esm-exports! f))
   (and (= node "defunion") (not (absent? (get f "member-fields")))) (str emitted "\n" (emit-member-public-esm-exports! (get f "members")))
   (= node "deferror") (str emitted "\n" (emit-member-public-esm-exports! (get f "members")))
+  (or (= node "def") (= node "defonce") (= node "defn") (= node "defn-multi")) (emit-named-public-esm-form! f emitted)
   :else (str "export " emitted))))
 
 (defn ^String emit-tagged-factory! [^String member-name fields]
@@ -718,6 +727,14 @@
 (defn ^String emit-args-list [args]
   (str/join ", " (mapv emit-expr*! args)))
 
+(defn ^String demand-runtime-call! [^String name args]
+  (swap! runtime-call-uses assoc name true)
+  (str "$$bc$" name "(" (emit-args-list args) ")"))
+
+(defn ^String demand-host-call! [^String name args]
+  (swap! host-call-uses assoc name true)
+  (str "$$bh$" name "(" (emit-args-list args) ")"))
+
 (defn emit-core-call! [^String fn-sym args]
   (let [n (count args)
    a0 (if (> n 0) (emit-expr*! (nth args 0)) "")
@@ -791,6 +808,11 @@
   (= fn-sym "fn?") (if (= n 1) (str "(typeof " a0 " === 'function')") nil)
   (= fn-sym "integer?") (if (= n 1) (str "Number.isInteger(" a0 ")") nil)
   (= fn-sym "vector?") (if (= n 1) (str "Array.isArray(" a0 ")") nil)
+  (= fn-sym "map?") (if (= n 1) (str "(() => { const _x = " a0 "; return typeof _x === 'object' && _x !== null && !Array.isArray(_x); })()") nil)
+  (= fn-sym "js-obj") (demand-host-call! "js_obj" args)
+  (= fn-sym "aset") (if (>= n 3) (demand-host-call! "aset" args) nil)
+  (= fn-sym "map-indexed") (if (= n 2) (demand-runtime-call! "map_indexed" args) nil)
+  (= fn-sym "re-matches") (if (= n 2) (str "(() => { const _r = " a0 ", _f = _r.flags.replace(/[gy]/g, \"\") + (_r.flags.includes(\"u\") ? \"\" : \"u\"), _m = " a1 ".match(new RegExp(\"^(?:\" + _r.source + \")$\", _f)); return _m == null ? null : (_m.length === 1 ? _m[0] : Array.from(_m, _x => _x ?? null)); })()") nil)
   (= fn-sym "subs") (cond
   (= n 2) (str a0 ".substring(" a1 ")")
   (= n 3) (str a0 ".substring(" a1 ", " a2 ")")
@@ -1622,6 +1644,8 @@
   (reset! bc-get-used false)
   (reset! bc-range-used false)
   (reset! bc-record-instance-used false)
+  (reset! runtime-call-uses {})
+  (reset! host-call-uses {})
   (reset! inline-scope {})
   (reset! ctx "stmt")
   (reset! checked-program-ref (and (= (get prog "kind") "beagle.checked-program") (= (get prog "schemaVersion") 4) (= (get prog "phase") "checked")))
@@ -1632,9 +1656,12 @@
   (let [body (str/join "\n\n" (mapv (fn [f] (reset! ctx "stmt")
   (emit-form! f)) forms))
    header (emit-module-header prog)
-   runtime-bindings (into (if (some? (str/index-of body "$$bc$equiv")) ["equivV as $$bc$equiv"] []) (into (if (deref bc-get-used) ["get as $$bc$get"] []) (into (if (deref bc-range-used) ["range as $$bc$range"] []) (if (deref bc-record-instance-used) ["record_instance_p as $$bc$record_instance_p"] []))))
-   runtime-import (if (= 0 (count runtime-bindings)) "" (str "import { " (str/join ", " runtime-bindings) " } from 'beagle/core.js';\n"))]
-  (str header runtime-import "\n" body "\n")))))
+   demanded-runtime-bindings (mapv (fn [^String name] (str name " as $$bc$" name)) (sort (keys (deref runtime-call-uses))))
+   runtime-bindings (into (if (some? (str/index-of body "$$bc$equiv")) ["equivV as $$bc$equiv"] []) (into (if (deref bc-get-used) ["get as $$bc$get"] []) (into (if (deref bc-range-used) ["range as $$bc$range"] []) (into (if (deref bc-record-instance-used) ["record_instance_p as $$bc$record_instance_p"] []) demanded-runtime-bindings))))
+   runtime-import (if (= 0 (count runtime-bindings)) "" (str "import { " (str/join ", " runtime-bindings) " } from 'beagle/core.js';\n"))
+   host-bindings (mapv (fn [^String name] (str name " as $$bh$" name)) (sort (keys (deref host-call-uses))))
+   host-import (if (= 0 (count host-bindings)) "" (str "import { " (str/join ", " host-bindings) " } from 'beagle/host.js';\n"))]
+  (str header runtime-import host-import "\n" body "\n")))))
 
 (def passes (atom []))
 
@@ -1677,6 +1704,8 @@
   (reset! bc-get-used false)
   (reset! bc-range-used false)
   (reset! bc-record-instance-used false)
+  (reset! runtime-call-uses {})
+  (reset! host-call-uses {})
   (reset! inline-scope {})
   (reset! ctx "stmt")
   (reset! checked-program-ref false)
@@ -1750,6 +1779,9 @@
   (expect! "record factory + accessors" (= (emit-record! {"name" "Pt" "fields" [{"name" "x"} {"name" "y"}]}) "function Pt(x, y) {\n  return Object.freeze({_tag: \"Pt\", x, y});\n}\n\nfunction pt_x(r) { return r.x; }\n\nfunction pt_y(r) { return r.y; }"))
   (expect! "exported record preserves authored and callable constructor names" (let [emitted (emit-public-esm-form! {"node" "record" "name" "ReceiptEntityRef" "fields" []})]
   (and (str/includes? emitted "export { ReceiptEntityRef as \"->ReceiptEntityRef\" };") (str/includes? emitted "export { ReceiptEntityRef as \"ReceiptEntityRef\" };"))))
+  (expect! "exported def preserves its authored public name" (= (emit-public-esm-form! {"node" "def" "name" "cache-ttl" "value" {"node" "literal" "kind" "number" "value" 30}}) "const cache_ttl = 30;\nexport { cache_ttl as \"cache-ttl\" };"))
+  (expect! "exported defn preserves its authored public name" (let [emitted (emit-public-esm-form! {"node" "defn" "name" "check!" "params" [] "rest" false "body" [{"node" "literal" "kind" "number" "value" 1}]})]
+  (and (str/includes? emitted "function check_bang()") (str/includes? emitted "export { check_bang as \"check!\" };"))))
   (expect! "def -> const" (= (emit-form! {"node" "def" "name" "tax-rate" "value" {"node" "literal" "kind" "float" "value" 0.08}}) "const tax_rate = 0.08;"))
   (expect! "unary minus (- 1)" (= (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "-"} "args" [{"node" "literal" "kind" "number" "value" 1}]}) "(-1)"))
   (expect! "infix minus (- a b)" (do

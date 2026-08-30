@@ -29,6 +29,7 @@ package_files=(
   LICENSE-APACHE
   store-rpc.mjs
   store-rpc-core.mjs
+  scan-all.js
   transport-deadline.js
   store-rpc-core.d.ts
   store-rpc.d.ts
@@ -48,6 +49,7 @@ git -C "$source_seed" add \
   store/clients/bun/LICENSE-APACHE \
   store/clients/bun/store-rpc.mjs \
   store/clients/bun/store-rpc-core.mjs \
+  store/clients/bun/scan-all.js \
   store/clients/bun/transport-deadline.js \
   store/clients/bun/store-rpc-core.d.ts \
   store/clients/bun/store-rpc.d.ts \
@@ -101,7 +103,7 @@ grep -Fxq "release-tag-object $tag_object" "${files_a[1]}" ||
   fail "receipt omitted the annotated tag object"
 grep -Fxq 'package-name @tompassarelli/beagle-store-rpc' "${files_a[1]}" ||
   fail "receipt omitted the package name"
-grep -Fxq 'package-version 0.5.0' "${files_a[1]}" ||
+grep -Fxq 'package-version 0.5.1' "${files_a[1]}" ||
   fail "receipt omitted the independent package version"
 archive_sha256="$(sha256sum "${files_a[0]}" | awk '{print $1}')"
 grep -Fxq "archive-sha256 $archive_sha256" "${files_a[1]}" ||
@@ -111,7 +113,7 @@ expected_receipt_keys=$'store-bun-release-receipt/v2\nsource-commit\nsource-date
   "$expected_receipt_keys" ]] ||
   fail "receipt schema is not closed and ordered"
 
-expected_entries=$'package/package.json\npackage/LICENSE\npackage/LICENSE-APACHE\npackage/LICENSE-MIT\npackage/README.md\npackage/backup.mjs\npackage/schema.d.ts\npackage/schema.mjs\npackage/store-rpc-core.d.ts\npackage/store-rpc-core.mjs\npackage/store-rpc.d.ts\npackage/store-rpc.mjs\npackage/transport-deadline.js'
+expected_entries=$'package/package.json\npackage/LICENSE\npackage/LICENSE-APACHE\npackage/LICENSE-MIT\npackage/README.md\npackage/backup.mjs\npackage/scan-all.js\npackage/schema.d.ts\npackage/schema.mjs\npackage/store-rpc-core.d.ts\npackage/store-rpc-core.mjs\npackage/store-rpc.d.ts\npackage/store-rpc.mjs\npackage/transport-deadline.js'
 [[ "$(tar -tzf "${files_a[0]}")" == "$expected_entries" ]] ||
   fail "archive member set or order is not canonical"
 
@@ -232,8 +234,16 @@ printf '%s\n' '{"name":"store-rpc-release-consumer","private":true,"type":"modul
 )
 cat >"$consumer/probe.mjs" <<'PROBE'
 import assert from 'node:assert/strict';
-import { storeClient, storeNativeCheckpoint, keywordTerm } from '@tompassarelli/beagle-store-rpc';
-import { storeClient as storeTransportClient } from '@tompassarelli/beagle-store-rpc/core';
+import {
+  keywordTerm,
+  scanAll,
+  storeClient,
+  storeNativeCheckpoint,
+} from '@tompassarelli/beagle-store-rpc';
+import {
+  scanAll as scanAllCore,
+  storeClient as storeTransportClient,
+} from '@tompassarelli/beagle-store-rpc/core';
 import { schemaClient } from '@tompassarelli/beagle-store-rpc/schema';
 
 const client = storeClient({ space: 'offline-package-probe', port: 1 });
@@ -258,12 +268,15 @@ assert.equal('storeNativeCheckpoint' in client, false);
 assert.equal(typeof storeNativeCheckpoint, 'function');
 assert.equal(typeof schemaClient, 'function');
 assert.equal(typeof storeTransportClient, 'function');
+assert.equal(typeof scanAll, 'function');
+assert.equal(typeof scanAllCore, 'function');
 assert.deepEqual(keywordTerm('draft'), ['keyword', 'draft']);
 
 for (const privateSubpath of [
   'backup',
   'store-rpc.mjs',
   'store-rpc-core.mjs',
+  'scan-all.js',
   'schema.mjs',
   'transport-deadline.js',
 ]) {

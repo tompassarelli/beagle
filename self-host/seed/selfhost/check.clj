@@ -26,7 +26,9 @@
   (if (qualified-reference? ref) ["qualified-ref" (get ref "qualifier") (get ref "name") nil] (reference-key ref)))
 
 (defn reference-map-ref [table ref fallback]
-  (let [exact (get table (reference-key ref))]
+  (let [active-identity (if (and (resolved-reference? ref) (not (qualified-reference? ref))) (get (get table "#%binding-aliases") (get ref "name")) nil)
+   active (if (string? active-identity) (get table active-identity) nil)
+   exact (if (some? active) active (get table (reference-key ref)))]
   (if (some? exact) exact (let [structural (if (resolved-reference? ref) (get table (structural-reference-key ref)) nil)]
   (if (some? structural) structural (if (and (qualified-reference? ref) (some? (get ref "providerId"))) (let [providerless (get table (reference-providerless-key ref))]
   (if (some? providerless) providerless fallback)) fallback))))))
@@ -50,6 +52,8 @@
 (defn reference-leaf [ref]
   (if (map? ref) (get ref "name") ref))
 
+(def ^String BINDING-ALIASES-KEY "#%binding-aliases")
+
 (defn binder-binding-id [owner ^String name]
   (let [direct (get owner "bindingId")
    identities (get owner "bindingIds")]
@@ -57,11 +61,24 @@
 
 (defn binder-env-assoc [env owner ^String name value]
   (let [with-name (assoc env name value)
-   id (binder-binding-id owner name)]
-  (if (string? id) (assoc with-name id value) with-name)))
+   id (binder-binding-id owner name)
+   aliases (assoc (get env BINDING-ALIASES-KEY {}) name id)
+   with-alias (assoc with-name BINDING-ALIASES-KEY aliases)]
+  (if (string? id) (assoc with-alias id value) with-alias)))
 
 (defn local-reference-key [value]
   (if (resolved-reference? value) (get value "refersTo") (reference-leaf value)))
+
+(defn active-local-reference-key [env value]
+  (let [leaf (reference-leaf value)
+   identity (local-reference-key value)
+   active-identity (get (get env BINDING-ALIASES-KEY) leaf)
+   active (if (and (string? active-identity) (contains? env active-identity)) active-identity nil)]
+  (cond
+  (and (resolved-reference? value) (some? active)) active
+  (and (resolved-reference? value) (contains? env identity)) identity
+  (contains? env leaf) leaf
+  :else identity)))
 
 (defn- ordered-keys [table]
   (vec (sort-by reference->string (vec (keys table)))))
@@ -893,16 +910,16 @@
    fn-name (if (and (not (nil? fn-ref)) (= (get fn-ref "node") "ref")) (get fn-ref "name") (if (string? fn-ref) fn-ref nil))
    args (get cond-expr "args")]
   (cond
-  (and (not (nil? fn-name)) (not (nil? (get TYPE-PREDICATES fn-name))) (= (count args) 1) (= (get (nth args 0) "node") "ref")) (let [var-name (local-reference-key (nth args 0))
+  (and (not (nil? fn-name)) (not (nil? (get TYPE-PREDICATES fn-name))) (= (count args) 1) (= (get (nth args 0) "node") "ref")) (let [var-name (active-local-reference-key env (nth args 0))
    narrowed (predicate-narrowing-type (get env var-name ANY) (get TYPE-PREDICATES fn-name))]
   (if (some? narrowed) {"var" var-name "type" narrowed "negated" false} {"var" nil "type" nil "negated" false}))
-  (and (not (nil? fn-name)) (= fn-name "some?") (= (count args) 1) (= (get (nth args 0) "node") "ref")) {"var" (local-reference-key (nth args 0)) "type" (make-prim "Nil") "negated" true}
+  (and (not (nil? fn-name)) (= fn-name "some?") (= (count args) 1) (= (get (nth args 0) "node") "ref")) {"var" (active-local-reference-key env (nth args 0)) "type" (make-prim "Nil") "negated" true}
   (and (not (nil? fn-name)) (or (= fn-name "=") (= fn-name "not=")) (= (count args) 2)) (let [a1 (nth args 0)
    a2 (nth args 1)
    neg (= fn-name "not=")]
   (cond
-  (and (= (get a1 "node") "ref") (= (get a2 "node") "literal") (= (get a2 "kind") "nil")) {"var" (local-reference-key a1) "type" (make-prim "Nil") "negated" neg}
-  (and (= (get a1 "node") "literal") (= (get a1 "kind") "nil") (= (get a2 "node") "ref")) {"var" (local-reference-key a2) "type" (make-prim "Nil") "negated" neg}
+  (and (= (get a1 "node") "ref") (= (get a2 "node") "literal") (= (get a2 "kind") "nil")) {"var" (active-local-reference-key env a1) "type" (make-prim "Nil") "negated" neg}
+  (and (= (get a1 "node") "literal") (= (get a1 "kind") "nil") (= (get a2 "node") "ref")) {"var" (active-local-reference-key env a2) "type" (make-prim "Nil") "negated" neg}
   :else {"var" nil "type" nil "negated" false}))
   (and (not (nil? fn-name)) (= fn-name "not") (= (count args) 1)) (let [inner (extract-narrowing (nth args 0) env)]
   (if (not (nil? (get inner "var"))) {"var" (get inner "var") "type" (get inner "type") "negated" (not (get inner "negated"))} {"var" nil "type" nil "negated" false}))
@@ -975,7 +992,7 @@
   :else {}))
 
 (defn stable-scrutinee-key [target env]
-  (let [key (if (= (get target "node") "ref") (local-reference-key target) nil)
+  (let [key (if (= (get target "node") "ref") (active-local-reference-key env target) nil)
    dynamic-vars (get env "#%dynamic-vars")]
   (if (and (not (nil? key)) (contains? env key) (nil? (get (get (deref STATE) "unstable-bindings") key)) (nil? (get dynamic-vars (get target "name")))) key nil)))
 
@@ -1000,7 +1017,7 @@
   (and (= fn-name "and") (> (count args) 0)) (if (= (count args) 1) (test-narrowings (nth args 0) env) {"then" (fold-branch args true) "else" {}})
   (and (= fn-name "or") (> (count args) 0)) (if (= (count args) 1) (test-narrowings (nth args 0) env) {"then" {} "else" (fold-branch args false)})
   (some? instance-result) instance-result
-  (= (get cond-expr "node") "ref") (let [v (local-reference-key cond-expr)
+  (= (get cond-expr "node") "ref") (let [v (active-local-reference-key env cond-expr)
    cur (get env v)]
   (if (nil? cur) {"then" {} "else" {}} (let [non-nil (remove-from-union cur (make-prim "Nil"))]
   {"then" {v non-nil} "else" (if (type-could-be-false? non-nil) {} {v (make-prim "Nil")})})))
@@ -3136,6 +3153,17 @@
    then-env (get narrowed "then")
    else-env (get narrowed "else")]
   (and (prim? (get then-env "x")) (= (get (get then-env "x") "name") "String") (nil-type? (get else-env "x")))))
+  (expect! "narrowing: active shadow binding overrides stale resolver identity" (let [outer-id "lexical:outer-expected"
+   inner-id "lexical:inner-expected"
+   outer-type (make-prim "SourceStageV1")
+   inner-type (make-union [(make-prim "NativeId") (make-prim "Nil")])
+   outer {"expected" outer-type outer-id outer-type}
+   inner (binder-env-assoc outer {"bindingId" inner-id} "expected" inner-type)
+   stale-ref {"node" "ref" "name" "expected" "providerId" nil "refersTo" outer-id}
+   condition (make-call "nil?" [stale-ref])
+   else-env (get (narrow-env-for-condition inner condition) "else")
+   narrowed (reference-map-ref else-env stale-ref nil)]
+  (and (= "NativeId" (get narrowed "name")) (= "SourceStageV1" (get (get else-env outer-id) "name")))))
   (expect! "narrowing: (and (some? x) ...) compounds into then-branch" (let [env {"n" (make-union [(make-prim "Int") (make-prim "Nil")])}
    ce (make-call "and" [(make-call "some?" [(make-ref "n")]) (make-call ">" [(make-ref "n") (make-lit "number" 0)])])
    then-env (get (narrow-env-for-condition env ce) "then")]

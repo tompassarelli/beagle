@@ -133,6 +133,17 @@ export interface PagedRequestOptions extends RequestOptions {
   page?: PageRequest;
 }
 
+export interface ScanAllOptions {
+  pageSize?: IntegerInput;
+  signal?: AbortSignal;
+}
+
+export interface ScanAllResult {
+  readonly result: TripleTerm[];
+  readonly servedVersion: bigint;
+  readonly pages: number;
+}
+
 export interface SinceSelector {
   lowerExclusive: IntegerInput;
   upper?: IntegerInput | 'current';
@@ -326,3 +337,8 @@ export function storeTransportCheckpoint(options: StoreTransportClientOptions): 
 export function storeTcpTransport(options?: Pick<StoreClientOptions, 'host' | 'port'>): StoreTransport;
 export function storeRpcDeclaredPacketBytes(packet: Uint8Array): number | null;
 export function storeClient(options: StoreClientOptions): StoreClient;
+export function scanAll(
+  client: Pick<StoreClient, 'scan'>,
+  pattern?: TriplePattern,
+  options?: ScanAllOptions,
+): Promise<ScanAllResult>;
