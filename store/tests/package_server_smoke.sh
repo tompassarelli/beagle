@@ -139,6 +139,7 @@ start_server() {
       BEAGLE_STORE_NOTIFY_HOLD="$notify_hold" \
       BEAGLE_STORE_NOTIFY_STOPPING="$notify_stopping" \
       BEAGLE_STORE_SERVER_XMX=7g \
+      BEAGLE_STORE_SERVER_G1_REGION=64m \
       BEAGLE_STORE_BIND=127.0.0.1 BEAGLE_STORE_SPACE_ID="$space" \
       "$package_root/bin/beagle-store-server" serve "$port" "$log"
   ) >"$server_output" 2>&1 &
@@ -247,6 +248,11 @@ if [[ "$require_proc" == "1" ]]; then
   }
   ! "$grep_bin" -Fq -- '-Xmx7g' <<<"$cmdline" || {
     echo "store package smoke: legacy heap override changed the production heap" >&2
+    exit 1
+  }
+  ! "$grep_bin" -Fq -- '-XX:G1HeapRegionSize=' <<<"$cmdline" || {
+    echo "store package smoke: legacy region override disabled automatic G1 sizing" >&2
+    printf '%s\n' "$cmdline" >&2
     exit 1
   }
 fi

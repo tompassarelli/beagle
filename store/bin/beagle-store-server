@@ -10,7 +10,6 @@
 #   BEAGLE_STORE_SERVER_RUNTIME=jvm-oracle  packaged Java/classpath runtime
 #   BEAGLE_STORE_SERVER_RUNTIME=jvm-dev      checkout-only Clojure runtime
 #   BEAGLE_STORE_BIND=0.0.0.0          bind all interfaces (default loopback)
-#   BEAGLE_STORE_SERVER_G1_REGION=32m  JVM fallback G1 region size; empty disables it
 #   BEAGLE_STORE_SERVER_LOG=<path>     request log file (default stderr)
 #   BEAGLE_STORE_SERVER_QUIET=1        log only slow requests
 #   BEAGLE_STORE_SLOW_MS=1000          slow-request threshold, always logged
@@ -123,11 +122,7 @@ if [[ -n "$space_id" ]]; then server_args+=("$space_id"); fi
 # MemoryMax. Keeping this flag immutable makes the package manifest, live JVM,
 # and service resource envelope describe one runtime.
 xmx="2g"
-heap_flags=("-Xmx$xmx")
-g1_region="${BEAGLE_STORE_SERVER_G1_REGION-32m}"
-if [[ -n "$g1_region" ]]; then
-  heap_flags+=(-XX:+UseG1GC "-XX:G1HeapRegionSize=$g1_region")
-fi
+heap_flags=("-Xmx$xmx" -XX:+UseG1GC)
 # A capped heap must die loudly, not thrash: the supervisor restarts it and
 # the dump names the culprit. BEAGLE_STORE_SERVER_NO_OOM_EXIT=1 opts out.
 if [[ -z "${BEAGLE_STORE_SERVER_NO_OOM_EXIT:-}" && -n "$xmx" ]]; then
