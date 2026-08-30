@@ -174,7 +174,7 @@
             chmod 0444 $out/libexec/store/runtime.manifest
             cp tests/store_mcp.clj $out/libexec/store/tests/
             cp clients/bun/backup.mjs clients/bun/store-rpc.mjs \
-              clients/bun/store-rpc-core.mjs \
+              clients/bun/store-rpc-core.mjs clients/bun/transport-deadline.js \
               $out/libexec/store/clients/bun/
             export XDG_CACHE_HOME="$TMPDIR/beagle-cache"
             beagle build bin/beagle-store-cli.bjs \
