@@ -159,7 +159,9 @@
   (when (env-string "NOTIFY_SOCKET")
     (let [command (or (env-string "BEAGLE_STORE_SD_NOTIFY") "systemd-notify")
           process (-> (ProcessBuilder.
-                       (into-array String [command state (str "STATUS=" status)]))
+                       (into-array String
+                                   [command "--pid=parent" state
+                                    (str "STATUS=" status)]))
                       (.inheritIO)
                       (.start))
           exit (.waitFor process)]

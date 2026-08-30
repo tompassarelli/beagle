@@ -222,13 +222,13 @@ initial_version="$(wait_ready)"
 [[ "$initial_version" == "0" ]] || {
   echo "store package smoke: fresh STORELOG did not start at version 0: $initial_version" >&2; exit 1; }
 for _ in $(seq 1 100); do
-  "$grep_bin" -Fxq \
-    'READY=1 STATUS=Beagle Store restored, listening, and RPC-usable' \
+  "$grep_bin" -Fxq -- \
+    '--pid=parent READY=1 STATUS=Beagle Store restored, listening, and RPC-usable' \
     "$notify_log" 2>/dev/null && break
   sleep 0.01
 done
-"$grep_bin" -Fxq \
-  'READY=1 STATUS=Beagle Store restored, listening, and RPC-usable' \
+"$grep_bin" -Fxq -- \
+  '--pid=parent READY=1 STATUS=Beagle Store restored, listening, and RPC-usable' \
   "$notify_log" || {
     echo "store package smoke: READY notification is absent" >&2; exit 1; }
 
@@ -327,11 +327,11 @@ restart_show="$(run_private_cli show package)"
   echo "store package smoke: restart lost MCP write" >&2; exit 1; }
 stop_server
 
-ready_count="$("$grep_bin" -Fxc \
-  'READY=1 STATUS=Beagle Store restored, listening, and RPC-usable' \
+ready_count="$("$grep_bin" -Fxc -- \
+  '--pid=parent READY=1 STATUS=Beagle Store restored, listening, and RPC-usable' \
   "$notify_log")"
-stopping_count="$("$grep_bin" -Fxc \
-  'STOPPING=1 STATUS=Beagle Store draining' "$notify_log")"
+stopping_count="$("$grep_bin" -Fxc -- \
+  '--pid=parent STOPPING=1 STATUS=Beagle Store draining' "$notify_log")"
 [[ "$ready_count" == "2" && "$stopping_count" == "2" ]] || {
   echo "store package smoke: notification sequence is not paired exactly" >&2
   sed -n '1,20p' "$notify_log" >&2
