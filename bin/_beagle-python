@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Resolve the Python runtime declared by Beagle's flake when a checkout is
+# invoked outside its development shell. Packaged entrypoints already put this
+# runtime on PATH; raw checkout entrypoints must not assume that ambient state.
+
+beagle_resolve_python() {
+    local root="${BEAGLE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+    local candidate="${_BEAGLE_PYTHON:-}"
+
+    if [[ -z "$candidate" ]]; then
+        candidate="$(command -v python3 2>/dev/null || true)"
+    fi
+    if [[ -z "$candidate" && -d "$root/.direnv" ]] &&
+       command -v direnv >/dev/null 2>&1; then
+        candidate="$(cd "$root" && direnv exec . which python3 2>/dev/null || true)"
+    fi
+    if [[ -z "$candidate" && -f "$root/flake.nix" ]] &&
+       command -v nix >/dev/null 2>&1; then
+        candidate="$(nix develop "$root" --command which python3 2>/dev/null || true)"
+    fi
+
+    if [[ -z "$candidate" || ! -x "$candidate" ]]; then
+        echo "beagle: Python runtime unavailable; enter the Beagle development shell or make its flake evaluable" >&2
+        return 2
+    fi
+
+    export _BEAGLE_PYTHON="$candidate"
+    BEAGLE_PYTHON="$candidate"
+    case ":$PATH:" in
+        *":$(dirname "$candidate"):"*) ;;
+        *) export PATH="$(dirname "$candidate"):$PATH" ;;
+    esac
+}

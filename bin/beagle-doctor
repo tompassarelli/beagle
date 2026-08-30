@@ -27,6 +27,8 @@
 
 set -uo pipefail
 source "$(dirname "$0")/_beagle-racket"
+source "$(dirname "$0")/_beagle-python"
+beagle_resolve_python || exit $?
 source "$(dirname "$0")/_beagle-daemon-files"
 BIN="$(cd "$(dirname "$0")" && pwd)"
 
@@ -57,7 +59,7 @@ check_tool() {
     local version_flag="${3:---version}"
     local result
     if result=$(eval "$cmd $version_flag" 2>&1 | head -1); then
-        CHECKS+=("{\"name\":\"$name\",\"status\":\"ok\",\"message\":$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))')}")
+        CHECKS+=("{\"name\":\"$name\",\"status\":\"ok\",\"message\":$(printf '%s' "$result" | "$BEAGLE_PYTHON" -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))')}")
     else
         STATUS="error"
         CHECKS+=("{\"name\":\"$name\",\"status\":\"error\",\"message\":\"not found\"}")
@@ -77,7 +79,7 @@ fi
 # Clojure CLI
 if command -v clj &>/dev/null; then
     ver=$(clj --version 2>&1 | head -1)
-    CHECKS+=("{\"name\":\"clojure\",\"status\":\"ok\",\"message\":$(printf '%s' "$ver" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))')}")
+    CHECKS+=("{\"name\":\"clojure\",\"status\":\"ok\",\"message\":$(printf '%s' "$ver" | "$BEAGLE_PYTHON" -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))')}")
 else
     CHECKS+=("{\"name\":\"clojure\",\"status\":\"warning\",\"message\":\"clj not found (needed for clj target)\"}")
     [[ "$STATUS" == "ok" ]] && STATUS="warning"
@@ -86,7 +88,7 @@ fi
 # Node.js
 if command -v node &>/dev/null; then
     ver=$(node --version 2>&1 | head -1)
-    CHECKS+=("{\"name\":\"node\",\"status\":\"ok\",\"message\":$(printf '%s' "$ver" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))')}")
+    CHECKS+=("{\"name\":\"node\",\"status\":\"ok\",\"message\":$(printf '%s' "$ver" | "$BEAGLE_PYTHON" -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))')}")
 else
     CHECKS+=("{\"name\":\"node\",\"status\":\"warning\",\"message\":\"node not found (needed for js target)\"}")
     [[ "$STATUS" == "ok" ]] && STATUS="warning"
@@ -95,7 +97,7 @@ fi
 # Nix
 if command -v nix &>/dev/null; then
     ver=$(nix --version 2>&1 | head -1)
-    CHECKS+=("{\"name\":\"nix\",\"status\":\"ok\",\"message\":$(printf '%s' "$ver" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))')}")
+    CHECKS+=("{\"name\":\"nix\",\"status\":\"ok\",\"message\":$(printf '%s' "$ver" | "$BEAGLE_PYTHON" -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))')}")
 else
     CHECKS+=("{\"name\":\"nix\",\"status\":\"warning\",\"message\":\"nix not found (needed for nix target)\"}")
     [[ "$STATUS" == "ok" ]] && STATUS="warning"
@@ -152,7 +154,7 @@ fi
 # ---------------------------------------------------------------------------
 AUTHORING_LOOP=()
 al_ok()   { AUTHORING_LOOP+=("{\"name\":\"$1\",\"status\":\"ok\"}"); }
-al_fail() { AUTHORING_LOOP+=("{\"name\":\"$1\",\"status\":\"error\",\"message\":$(printf '%s' "$2" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))')}"); STATUS="error"; AUTHORING_STATUS="error"; }
+al_fail() { AUTHORING_LOOP+=("{\"name\":\"$1\",\"status\":\"error\",\"message\":$(printf '%s' "$2" | "$BEAGLE_PYTHON" -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))')}"); STATUS="error"; AUTHORING_STATUS="error"; }
 
 DOC_WORK="$(mktemp -d /tmp/beagle-doctor.XXXXXX)"
 printf '#lang beagle/clj\n(ns doctor.canary)\n(defn f [] Nil (str "x"\n' > "$DOC_WORK/bad.bclj"
@@ -274,9 +276,9 @@ else
     echo ""
     echo "Environment:"
     for check in "${CHECKS[@]}"; do
-        name=$(echo "$check" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["name"])')
-        status=$(echo "$check" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["status"])')
-        msg=$(echo "$check" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["message"])')
+        name=$(echo "$check" | "$BEAGLE_PYTHON" -c 'import json,sys; d=json.load(sys.stdin); print(d["name"])')
+        status=$(echo "$check" | "$BEAGLE_PYTHON" -c 'import json,sys; d=json.load(sys.stdin); print(d["status"])')
+        msg=$(echo "$check" | "$BEAGLE_PYTHON" -c 'import json,sys; d=json.load(sys.stdin); print(d["message"])')
         if [[ "$status" == "ok" ]]; then
             echo "  [ok]      $name: $msg"
         elif [[ "$status" == "warning" ]]; then
@@ -288,26 +290,26 @@ else
     echo ""
     echo "Authoring loop (functional):"
     for entry in "${AUTHORING_LOOP[@]}"; do
-        name=$(echo "$entry" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["name"])')
-        status=$(echo "$entry" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["status"])')
+        name=$(echo "$entry" | "$BEAGLE_PYTHON" -c 'import json,sys; d=json.load(sys.stdin); print(d["name"])')
+        status=$(echo "$entry" | "$BEAGLE_PYTHON" -c 'import json,sys; d=json.load(sys.stdin); print(d["status"])')
         if [[ "$status" == "ok" ]]; then
             echo "  [ok]      $name canary"
         else
-            msg=$(echo "$entry" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("message",""))')
+            msg=$(echo "$entry" | "$BEAGLE_PYTHON" -c 'import json,sys; d=json.load(sys.stdin); print(d.get("message",""))')
             echo "  [ERROR]   $name canary: $msg"
         fi
     done
     echo ""
     echo "Target emitters:"
     for target in "${TARGETS[@]}"; do
-        name=$(echo "$target" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["name"])')
-        status=$(echo "$target" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["status"])')
-        if [[ "$status" == "ok" || "$status" == "live" ]]; then
+        name=$(echo "$target" | "$BEAGLE_PYTHON" -c 'import json,sys; d=json.load(sys.stdin); print(d["name"])')
+        status=$(echo "$target" | "$BEAGLE_PYTHON" -c 'import json,sys; d=json.load(sys.stdin); print(d["status"])')
+        if [[ "$status" == "ok" || "$status" == "live" || "$status" == "experimental" ]]; then
             echo "  [$status]  $name"
         elif [[ "$status" == "not-built" ]]; then
             echo "  [warn]    $name: in the target table but no emitter module built"
         else
-            msg=$(echo "$target" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("message",""))')
+            msg=$(echo "$target" | "$BEAGLE_PYTHON" -c 'import json,sys; d=json.load(sys.stdin); print(d.get("message",""))')
             echo "  [ERROR]   $name: $msg"
         fi
     done

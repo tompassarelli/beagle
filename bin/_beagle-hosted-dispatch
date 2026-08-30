@@ -23,10 +23,23 @@ _beagle_hosted_target_for_source() {
 
 _beagle_hosted_prepare_native() {
     local selector="$BEAGLE_DIR/self-host/native/stage0-select.sh"
-    local explicit=0 candidate_real expected_real expected_output
+    local default_native="$BEAGLE_DIR/self-host/native/beagle-selfhost"
+    local explicit=0 resolved_exact=0 candidate_real expected_real expected_output
     local sidecar recorded_hash current_hash
 
     [[ "${BEAGLE_NATIVE_BIN+x}" == x ]] && explicit=1
+
+    if [[ $explicit -eq 0 && ! -x "$default_native" ]]; then
+        command -v nix >/dev/null 2>&1 ||
+            _beagle_hosted_error "native hosted compiler is absent at $default_native and nix is unavailable" || return
+        expected_output="$(nix path-info "$BEAGLE_DIR#beagle-selfhost" 2>/dev/null)" ||
+            _beagle_hosted_error "exact .#beagle-selfhost artifact is unavailable; run: nix build $BEAGLE_DIR#beagle-selfhost" || return
+        [[ -x "$expected_output/bin/beagle-selfhost" ]] ||
+            _beagle_hosted_error "exact .#beagle-selfhost artifact has no executable: $expected_output/bin/beagle-selfhost" || return
+        BEAGLE_NATIVE_BIN="$expected_output/bin/beagle-selfhost"
+        explicit=1
+        resolved_exact=1
+    fi
 
     [[ -r "$selector" ]] ||
         _beagle_hosted_error "native hosted compiler selector is unavailable: $selector" || return
@@ -34,13 +47,18 @@ _beagle_hosted_prepare_native() {
     source "$selector"
     beagle_select_stage0 \
         "$BEAGLE_DIR/self-host/seed" \
-        "$BEAGLE_DIR/self-host/native/beagle-selfhost" || return $?
+        "$default_native" || return $?
     [[ "$STAGE0" == native && -n "$NATIVE_BIN" ]] ||
         _beagle_hosted_error "native hosted compiler selection returned no executable" || return
 
     candidate_real="$(realpath "$NATIVE_BIN")" ||
         _beagle_hosted_error "cannot resolve selected native hosted compiler: $NATIVE_BIN" || return
-    if [[ -n "${_BEAGLE_SELFHOST_EXACT_NATIVE_BIN:-}" ]]; then
+    if [[ $resolved_exact -eq 1 ]]; then
+        expected_real="$(realpath "$expected_output/bin/beagle-selfhost")" ||
+            _beagle_hosted_error "cannot resolve exact native hosted compiler: $expected_output/bin/beagle-selfhost" || return
+        [[ "$candidate_real" == "$expected_real" ]] ||
+            _beagle_hosted_error "selected native hosted compiler mismatch: $candidate_real != $expected_real" || return
+    elif [[ -n "${_BEAGLE_SELFHOST_EXACT_NATIVE_BIN:-}" ]]; then
         expected_real="$(realpath "$_BEAGLE_SELFHOST_EXACT_NATIVE_BIN")" ||
             _beagle_hosted_error "cannot resolve packaged native hosted compiler: $_BEAGLE_SELFHOST_EXACT_NATIVE_BIN" || return
         [[ "$candidate_real" == "$expected_real" ]] ||
