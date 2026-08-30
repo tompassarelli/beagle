@@ -1469,6 +1469,13 @@
               ;; constructor does: the hosted heap already outlives every
               ;; epoch the form could name.
               (cond
+                ;; Reader metadata normally lowers to a dedicated node. Keep
+                ;; the marker readable when a legacy or expanded call reaches
+                ;; emission: `(#%meta tag value)` is not Clojure source.
+                (and (= fn-key "#%meta")
+                  (= 2 (count args)))
+                  (str "^" (emit-expr* (nth args 0)) " "
+                    (emit-expr* (nth args 1)))
                 (and (= 1 (count args))
                   (or (contains? (deref scalar-fns) fn-key)
                     (qualified-reference=? fn-expr "bgl" "promote")))
@@ -1944,6 +1951,21 @@
                           "default" false}
                     "args" []})
        "((:k m))"))
+
+  (expect! "call: legacy metadata marker emits readable Clojure metadata"
+    (let [path-output (emit-expr!
+              {"node" "call"
+               "fn" {"node" "ref" "name" "#%meta"}
+               "args" [{"node" "ref" "name" "Path"}
+                       {"node" "ref" "name" "target"}]})
+          bytes-output (emit-expr!
+              {"node" "call"
+               "fn" {"node" "ref" "name" "#%meta"}
+               "args" [{"node" "ref" "name" "bytes"}
+                       {"node" "ref" "name" "previous"}]})]
+      (and (= path-output "^Path target")
+        (= bytes-output "^bytes previous")
+        (not (str/includes? (str path-output bytes-output) "#%meta")))))
 
   (expect! "def: dynamic metadata survives emission"
     (= (emit-expr! {"node" "def"

@@ -695,6 +695,7 @@
    args (get e "args")]
   (if (= (get fn-expr "node") "ref") (let [fn-key (reference-key fn-expr)]
   (cond
+  (and (= fn-key "#%meta") (= 2 (count args))) (str "^" (emit-expr* (nth args 0)) " " (emit-expr* (nth args 1)))
   (and (= 1 (count args)) (or (contains? (deref scalar-fns) fn-key) (qualified-reference=? fn-expr "bgl" "promote"))) (emit-expr* (nth args 0))
   (and (= fn-key "sha256-bytes") (= 1 (count args)) (not (contains? (deref local-names) fn-key))) (str "(" CLJ-SHA256-BYTES-CALL " " (emit-expr* (nth args 0)) ")")
   (and (qualified-reference=? fn-expr "bgl" "sha256-utf8") (= 1 (count args))) (str "(" CLJ-SHA256-UTF8-CALL " " (emit-expr* (nth args 0)) ")")
@@ -883,6 +884,9 @@
   (expect! "record accessors" (= (emit-record-form {"name" "Pt" "fields" [{"name" "x"} {"name" "y"}]}) "(defrecord Pt [x y])\n\n(defn pt-x [r] (:x r))\n\n(defn pt-y [r] (:y r))"))
   (expect! "if: else-less encodes 2-arity" (= (emit-expr! {"node" "if" "cond" {"node" "ref" "name" "p"} "then" {"node" "ref" "name" "t"} "else" {"node" "literal" "kind" "bool" "value" false}}) "(if p t)"))
   (expect! "call: keyword access in function position" (= (emit-expr! {"node" "call" "fn" {"node" "kw-access" "kw" ":k" "target" {"node" "ref" "name" "m"} "default" false} "args" []}) "((:k m))"))
+  (expect! "call: legacy metadata marker emits readable Clojure metadata" (let [path-output (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "#%meta"} "args" [{"node" "ref" "name" "Path"} {"node" "ref" "name" "target"}]})
+   bytes-output (emit-expr! {"node" "call" "fn" {"node" "ref" "name" "#%meta"} "args" [{"node" "ref" "name" "bytes"} {"node" "ref" "name" "previous"}]})]
+  (and (= path-output "^Path target") (= bytes-output "^bytes previous") (not (str/includes? (str path-output bytes-output) "#%meta")))))
   (expect! "def: dynamic metadata survives emission" (= (emit-expr! {"node" "def" "name" "*arity-check?*" "ann" {"kind" "prim" "name" "Bool"} "doc" false "dynamic" true "value" {"node" "literal" "kind" "bool" "value" true}}) "(def ^:dynamic ^Boolean *arity-check?* true)"))
   (expect! "binding: qualified external target emits as real Clojure binding" (= (emit-expr! {"node" "binding" "bindings" [{"name" "external.state/*value*" "ann" {"kind" "prim" "name" "Int"} "constraint" nil "value" {"node" "literal" "kind" "number" "value" 7}}] "body" [{"node" "ref" "qualifier" "external.state" "name" "*value*" "providerId" nil}]}) "(binding [external.state/*value* 7]\n  external.state/*value*)"))
   (expect! "match temps deterministic" (do
