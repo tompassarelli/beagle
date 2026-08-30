@@ -1144,6 +1144,11 @@
                (str "export { " factory " as " (js-string-lit member) " };")]))
           members)))))
 
+(defn emit-named-public-esm-form! [f Any emitted String] String
+  (let [authored (get f "name")]
+    (str emitted "\nexport { " (mangle-name authored) " as "
+      (js-string-lit authored) " };")))
+
 (defn emit-public-esm-form! [f Any] String
   (let [node (get f "node")
         emitted (emit-form* f)]
@@ -1154,6 +1159,9 @@
         (str emitted "\n" (emit-member-public-esm-exports! (get f "members")))
       (= node "deferror")
         (str emitted "\n" (emit-member-public-esm-exports! (get f "members")))
+      (or (= node "def") (= node "defonce") (= node "defn")
+          (= node "defn-multi"))
+        (emit-named-public-esm-form! f emitted)
       :else (str "export " emitted))))
 
 ;; Params are bindings (suffixed); object keys are properties (no `$`).
@@ -3254,6 +3262,17 @@
                     {"node" "record" "name" "ReceiptEntityRef" "fields" []})]
       (and (str/includes? emitted "export { ReceiptEntityRef as \"->ReceiptEntityRef\" };")
            (str/includes? emitted "export { ReceiptEntityRef as \"ReceiptEntityRef\" };"))))
+  (expect! "exported def preserves its authored public name"
+    (= (emit-public-esm-form!
+         {"node" "def" "name" "cache-ttl"
+          "value" {"node" "literal" "kind" "number" "value" 30}})
+      "const cache_ttl = 30;\nexport { cache_ttl as \"cache-ttl\" };"))
+  (expect! "exported defn preserves its authored public name"
+    (let [emitted (emit-public-esm-form!
+                    {"node" "defn" "name" "check!" "params" [] "rest" false
+                     "body" [{"node" "literal" "kind" "number" "value" 1}]})]
+      (and (str/includes? emitted "function check_bang()")
+           (str/includes? emitted "export { check_bang as \"check!\" };"))))
   (expect! "def -> const"
     (= (emit-form! {"node" "def" "name" "tax-rate" "value" {"node" "literal" "kind" "float" "value" 0.08}})
        "const tax_rate = 0.08;"))
