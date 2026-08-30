@@ -55,7 +55,7 @@
           filename (str id "-"
                         (store.rt/slugify (if title title "untitled"))
                         ".md")]
-      (spit (str out "/" filename) (exp/thread-md triples subject)))))
+      (spit (str out "/" filename) (exp/subject-md triples subject)))))
 
 (defn require-pass [label ok]
   (println (str "  [" (if ok "PASS" "FAIL") "] " label))
@@ -114,7 +114,7 @@
     (require-pass "export includes predicate metadata subjects"
                   (= signatures (triple-set "predicate-reimport"
                                             (imp/load-corpus out))))
-    (let [rendered (exp/thread-md triples "@alice")]
+    (let [rendered (exp/subject-md triples "@alice")]
       (require-pass "declared ref exports bare"
                     (str/includes? rendered "friend  @bob"))
       (require-pass "declared literal exports quoted"
@@ -124,7 +124,7 @@
               (t/triple "@a" "depends_on" "@b")
               (t/triple "@a" "note" "@literal")
               (t/triple "@b" "title" "B")]
-      rendered (exp/thread-md legacy "@a")]
+      rendered (exp/subject-md legacy "@a")]
   (require-pass "legacy ref fallback renders unchanged"
                 (str/includes? rendered "depends_on  @b"))
   (require-pass "legacy literal @ value remains quoted"

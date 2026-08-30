@@ -80,7 +80,7 @@
 (defn- ^String render-object [^PredicateRegistry registry triples ^String predicate ^String value]
   (if (= "ref" (value-kind-of registry triples predicate)) (if (str/starts-with? value "@") value (str "@" value)) (if (or (str/blank? value) (str/includes? value " ") (str/includes? value "\t") (str/includes? value "\n") (str/includes? value "\r") (str/starts-with? value "@") (str/starts-with? value "\"")) (store.rt/edn-quote value) value)))
 
-(defn ^String thread-md [triples ^String subject]
+(defn ^String subject-md [triples ^String subject]
   (let [^PredicateRegistry registry (predicate-registry triples)
    selected (subject-triples triples subject)
    present (distinct-strings (mapv (fn [value] (predicate-name registry (triple-predicate value))) selected))

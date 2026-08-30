@@ -178,7 +178,7 @@
       (store.rt/edn-quote value)
       value)))
 
-(defn thread-md
+(defn subject-md
   [triples (Vec t/Triple)
    subject String] String
   (let [registry PredicateRegistry (predicate-registry triples)
