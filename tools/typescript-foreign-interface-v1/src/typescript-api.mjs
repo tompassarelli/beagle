@@ -154,6 +154,7 @@ const canonicalNodeKind = (node) => {
     [ts.isTemplateExpression, "TemplateExpression"],
     [ts.isTemplateSpan, "TemplateSpan"],
     [ts.isArrowFunction, "ArrowFunction"],
+    [ts.isAwaitExpression, "AwaitExpression"],
     [ts.isCallExpression, "CallExpression"],
     [ts.isPropertyAccessExpression, "PropertyAccessExpression"],
     [ts.isElementAccessExpression, "ElementAccessExpression"],
@@ -1141,6 +1142,7 @@ export function createCompilerBridge({
     metaPropertyKeywordKind: (node) => ts.SyntaxKind[node?.keywordToken] ?? "",
     prefixOperatorKind: (node) => canonicalTokenKind({ kind: node.operator }),
     "nodeExported?": (node) => Boolean(node?.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)),
+    "nodeAsync?": (node) => Boolean(node?.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword)),
     "nodeOptional?": (node) => Boolean(
       node?.questionToken
       || node?.questionDotToken

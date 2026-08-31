@@ -1187,6 +1187,9 @@
         (identical? kind "NoSubstitutionTemplateLiteral") (.literalJson bridge node)
         (identical? kind "TemplateExpression") (emit-template! state node)
         (identical? kind "ArrowFunction") (emit-arrow! state node)
+        (identical? kind "AwaitExpression")
+        (str "(await "
+             (emit-expression! state (bridge-node state node "expression")) ")")
         (identical? kind "CallExpression") (emit-call! state node)
         (identical? kind "MetaProperty") (emit-meta-property! state node)
         (identical? kind "NewExpression") (emit-new! state node)
@@ -1303,28 +1306,106 @@
 (defn pure-for-mutation!
   [state ImportStateV1
    statement OpaqueTypeScriptNodeV1] (U PureForMutationV1 Nil)
-  (if (identical? (node-kind state statement) "ExpressionStatement")
-    (let [expression OpaqueTypeScriptNodeV1 (bridge-node state statement "expression")
-          operator String (.nodeTokenKind (importstatev1-bridge state)
-                          (bridge-node state expression "operatorToken"))
-          left OpaqueTypeScriptNodeV1 (bridge-node state expression "left")
-          right OpaqueTypeScriptNodeV1 (bridge-node state expression "right")]
-      (if (and (identical? (node-kind state expression) "BinaryExpression")
-               (identical? (node-kind state left) "Identifier")
-               (or (identical? operator "EqualsToken")
-                   (identical? operator "SlashEqualsToken")))
-        (let [name String (node-name state left)
-              right-source String (emit-expression! state right)]
+  (let [kind String (node-kind state statement)]
+    (cond
+      (identical? kind "ExpressionStatement")
+      (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
+            expression OpaqueTypeScriptNodeV1 (bridge-node state statement "expression")]
+        (if (identical? (node-kind state expression) "BinaryExpression")
+          (let [operator String (.nodeTokenKind bridge
+                                  (bridge-node state expression "operatorToken"))
+                left OpaqueTypeScriptNodeV1 (bridge-node state expression "left")
+                right OpaqueTypeScriptNodeV1 (bridge-node state expression "right")
+                left-kind String (node-kind state left)
+                right-source String (emit-expression! state right)]
+            (cond
+              (and (identical? left-kind "Identifier")
+                   (or (identical? operator "EqualsToken")
+                       (identical? operator "SlashEqualsToken")))
+              (let [name String (node-name state left)]
+                (->PureForMutationV1
+                  name
+                  (type->beagle! state (.typeAt bridge left) true)
+                  (if (identical? operator "SlashEqualsToken")
+                    (str "(/ " name " " right-source ")")
+                    right-source)))
+              (and (identical? left-kind "ElementAccessExpression")
+                   (identical? operator "EqualsToken")
+                   (identical?
+                     (node-kind state (bridge-node state left "expression"))
+                     "Identifier"))
+              (let [receiver OpaqueTypeScriptNodeV1 (bridge-node state left "expression")
+                    name String (node-name state receiver)]
+                (->PureForMutationV1
+                  name
+                  (type->beagle! state (.typeAt bridge receiver) true)
+                  (str "(assoc " name " "
+                       (emit-expression! state
+                         (bridge-node state left "argumentExpression"))
+                       " " right-source ")")))
+              (and (identical? left-kind "PropertyAccessExpression")
+                   (identical? operator "EqualsToken")
+                   (identical?
+                     (node-kind state (bridge-node state left "expression"))
+                     "Identifier"))
+              (let [receiver OpaqueTypeScriptNodeV1 (bridge-node state left "expression")
+                    name String (node-name state receiver)
+                    field String (node-name state (bridge-node state left "name"))]
+                (->PureForMutationV1
+                  name
+                  (type->beagle! state (.typeAt bridge receiver) true)
+                  (str "(with " name " [:" field " " right-source "])")))
+              :else nil))
+          nil))
+      (identical? kind "IfStatement")
+      (let [then-node OpaqueTypeScriptNodeV1 (bridge-node state statement "thenStatement")
+            then-statements (Vec OpaqueTypeScriptNodeV1) (if (identical? (node-kind state then-node) "Block")
+              (bridge-nodes state then-node "statements")
+              [then-node])
+            mutation (U PureForMutationV1 Nil) (if (and (identical? (count then-statements) 1)
+                                                        (not (present? (bridge-node state statement "elseStatement"))))
+              (pure-for-mutation! state (first then-statements))
+              nil)]
+        (if mutation
           (->PureForMutationV1
-            name
-            (type->beagle! state
-              (.typeAt (importstatev1-bridge state) left)
-              true)
-            (if (identical? operator "SlashEqualsToken")
-              (str "(/ " name " " right-source ")")
-              right-source)))
-        nil))
-    nil))
+            (pureformutationv1-name mutation)
+            (pureformutationv1-type mutation)
+            (str "(if "
+                 (emit-condition! state (bridge-node state statement "expression"))
+                 " " (pureformutationv1-value mutation)
+                 " " (pureformutationv1-name mutation) ")"))
+          nil))
+      :else nil)))
+
+(defn for-variable-bindings!
+  [state ImportStateV1
+   statements (Vec OpaqueTypeScriptNodeV1)] (Vec String)
+  (reduce
+    (fn
+      [values (Vec String)
+       statement OpaqueTypeScriptNodeV1] (Vec String)
+      (if (identical? (node-kind state statement) "VariableStatement")
+        (reduce
+          (fn
+            [bindings (Vec String)
+             declaration OpaqueTypeScriptNodeV1] (Vec String)
+            (let [name-node OpaqueTypeScriptNodeV1 (bridge-node state declaration "name")
+                  initializer OpaqueTypeScriptNodeV1 (bridge-node state declaration "initializer")]
+              (into bindings
+                [(emit-binding-name! state name-node)
+                 (type->beagle! state
+                   (.typeAt (importstatev1-bridge state) declaration)
+                   true)
+                 (if (present? initializer)
+                   (emit-expression! state initializer)
+                   "nil")])))
+          values
+          (bridge-nodes state
+            (bridge-node state statement "declarationList")
+            "declarations"))
+        values))
+    []
+    statements))
 
 (defn emit-pure-for-of!
   [state ImportStateV1
@@ -1350,7 +1431,12 @@
         guarded? Bool (and (identical? (node-kind state last-statement) "IfStatement")
              (break-statement? state (bridge-node state last-statement "thenStatement"))
              (not (present? (bridge-node state last-statement "elseStatement"))))
-        mutation-statements (Vec OpaqueTypeScriptNodeV1) (if guarded? (vec (butlast statements)) statements)
+        body-statements (Vec OpaqueTypeScriptNodeV1) (if guarded? (vec (butlast statements)) statements)
+        variable-bindings (Vec String) (for-variable-bindings! state body-statements)
+        mutation-statements (Vec OpaqueTypeScriptNodeV1) (filterv
+          (fn [candidate OpaqueTypeScriptNodeV1] Bool
+            (not (identical? (node-kind state candidate) "VariableStatement")))
+          body-statements)
         mutations (Vec PureForMutationV1) (reduce
           (fn
             [values (Vec PureForMutationV1)
@@ -1360,26 +1446,47 @@
                 (conj values mutation)
                 (do
                   (diagnostic! state candidate "TSI_FOR_MUTATION"
-                    "for-of supports typed identifier assignment before an optional break guard")
+                    "for-of supports typed state assignment before an optional break guard")
                   values))))
           []
           mutation-statements)
-        state-names (Vec String) (distinct-strings
+        binding-name String (if (identical? (node-kind state binding) "Identifier")
+          (node-name state binding)
+          "")
+        binding-mutated? Bool (some
+          (fn [mutation PureForMutationV1] Bool
+            (identical? (pureformutationv1-name mutation) binding-name))
+          mutations)
+        collection-name String (if binding-mutated?
+          (if (identical? (node-kind state collection-node) "Identifier")
+            (node-name state collection-node)
+            (diagnostic! state collection-node "TSI_FOR_COLLECTION_STATE"
+              "for-of element mutation requires an identifier collection"))
+          "")
+        outer-state-names (Vec String) (distinct-strings
           (mapv (fn [mutation PureForMutationV1] String
                   (pureformutationv1-name mutation))
-                mutations))
+                (filterv
+                  (fn [mutation PureForMutationV1] Bool
+                    (not (identical? (pureformutationv1-name mutation) binding-name)))
+                  mutations)))
+        state-names (Vec String) (if binding-mutated?
+          (conj outer-state-names collection-name)
+          outer-state-names)
         state-types (Vec String) (mapv
           (fn [name String] String
-            (let [mutation (U PureForMutationV1 Nil) (some
-                    (fn [candidate PureForMutationV1] (U PureForMutationV1 Nil)
-                      (if (identical? (pureformutationv1-name candidate) name)
-                        candidate
-                        nil))
-                    mutations)]
-              (if mutation
-                (pureformutationv1-type mutation)
-                (diagnostic! state statement "TSI_FOR_STATE"
-                  (str "cannot type for-of state " name)))))
+            (if (and binding-mutated? (identical? name collection-name))
+              collection-type
+              (let [mutation (U PureForMutationV1 Nil) (some
+                      (fn [candidate PureForMutationV1] (U PureForMutationV1 Nil)
+                        (if (identical? (pureformutationv1-name candidate) name)
+                          candidate
+                          nil))
+                      mutations)]
+                (if mutation
+                  (pureformutationv1-type mutation)
+                  (diagnostic! state statement "TSI_FOR_STATE"
+                    (str "cannot type for-of state " name))))))
           state-names)
         state-record-name String (str "TypeScriptForStateV" (swap! (importstatev1-counter state) inc))
         state-result-name String (next-temporary! state "for-state-")
@@ -1410,7 +1517,10 @@
             (into values
               [(nth state-names index)
                (nth state-types index)
-               (nth state-names index)]))
+               (if (and binding-mutated?
+                        (identical? (nth state-names index) collection-name))
+                 "[]"
+                 (nth state-names index))]))
           [items-name collection-type collection-source]
           (vec (range (count state-names))))
         mutation-bindings (Vec String) (reduce
@@ -1423,12 +1533,20 @@
                (pureformutationv1-value mutation)]))
           []
           mutations)
+        iteration-bindings (Vec String) (if binding-mutated?
+          (into mutation-bindings
+            [collection-name collection-type
+             (str "(conj " collection-name " " binding-name ")")])
+          mutation-bindings)
         recur-source String (parenthesize "recur"
           (into [(str "(vec (rest " items-name "))")] state-names))
         iteration-source String (str "(let [" binding-source " " binding-type " (first " items-name ")"
-             (if (empty? mutation-bindings)
+             (if (empty? variable-bindings)
                ""
-               (str " " (join-with " " mutation-bindings)))
+               (str " " (join-with " " variable-bindings)))
+             (if (empty? iteration-bindings)
+               ""
+               (str " " (join-with " " iteration-bindings)))
              "] "
              (if guarded?
                (str "(if "
@@ -1678,6 +1796,7 @@
    node OpaqueTypeScriptNodeV1] String
   (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
         name String (node-name state node)
+        async-prefix String (if (.nodeAsync? bridge node) "^:async " "")
         parameters (Vec OpaqueTypeScriptNodeV1) (bridge-nodes state node "parameters")
         return-type String (type->beagle! state (.returnType bridge node) true)
         body OpaqueTypeScriptNodeV1 (bridge-node state node "body")
@@ -1692,7 +1811,7 @@
           (: (.signatureTypeParameters bridge signature) (Vec OpaqueTypeScriptTypeV1))
           [])
         ordinary-declaration String (if (identical? first-default (count parameters))
-          (str "(defn " name " ["
+          (str "(defn " async-prefix name " ["
                (join-with " "
                  (mapv (fn [parameter OpaqueTypeScriptNodeV1] String
                          (emit-parameter! state parameter))
@@ -1725,7 +1844,7 @@
                                "] " return-type " "
                                (parenthesize name call-arguments) ")")))))
                   (range first-default (+ (count parameters) 1)))]
-            (str "(defn " name " " (join-with " " arities) ")")))
+            (str "(defn " async-prefix name " " (join-with " " arities) ")")))
         declaration String (if (empty? type-parameters)
           ordinary-declaration
           (if (identical? first-default (count parameters))
