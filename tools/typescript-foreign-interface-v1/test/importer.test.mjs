@@ -60,10 +60,13 @@ test("wasm-bindgen anonymous init objects become checked records", async () => {
     "(defrecord TypeScriptAnonymousObjectV1 [module SyncInitInput])",
   ]);
   expect(result.source).toContain(
-    "(js/export (defn initSync [module (U ArrayBuffer Module TypeScriptAnonymousObjectV1)] Number 0.0))",
+    "(js/export (defn initSync [module (U ArrayBuffer (ArrayBufferView ArrayBuffer) Module TypeScriptAnonymousObjectV1)] Number 0.0))",
   );
   expect(result.source).toContain(
     "(js/export (defn initArrayBuffer [module ArrayBuffer] Number (initSync module)))",
+  );
+  expect(result.source).toContain(
+    "(js/export (defn initInput [module SyncInitInput] Number (initSync module)))",
   );
   expect(result.source).not.toContain("__typescript_import_unsupported__");
 });

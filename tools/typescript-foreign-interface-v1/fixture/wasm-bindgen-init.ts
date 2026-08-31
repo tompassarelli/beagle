@@ -1,4 +1,7 @@
-export type SyncInitInput = ArrayBuffer | WebAssembly.Module;
+export type SyncInitInput =
+  | ArrayBuffer
+  | ArrayBufferView<ArrayBuffer>
+  | WebAssembly.Module;
 
 export function initSync(
   module: { module: SyncInitInput } | SyncInitInput,
@@ -7,5 +10,9 @@ export function initSync(
 }
 
 export function initArrayBuffer(module: ArrayBuffer): number {
+  return initSync(module);
+}
+
+export function initInput(module: SyncInitInput): number {
   return initSync(module);
 }

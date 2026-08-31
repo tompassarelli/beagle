@@ -2,6 +2,7 @@
 
 (require rackunit
          racket/file
+         racket/runtime-path
          racket/string
          racket/system
          beagle/private/foreign-interface-v1
@@ -10,6 +11,9 @@
          beagle/private/module-source-root
          beagle/private/typescript-foreign-resolver-v1
          beagle/private/types)
+
+(define-runtime-path wasm-bindgen-fixture
+  "../../tools/typescript-foreign-interface-v1/fixture/wasm-bindgen-init.ts")
 
 (define (write-source! path source)
   (call-with-output-file
@@ -114,7 +118,7 @@
      "missing Bun must be diagnosed before adapter materialization"))))
 
 (test-case
- "production resolution checks and emits one exact native ESM interface"
+ "production resolution checks and emits exact native ESM interfaces"
  (with-isolated-adapter-cache
   (lambda (project-root adapter-cache)
     (write-source!
@@ -147,6 +151,19 @@
     (write-source!
      (build-path package-root "index.d.ts")
      "export declare const value: number;\n")
+    (define wasm-package-root
+      (build-path project-root "node_modules" "@fixture" "wasm-bindgen-init"))
+    (make-directory* wasm-package-root)
+    (write-source!
+     (build-path wasm-package-root "package.json")
+     (string-append
+      "{\"name\":\"@fixture/wasm-bindgen-init\",\"version\":\"1.0.0\","
+      "\"type\":\"module\",\"exports\":{\".\":{"
+      "\"beagle\":\"./index.ts\","
+      "\"types\":\"./index.ts\","
+      "\"default\":\"./index.js\"}}}\n"))
+    (copy-file wasm-bindgen-fixture
+               (build-path wasm-package-root "index.ts"))
     (define source-path
       (build-path project-root "nested" "native-success.bjs"))
     (make-directory* (build-path project-root "nested"))
@@ -155,11 +172,13 @@
      (string-append
       "#lang beagle/js\n"
       "(ns resolver-test.native-success\n"
-      "  (:require [\"@fixture/native\" :refer [acceptFlag notify pipeline schedule stringTransformer value]]))\n"
+      "  (:require [\"@fixture/native\" :refer [acceptFlag notify pipeline schedule stringTransformer value]]\n"
+      "            [\"@fixture/wasm-bindgen-init\" :refer [SyncInitInput initSync]]))\n"
       "(js/export (def answer String value))\n"
       "(js/export (defn relay [flag Bool] Nil (acceptFlag flag)))\n"
       "(js/export (defn transform [value String] String (stringTransformer value)))\n"
       "(js/export (defn runPipeline [] Nil (pipeline \"source\" 1 2 true)))\n"
+      "(js/export (defn initialize [module SyncInitInput] Number (initSync module)))\n"
       "(js/export (defn run [] Nil (schedule (fn [] Nil (notify)))))\n"))
 
     (define closure
@@ -176,8 +195,28 @@
     (define resolutions
       (hash-values
        (module-source-closure-foreign-module-resolutions closure)))
-    (check-equal? (length resolutions) 1)
-    (define foreign-source (car resolutions))
+    (check-equal? (length resolutions) 2)
+    (define (foreign-source-for module-specifier)
+      (for/first
+          ([source (in-list resolutions)]
+           #:when
+           (let ([interface
+                  (module-interface-foreign-interface-v1
+                   (module-source-interface source))])
+             (and interface
+                  (string=?
+                   (foreign-interface-v1-module-specifier interface)
+                   module-specifier))))
+        source))
+    (define foreign-source (foreign-source-for "@fixture/native"))
+    (check-pred module-source? foreign-source)
+    (define wasm-source
+      (foreign-source-for "@fixture/wasm-bindgen-init"))
+    (check-pred module-source? wasm-source)
+    (check-pred
+     foreign-interface-v1?
+     (module-interface-foreign-interface-v1
+      (module-source-interface wasm-source)))
     (define foreign-interface
       (module-interface-foreign-interface-v1
        (module-source-interface foreign-source)))
@@ -250,6 +289,9 @@
     (check-true
      (string-contains? emitted "from \"@fixture/native\";")
      "emission must preserve the exact native ESM specifier")
+    (check-true
+     (string-contains? emitted "from \"@fixture/wasm-bindgen-init\";")
+     "emission must preserve the exact wasm-bindgen ESM specifier")
     (check-false
      (string-contains? emitted "foreign-interface:")
      "validated type identity must never become wrapper source"))))

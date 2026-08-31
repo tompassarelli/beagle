@@ -1870,6 +1870,35 @@
             (foreign-result-type
              interface parameter-id (foreign-view-bindings actual-target)))
           (recur argument-id #f actual-argument))))))
+  (define (match-actual-union expected-members actual-union-view)
+    (try-foreign-branch
+     bindings
+     (lambda (union-trial)
+       (for/and
+           ([actual-member
+             (in-list
+              (hash-ref
+               (node-at interface (foreign-view-node-id actual-union-view))
+               'members))])
+         (define actual-member-type
+           (foreign-view-type
+            interface
+            (make-foreign-view
+             actual-member (foreign-view-bindings actual-union-view))))
+         (ormap
+          (lambda (expected-member)
+            (try-foreign-branch
+             union-trial
+             (lambda (member-trial)
+               (define expected-member-type
+                 (foreign-view-type
+                  interface
+                  (make-foreign-view
+                   expected-member (or member-trial expected-bindings))))
+               (or
+                (equal? actual-member-type expected-member-type)
+                (recur expected-member #f actual-member-type member-trial)))))
+          expected-members)))))
   (cond
     ;; Any is useful inside Beagle, but it is not evidence for a foreign
     ;; declaration parameter.  Reject it at the boundary before either direct
@@ -1898,14 +1927,27 @@
                   actual (hash-ref expected 'name)))])]
          [(literal) (and expression (literal-matches? expression expected))]
          [(union)
-          (ormap (lambda (member)
-                   (try-foreign-branch
-                    bindings
-                    (lambda (trial)
-                      (foreign-argument-compatible?
-                       interface member expression actual
-                       trial active inferable))))
-                 (hash-ref expected 'members))]
+          (define expected-members (hash-ref expected 'members))
+          (define normalized-actual
+            (and actual-view
+                 (normalize-foreign-view
+                  interface actual-view (mutable-set))))
+          (if
+           (and normalized-actual
+                (string=?
+                 (hash-ref
+                  (node-at interface (foreign-view-node-id normalized-actual))
+                  'kind)
+                 "union"))
+           (match-actual-union expected-members normalized-actual)
+           (ormap (lambda (member)
+                    (try-foreign-branch
+                     bindings
+                     (lambda (trial)
+                       (foreign-argument-compatible?
+                        interface member expression actual
+                        trial active inferable))))
+                  expected-members))]
          [(intersection)
           ;; A branded or nominal intersection cannot be manufactured by a
           ;; structurally compatible Beagle scalar.  Values returned by the
