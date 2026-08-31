@@ -57,7 +57,9 @@
 
 (define (with-isolated-adapter-cache thunk)
   (with-resolver-scratch
-   (lambda (_environment _empty-path) (void))
+   (lambda (environment _empty-path)
+     (environment-variables-set!
+      environment #"BEAGLE_JS_RUNTIME_PREFIX" #"./consumer-runtime/"))
    thunk))
 
 (test-case

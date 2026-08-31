@@ -294,14 +294,19 @@
      "typescript-adapter-source-~a.bjs"
      source-bytes
      (lambda (snapshotted-source)
-       (run/capture
-        'typescript-foreign-resolver-v1
-        racket-executable
-        (list
-         (path->string build-entrypoint)
-         "--source"
-         (path->string snapshotted-source)
-         ADAPTER-SOURCE-ID)))))
+       (define adapter-environment
+         (environment-variables-copy (current-environment-variables)))
+       (environment-variables-set!
+        adapter-environment #"BEAGLE_JS_RUNTIME_PREFIX" #f)
+       (parameterize ([current-environment-variables adapter-environment])
+         (run/capture
+          'typescript-foreign-resolver-v1
+          racket-executable
+          (list
+           (path->string build-entrypoint)
+           "--source"
+           (path->string snapshotted-source)
+           ADAPTER-SOURCE-ID))))))
   (unless (positive? (bytes-length generated-bytes))
     (error
      'typescript-foreign-resolver-v1
