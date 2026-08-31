@@ -1,0 +1,37 @@
+#lang beagle/js
+
+(ns declarations.provider)
+
+(defalias Label String)
+
+(defrecord Draft
+  [id Label
+   tags (Vec String)])
+
+(defrecord Accepted [draft Draft])
+(defrecord Rejected [reason (U String Nil)])
+(defunion Result Accepted Rejected)
+
+(declare-extern chooseImpl
+  (U (Fn [JsObject] JsObject)
+     (Fn [JsObject Bool] JsObject)))
+
+(js/declare-record PublicAccepted
+  [status String
+   note (js/optional String)])
+
+(js/declare-record PublicRejected [reason String])
+
+(js/declare-type PublicResult
+  (U PublicAccepted PublicRejected))
+
+(js/export (def LABELS (Vec String) ["one" "two"]))
+(js/export
+  (def choose
+    (U (Fn [JsObject] JsObject)
+       (Fn [JsObject Bool] JsObject))
+    chooseImpl))
+
+(js/declare-export choose
+  (U (Fn [JsObject] PublicResult)
+     (Fn [JsObject Bool] PublicResult)))

@@ -16,9 +16,10 @@
          "macros.rkt"
          "types.rkt")
 
-(define INTERFACE-SCHEMA-VERSION 12)
-;; V12 publishes canonical foreign interface/node type references and retains
-;; the exact module identity on every consumer-side imported interface.
+(define INTERFACE-SCHEMA-VERSION 13)
+;; V13 adds declaration-only JavaScript wire types to the canonical checked
+;; module interface. V12 published canonical foreign interface/node references
+;; and retained exact module identity on consumer-side imported interfaces.
 (define INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE? #t)
 (define ANY (type-prim 'Any))
 
@@ -32,6 +33,7 @@
 (struct interface-error (name members member-fields) #:transparent)
 (struct interface-type-declaration (name kind details) #:transparent)
 (struct interface-type-export (name kind arity expansion) #:transparent)
+(struct interface-js-declaration-field (name type optional?) #:transparent)
 (struct interface-record-contract (name kind fields validator-symbol)
   #:transparent)
 (struct interface-protocol-method-contract
@@ -389,6 +391,24 @@
        (for ([member (in-list members)])
          (add! member 'throwable-member
                (hash-ref member-fields member '())))]
+      [(jst-declare-record name fields)
+       (for ([field (in-list fields)])
+         (when (type-has-any? (jst-declaration-field-type field))
+           (error 'program->module-interface
+                  "js/declare-record ~a field ~a contains Beagle Any"
+                  name
+                  (jst-declaration-field-name field))))
+       (add!
+        name
+        'js-wire-record
+        (for/list ([field (in-list fields)])
+          (param
+           (jst-declaration-field-name field)
+           (if (jst-declaration-field-optional? field)
+               (type-union
+                (list (jst-declaration-field-type field) (type-prim 'Nil)))
+               (jst-declaration-field-type field))
+           #f)))]
       [_ (void)]))
   contracts)
 
@@ -730,6 +750,71 @@
          #f
          (open-interface-effects prog)))]
       [_ (void)]))
+  (define declaration-overrides (make-hasheq))
+  (for ([raw-form (in-list forms)])
+    (define form (unwrap-public-form raw-form))
+    (when (jst-declare-export? form)
+      (define name (jst-declare-export-name form))
+      (when (hash-has-key? declaration-overrides name)
+        (error 'program->module-interface
+               "duplicate js/declare-export for ~a"
+               name))
+      (hash-set! declaration-overrides name (jst-declare-export-type form))))
+  (define wire-return-names
+    (for/seteq ([raw-form (in-list forms)]
+                #:do [(define form (unwrap-public-form raw-form))]
+                #:when (or (jst-declare-record? form)
+                           (jst-declare-type? form)))
+      (if (jst-declare-record? form)
+          (jst-declare-record-name form)
+          (jst-declare-type-name form))))
+  (define (function-alternatives type)
+    (cond
+      [(type-fn? type) (list type)]
+      [(and (type-union? type)
+            (andmap type-fn? (type-union-alts type)))
+       (type-union-alts type)]
+      [else #f]))
+  (define (wire-return? type)
+    (and (type-prim? type)
+         (set-member? wire-return-names (type-prim-name type))))
+  (define (compatible-declaration? runtime declaration)
+    (define runtime-functions (function-alternatives runtime))
+    (define declaration-functions (function-alternatives declaration))
+    (and runtime-functions
+         declaration-functions
+         (= (length runtime-functions) (length declaration-functions))
+         (for/and ([runtime-function (in-list runtime-functions)]
+                   [declaration-function (in-list declaration-functions)])
+           (and (equal? (type-fn-params runtime-function)
+                        (type-fn-params declaration-function))
+                (equal? (type-fn-rest-type runtime-function)
+                        (type-fn-rest-type declaration-function))
+                (or (equal? (type-fn-ret runtime-function)
+                            (type-fn-ret declaration-function))
+                    (and (equal? (type-fn-ret runtime-function)
+                                 (type-prim 'JsObject))
+                         (wire-return?
+                          (type-fn-ret declaration-function))))))))
+  (for ([(name declaration) (in-hash declaration-overrides)])
+    (when (type-has-any? declaration)
+      (error 'program->module-interface
+             "js/declare-export ~a contains Beagle Any"
+             name))
+    (define runtime (hash-ref out name #f))
+    (unless runtime
+      (error 'program->module-interface
+             "js/declare-export ~a must name a js/export runtime binding"
+             name))
+    (unless (compatible-declaration? (interface-binding-type runtime)
+                                     declaration)
+      (error 'program->module-interface
+             "js/declare-export ~a must preserve callable parameters and may refine only a JsObject return to a JavaScript wire declaration"
+             name))
+    (hash-set!
+     out
+     name
+     (struct-copy interface-binding runtime [type declaration])))
   out)
 
 (define (declared-interface-bindings prog)
@@ -858,6 +943,21 @@
                (list
                 (scalar-predicate-op predicate)
                 (scalar-predicate-value predicate)))))]
+        [(jst-declare-record name fields)
+         (interface-type-declaration
+          name
+          'js-wire-record
+          (for/list ([field (in-list fields)])
+            (interface-js-declaration-field
+             (jst-declaration-field-name field)
+             (jst-declaration-field-type field)
+             (jst-declaration-field-optional? field))))]
+        [(jst-declare-type name type)
+         (when (type-has-any? type)
+           (error 'program->module-interface
+                  "js/declare-type ~a contains Beagle Any"
+                  name))
+         (interface-type-declaration name 'js-wire-alias type)]
         [_ #f]))
     (if declaration
         (hash-set
@@ -898,6 +998,10 @@
          (add! member 'throwable-member))]
       [(defscalar-form name _ _)
        (add! name 'scalar)]
+      [(jst-declare-record name _)
+       (add! name 'js-wire-record)]
+      [(jst-declare-type name type)
+       (add! name 'js-wire-alias 0 type)]
       [_ (void)]))
   (for ([(name expansion) (in-hash declared-type-aliases)])
     (add! name 'alias 0 expansion))
@@ -1019,14 +1123,50 @@
 (define (qualify-interface-type-declaration
          declaration namespace local-type-names)
   (define details (interface-type-declaration-details declaration))
-  (if (interface-protocol-contract? details)
+  (cond
+    [(and (eq? (interface-type-declaration-kind declaration) 'js-wire-alias)
+          (type? details))
+     (struct-copy
+      interface-type-declaration
+      declaration
+      [details
+       (qualify-provider-local-type-references
+        details namespace local-type-names)])]
+    [(interface-protocol-contract? details)
+     (struct-copy
+      interface-type-declaration
+      declaration
+      [details
+       (qualify-interface-protocol-contract
+        details namespace local-type-names)])]
+    [(and (list? details)
+          (andmap interface-js-declaration-field? details))
+     (struct-copy
+      interface-type-declaration
+      declaration
+      [details
+       (for/list ([field (in-list details)])
+         (struct-copy
+          interface-js-declaration-field
+          field
+          [type
+           (qualify-provider-local-type-references
+            (interface-js-declaration-field-type field)
+            namespace
+            local-type-names)]))])]
+    [else declaration]))
+
+(define (qualify-interface-type-export export namespace local-type-names)
+  (define expansion (interface-type-export-expansion export))
+  (if (and (eq? (interface-type-export-kind export) 'js-wire-alias)
+           (type? expansion))
       (struct-copy
-       interface-type-declaration
-       declaration
-       [details
-        (qualify-interface-protocol-contract
-         details namespace local-type-names)])
-      declaration))
+       interface-type-export
+       export
+       [expansion
+        (qualify-provider-local-type-references
+         expansion namespace local-type-names)])
+      export))
 
 (define (canonical-exported-aliases
          namespace forms declared-type-aliases)
@@ -1172,6 +1312,9 @@
 (define (type-declaration-details->canonical-datum declaration)
   (define details (interface-type-declaration-details declaration))
   (cond
+    [(and (eq? (interface-type-declaration-kind declaration) 'js-wire-alias)
+          (type? details))
+     `(js-wire-alias ,(type->canonical-datum details))]
     [(interface-protocol-contract? details)
      `(protocol
        (name ,(interface-protocol-contract-name details))
@@ -1185,7 +1328,16 @@
             (protocol-method-contract->canonical-datum
              (hash-ref
               (interface-protocol-contract-methods details)
-              name)))))]
+             name)))))]
+    [(and (list? details)
+          (andmap interface-js-declaration-field? details))
+     `(js-wire-fields
+       ,@(for/list ([field (in-list details)])
+           (list
+            (interface-js-declaration-field-name field)
+            (type->canonical-datum
+             (interface-js-declaration-field-type field))
+            (interface-js-declaration-field-optional? field))))]
     [else details]))
 
 (define (require-entry->canonical-datum entry)
@@ -1478,11 +1630,19 @@
      prog
      exported-aliases
      provisional?))
-  (define type-exports
+  (define raw-type-exports
     (program-type-exports
      (program-forms prog)
      exported-aliases))
-  (define local-type-names (list->seteq (hash-keys type-exports)))
+  (define local-type-names (list->seteq (hash-keys raw-type-exports)))
+  (define type-exports
+    (for/hasheq ([(name export) (in-hash raw-type-exports)])
+      (values
+       name
+       (qualify-interface-type-export
+        export
+        (program-namespace prog)
+        local-type-names))))
   (define qualified-type-declarations
     (for/hasheq
         ([(name declaration) (in-hash type-declarations)])
@@ -1935,6 +2095,7 @@
  (struct-out interface-error)
  (struct-out interface-type-declaration)
  (struct-out interface-type-export)
+ (struct-out interface-js-declaration-field)
  (struct-out interface-record-contract)
  (struct-out interface-protocol-method-contract)
  (struct-out interface-protocol-contract)

@@ -4903,6 +4903,9 @@
     ;; exported defn skips the full check and rep-selection sees no key/elem types.
     [(? jst-export?) (check-form (jst-export-form form) env)]
     [(? jst-export-default?) (check-form (jst-export-default-form form) env)]
+    [(? jst-declare-record?) (void)]
+    [(? jst-declare-type?) (void)]
+    [(? jst-declare-export?) (void)]
 
     [_ (infer-expr form env)]))
 

@@ -1500,7 +1500,7 @@
 (define current-parse-target (make-parameter DEFAULT-TARGET))
 
 (define INTERFACE-TYPE-EXPORT-KINDS
-  '(record protocol enum union parametric-union union-member
+  '(record js-wire-record js-wire-alias protocol enum union parametric-union union-member
     throwable-union throwable-member scalar alias foreign))
 
 (define (raise-invalid-interface-type-export interface name detail . args)
@@ -1545,7 +1545,7 @@
        (raise-invalid-interface-type-export
         interface name "non-parametric type arity must be 0, got ~v" arity))])
   (case kind
-    [(alias)
+    [(alias js-wire-alias)
      (unless (type? expansion)
        (raise-invalid-interface-type-export
         interface name "alias expansion must be a canonical type, got ~v"
@@ -2956,6 +2956,9 @@
          [(? symbol? inner) inner]
          [_ #f]))
      (when name (validate-identifier! name "top-level declaration"))]
+    [(list* (or 'js/declare-record 'js/declare-type 'js/declare-export)
+            (? symbol? name) _)
+     (validate-identifier! name "JavaScript declaration projection")]
     [_ (void)])
   (cond
     [(and (pair? d) (memq (car d) '(unsafe unsafe-js unsafe-clj unsafe-py unsafe-rkt unsafe-nix)))
@@ -5062,6 +5065,74 @@
       [(list 'js/export-default inner-form)
        (jst-export-default (parse-expr (or (stx-ref subs 1) inner-form)))]
       [_ (parse-list-form* d subs)])))
+
+(define (parse-js-declaration-fields fields-form)
+  (define items (bracket-items fields-form "js/declare-record fields"))
+  (unless (even? (length items))
+    (raise-parse-error
+     'bad-js-declare-record
+     "js/declare-record fields require flat name/type pairs, got: ~v"
+     items))
+  (for/list ([index (in-range 0 (length items) 2)])
+    (define name (list-ref items index))
+    (define type-form (list-ref items (add1 index)))
+    (unless (symbol? name)
+      (raise-parse-error
+       'bad-js-declare-record
+       "js/declare-record field name must be a symbol, got: ~v"
+       name))
+    (validate-identifier! name "JavaScript declaration field")
+    (match type-form
+      [(list 'js/optional type-expression)
+       (jst-declaration-field name (parse-type type-expression) #t)]
+      [(list* 'js/optional _)
+       (raise-parse-error
+        'bad-js-declare-record
+        "js/optional requires exactly one field type, got: ~v"
+        type-form)]
+      [_
+       (jst-declaration-field name (parse-type type-form) #f)])))
+
+;; Declaration-only JavaScript wire records carry a checked structural type to
+;; host projections without creating a tagged/frozen Beagle record value.
+(register-combiner! 'js/declare-record
+  (lambda (d subs)
+    (match d
+      [(list 'js/declare-record (? symbol? name) fields-form)
+       (jst-declare-record
+        name
+        (parse-js-declaration-fields (or (stx-ref subs 2) fields-form)))]
+      [_
+       (raise-parse-error
+        'bad-js-declare-record
+        "js/declare-record requires (js/declare-record Name [field Type ...]), got: ~v"
+        d)])))
+
+;; Declaration-only aliases model untagged JavaScript wire unions and other
+;; projected shapes without creating a runtime binding.
+(register-combiner! 'js/declare-type
+  (lambda (d _subs)
+    (match d
+      [(list 'js/declare-type (? symbol? name) type-expression)
+       (jst-declare-type name (parse-type type-expression))]
+      [_
+       (raise-parse-error
+        'bad-js-declare-type
+        "js/declare-type requires (js/declare-type Name Type), got: ~v"
+        d)])))
+
+;; A declaration overlay keeps the runtime implementation signature honest
+;; while publishing the explicitly typed wire contract for the same ESM name.
+(register-combiner! 'js/declare-export
+  (lambda (d _subs)
+    (match d
+      [(list 'js/declare-export (? symbol? name) type-expression)
+       (jst-declare-export name (parse-type type-expression))]
+      [_
+       (raise-parse-error
+        'bad-js-declare-export
+        "js/declare-export requires (js/declare-export name Type), got: ~v"
+        d)])))
 
 (define (parse-list-form d subs)
   ;; Invariant: macro heads are resolved in parse-expr (and the top-level loop)

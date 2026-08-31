@@ -1,0 +1,9 @@
+#lang beagle/js
+
+(ns declarations.consumer
+  (:require [declarations.provider :as provider]))
+
+(defalias ImportedResult provider/Result)
+
+(declare-extern echoImpl (Fn [ImportedResult] ImportedResult))
+(js/export (def echo (Fn [ImportedResult] ImportedResult) echoImpl))

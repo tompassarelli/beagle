@@ -92,7 +92,7 @@
   (test-suite
    "binding constraints in module interfaces"
 
-   (test-case "schema v12 preserves constraint AST and synchronization proof"
+   (test-case "schema v13 preserves constraint AST and synchronization proof"
      (define positive
        (published
         (string-append
@@ -118,7 +118,7 @@
      (define positive-binding (binding-ref positive 'keep))
      (define constraint
        (car (interface-binding-constraints positive-binding)))
-     (check-equal? (module-interface-schema-version positive) 12)
+     (check-equal? (module-interface-schema-version positive) 13)
      (check-true (interface-constraint? constraint))
      (check-false (interface-constraint-synchronous? constraint))
      (check-false (interface-constraint-provider constraint))

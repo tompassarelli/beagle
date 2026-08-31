@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+source "$(dirname "$0")/_beagle-racket"
+source "$(dirname "$0")/_beagle-source-id"
+
+module_root_args=()
+module_root_specs=()
+providers=()
+positionals=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --module-root)
+            [[ $# -ge 2 ]] || {
+                echo "beagle dts: --module-root requires LOGICAL_PREFIX=PHYSICAL_DIRECTORY" >&2
+                exit 2
+            }
+            module_root_args+=(--module-root "$2")
+            module_root_specs+=("$2")
+            shift 2
+            ;;
+        --module-root=*)
+            module_root_args+=("$1")
+            module_root_specs+=("${1#*=}")
+            shift
+            ;;
+        --provider)
+            [[ $# -ge 2 ]] || {
+                echo "beagle dts: --provider requires a .bjs source path" >&2
+                exit 2
+            }
+            providers+=("$2")
+            shift 2
+            ;;
+        --provider=*)
+            providers+=("${1#*=}")
+            shift
+            ;;
+        --)
+            shift
+            positionals+=("$@")
+            break
+            ;;
+        -*)
+            echo "beagle dts: unknown option: $1" >&2
+            exit 2
+            ;;
+        *)
+            positionals+=("$1")
+            shift
+            ;;
+    esac
+done
+
+if [[ ${#positionals[@]} -lt 1 || ${#positionals[@]} -gt 2 ]]; then
+    echo "usage: beagle dts [--module-root LOGICAL=PHYSICAL]... [--provider SOURCE.bjs]... SOURCE.bjs [OUTPUT.d.ts]" >&2
+    exit 2
+fi
+
+source_path="${positionals[0]}"
+if [[ ! -f "$source_path" ]]; then
+    echo "beagle dts: source file not found: $source_path" >&2
+    exit 1
+fi
+if [[ "$source_path" != *.bjs ]]; then
+    echo "beagle dts: declarations require a .bjs source: $source_path" >&2
+    exit 2
+fi
+
+beagle_root="$(cd "$(dirname "$0")/.." && pwd)"
+source_abs="$(realpath "$source_path")"
+source_id="$(beagle_source_id "$source_abs" "${module_root_specs[@]}")"
+compiler_args=("${module_root_args[@]}")
+
+for provider in "${providers[@]}"; do
+    if [[ ! -f "$provider" ]]; then
+        echo "beagle dts: provider source not found: $provider" >&2
+        exit 1
+    fi
+    if [[ "$provider" != *.bjs ]]; then
+        echo "beagle dts: providers must be .bjs sources: $provider" >&2
+        exit 2
+    fi
+    provider_abs="$(realpath "$provider")"
+    provider_id="$(beagle_source_id "$provider_abs" "${module_root_specs[@]}")"
+    if [[ "$provider_id" != "$source_id" ]]; then
+        compiler_args+=(--source "$provider_abs" "$provider_id")
+    fi
+done
+
+compiler_args+=(--source "$source_abs" "$source_id" --entry "$source_id")
+
+if [[ ${#positionals[@]} -eq 2 ]]; then
+    output="${positionals[1]}"
+else
+    base="$(basename "$source_path" .bjs)"
+    output="$beagle_root/.beagle-out/$base.d.ts"
+fi
+
+mkdir -p "$(dirname "$output")"
+temporary="$(mktemp "${output}.XXXXXX")"
+trap 'rm -f "$temporary"' EXIT
+"$RACKET" "$beagle_root/beagle-lib/private/typescript-declaration-cli.rkt" \
+    "${compiler_args[@]}" > "$temporary"
+mv "$temporary" "$output"
+trap - EXIT
+echo "$source_path -> $output" >&2

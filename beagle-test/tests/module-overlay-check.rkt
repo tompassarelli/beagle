@@ -1284,10 +1284,10 @@
       (overlay-check-result-ok? second)
       "a prior parse must not license an unrelated bare alias"))))
 
-(test-case "interface v12 includes dynamic-var status in consumer pruning"
+(test-case "interface v13 includes dynamic-var status in consumer pruning"
   (with-overlay-files
    (lambda (root provider-source _consumer-source)
-     (check-equal? INTERFACE-SCHEMA-VERSION 12)
+     (check-equal? INTERFACE-SCHEMA-VERSION 13)
      (check-true INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE?)
      (define plain-edn
        (candidate!

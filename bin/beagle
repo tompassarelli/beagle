@@ -59,6 +59,8 @@ Author:
                             Emit the shadow-only canonical fact graph
   build [--module-root LOGICAL=PHYSICAL]... PATH [OUT]
                             Emit a hosted source-profile target with a closed module graph
+  dts [--provider SOURCE.bjs]... SOURCE.bjs [OUT.d.ts]
+                            Project checked beagle/js types to TypeScript declarations
   build --materializer M... [--module-root LOGICAL=PHYSICAL]...
         --out DIR [--entry NS/NAME]... PATH.bgl...
                             Freeze Core once, then project each selected materializer
@@ -336,6 +338,7 @@ case "$cmd" in
     doctor)          exec "$BIN/beagle-doctor" "$@" ;;
     callers)         exec "$BIN/beagle-callers" "$@" ;;
     provides)        exec "$BIN/beagle-provides" "$@" ;;
+    dts)             exec "$BIN/beagle-dts" "$@" ;;
     ts-externs)      exec "$BIN/beagle-ts-externs" "$@" ;;
     ts-import)       exec "$BIN/beagle-ts-import" "$@" ;;
     impact)          exec "$BIN/beagle-impact" "$@" ;;

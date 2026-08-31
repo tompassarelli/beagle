@@ -1385,6 +1385,10 @@
 (struct jst-typeof   (expr)                                       #:transparent)
 (struct jst-export   (form)                                       #:transparent)
 (struct jst-export-default (form)                                 #:transparent)
+(struct jst-declaration-field (name type optional?)                #:transparent)
+(struct jst-declare-record (name fields)                           #:transparent)
+(struct jst-declare-type (name type)                               #:transparent)
+(struct jst-declare-export (name type)                             #:transparent)
 (struct jst-import-meta ()                                        #:transparent)
 
 ;; Metadata and export markers wrap a definition without changing what it
@@ -1755,5 +1759,8 @@
  (struct-out jst-new) (struct-out jst-delete) (struct-out jst-in)
  (struct-out jst-typeof)
  (struct-out jst-export) (struct-out jst-export-default)
+ (struct-out jst-declaration-field)
+ (struct-out jst-declare-record) (struct-out jst-declare-type)
+ (struct-out jst-declare-export)
  (struct-out jst-import-meta)
  unwrap-definition-form)

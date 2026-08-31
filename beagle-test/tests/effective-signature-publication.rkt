@@ -60,7 +60,7 @@
          "(defn identity [value] Int value)\n")))
      (define interface
        (program->module-interface prog #:provisional? #t))
-     (check-equal? (module-interface-schema-version interface) 12)
+     (check-equal? (module-interface-schema-version interface) 13)
      (check-equal? (type->string (binding-type interface 'identity))
                    "(Fn [Any] Int)"))
 
@@ -117,7 +117,7 @@
           "(defn choose ([x] Int x) ([x y] String y))\n"))))
      (define identity (binding-type interface 'identity))
      (define choose (binding-type interface 'choose))
-     (check-equal? INTERFACE-SCHEMA-VERSION 12)
+     (check-equal? INTERFACE-SCHEMA-VERSION 13)
      (check-equal? (type->string identity) "(Fn [Int] Int)")
      (check-true (inferred-type-poly? choose))
      (check-equal? (free-type-metas identity) '())

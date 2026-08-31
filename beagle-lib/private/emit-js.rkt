@@ -2631,6 +2631,9 @@
     [(jst-export? f)
      (emit-form (jst-export-form f))]
     [(jst-export-default? f) (string-append "export default " (emit-form (jst-export-default-form f)))]
+    [(or (jst-declare-record? f)
+         (jst-declare-type? f)
+         (jst-declare-export? f)) ""]
 
     ;; Top-level effect-position forms: route ctrl-flow (if/cond/when/let/do)
     ;; through the statement lowering; emit-stmt-inline falls back to
