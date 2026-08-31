@@ -103,6 +103,7 @@
    (list
     (hash 'id "n:function"
           'kind "function"
+          'typeParameters '()
           'overloads (list (wire-signature "n:string")))
     STRING-NODE)))
 

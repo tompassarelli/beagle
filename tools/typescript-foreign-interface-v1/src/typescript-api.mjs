@@ -419,8 +419,8 @@ export function createContext({ projectRoot, containingFile, moduleSpecifier, co
   const canonicalContainingFile = canonicalPath(containingFile);
   const compilerOptions = {
     customConditions: [...conditions].sort(),
-    module: ts.ModuleKind.NodeNext,
-    moduleResolution: ts.ModuleResolutionKind.NodeNext,
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
     noEmit: true,
     skipLibCheck: true,
     strict: true,
@@ -722,7 +722,12 @@ export function createCompilerBridge({
     moduleExports(context) { this.context = context; return context.checker.getExportsOfModule(context.moduleSymbol); },
     moduleMapping(mappings, specifier) { return mappings.get(specifier) ?? null; },
     "nominalReference?": (type) => Boolean(type.symbol?.valueDeclaration && ts.isClassDeclaration(type.symbol.valueDeclaration)),
-    objectTypeParameters: (type) => type.typeParameters ?? [],
+    declarationTypeParameters(type) {
+      const candidates = type.typeParameters ?? type.aliasTypeArguments ?? [];
+      return candidates.every((candidate) => hasFlag(candidate.flags, ts.TypeFlags.TypeParameter))
+        ? candidates
+        : [];
+    },
     "optionalSymbol?": (symbol) => hasFlag(symbol.flags, ts.SymbolFlags.Optional),
     pad: (value, width) => String(value).padStart(width, "0"),
     parameterType(signature, parameter) { return this.context.checker.getTypeOfSymbolAtLocation(parameter, declaration(parameter) ?? signature.declaration); },
@@ -820,7 +825,12 @@ export function createCompilerBridge({
     "tupleElementRest?": (element) => hasFlag(element.flag, ts.ElementFlags.Rest),
     tupleElementType: (element) => element.elementType,
     tupleElements(type) { return tupleElements(this.context, type); },
-    typeArguments(type) { return this.context.checker.getTypeArguments?.(type) ?? type.typeArguments ?? []; },
+    typeArguments(type) {
+      const referenceArguments = this.context.checker.getTypeArguments?.(type) ?? [];
+      return referenceArguments.length > 0
+        ? referenceArguments
+        : type.aliasTypeArguments ?? type.typeArguments ?? [];
+    },
     typeDisplay(type) { return this.context.checker.typeToString(type, undefined, ts.TypeFormatFlags.NoTruncation); },
     typeImportSpecifier(context, type) {
       const symbol = type.aliasSymbol ?? type.symbol;

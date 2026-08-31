@@ -162,7 +162,7 @@
     (tuple (elements readonly) ())
     (object (typeParameters properties indexes callSignatures constructSignatures)
             (name))
-    (function (overloads) ())
+    (function (typeParameters overloads) ())
     (reference (name target typeArguments nominal) ())
     (type-parameter (name constraint default) ())
     (brand (name base) ())
@@ -438,6 +438,10 @@
                     (string! (format "~a.name" where) (hash-ref value 'name)))
           normalized)]
      [(function)
+      (define type-parameters
+        (normalize-type-parameters
+         (format "~a.typeParameters" where)
+         (hash-ref value 'typeParameters)))
       (define overloads
         (for/list ([signature
                     (in-list (array! (format "~a.overloads" where)
@@ -447,7 +451,9 @@
            (format "~a.overloads[~a]" where index) signature)))
       (when (null? overloads)
         (schema-error where "function requires at least one overload"))
-      (hash-set base 'overloads overloads)]
+      (hash-set* base
+                 'typeParameters type-parameters
+                 'overloads overloads)]
      [(reference)
       (hash-set* base
                  'name (string! (format "~a.name" where) (hash-ref value 'name))
@@ -691,9 +697,16 @@
        (map (lambda (entry) (signature-references (cdr entry)))
             (node-signature-entries node))))]
     [(function)
-     (append*
-      (map (lambda (entry) (signature-references (cdr entry)))
-           (node-signature-entries node)))]
+     (append
+      (append*
+       (for/list ([parameter (in-list (hash-ref node 'typeParameters))])
+         (filter values
+                 (list (hash-ref parameter 'node)
+                       (hash-ref parameter 'constraint)
+                       (hash-ref parameter 'default)))))
+      (append*
+       (map (lambda (entry) (signature-references (cdr entry)))
+            (node-signature-entries node))))]
     [(reference)
      (filter values
              (cons (hash-ref node 'target) (hash-ref node 'typeArguments)))]
@@ -719,7 +732,7 @@
                         node-id field)))))
 
 (define (validate-node-type-parameters! node node-table)
-  (when (string=? (hash-ref node 'kind) "object")
+  (when (member (hash-ref node 'kind) '("object" "function"))
     (validate-type-parameter-entries!
      (format "nodes[~a].typeParameters" (hash-ref node 'id))
      (hash-ref node 'typeParameters)
@@ -739,7 +752,7 @@
                     (lambda (prior) (cons where prior))
                     '())))
   (for ([node (in-list nodes)])
-    (when (string=? (hash-ref node 'kind) "object")
+    (when (member (hash-ref node 'kind) '("object" "function"))
       (claim! (format "nodes[~a].typeParameters" (hash-ref node 'id))
               (hash-ref node 'typeParameters)))
     (for ([entry (in-list (node-signature-entries node))])
@@ -779,10 +792,10 @@
           "a reference without a target cannot carry type arguments"))]
       [else
        (define target (hash-ref node-table target-id))
-       (unless (string=? (hash-ref target 'kind) "object")
+       (unless (member (hash-ref target 'kind) '("object" "function"))
          (schema-error
           (format "nodes[~a].target" node-id)
-          "reference target must be an object declaration, got ~a"
+          "reference target must be an object or function declaration, got ~a"
           (hash-ref target 'kind)))
        (define parameters (hash-ref target 'typeParameters))
        (unless (= (length arguments) (length parameters))
@@ -1027,9 +1040,12 @@
                 (map signature->jsexpr
                      (hash-ref node 'constructSignatures)))]
     [(function)
-     (hash-set node
-               'overloads
-               (map signature->jsexpr (hash-ref node 'overloads)))]
+     (hash-set* node
+                'typeParameters
+                (map signature-type-parameter->jsexpr
+                     (hash-ref node 'typeParameters))
+                'overloads
+                (map signature->jsexpr (hash-ref node 'overloads)))]
     [(reference)
      (hash-set node
                'target
@@ -1085,7 +1101,7 @@
 
 (define (foreign-export-type-parameters interface export)
   (define node (node-at interface (hash-ref export 'node)))
-  (if (string=? (hash-ref node 'kind) "object")
+  (if (member (hash-ref node 'kind) '("object" "function"))
       (hash-ref node 'typeParameters)
       '()))
 
@@ -1180,7 +1196,7 @@
      base))
   (define node (node-at interface (type-foreign-node-id base)))
   (define parameters
-    (if (string=? (hash-ref node 'kind) "object")
+    (if (member (hash-ref node 'kind) '("object" "function"))
         (hash-ref node 'typeParameters)
         '()))
   (unless (= (length arguments) (length parameters))
@@ -1325,6 +1341,8 @@
          (for ([entry (in-list (node-signature-entries node))])
            (visit-signature (cdr entry) bound))]
         [(function)
+         (for ([parameter (in-list (hash-ref node 'typeParameters))])
+           (visit (hash-ref parameter 'node) bound))
          (for ([signature (in-list (hash-ref node 'overloads))])
            (visit-signature signature bound))]
         [(reference)

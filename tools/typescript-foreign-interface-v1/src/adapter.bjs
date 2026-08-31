@@ -100,6 +100,7 @@
      constructSignatures (Vec SignatureV1)])
   (FunctionNode
     [id String
+     typeParameters (Vec TypeParameterV1)
      overloads (Vec SignatureV1)])
   (ReferenceNode
     [id String
@@ -302,7 +303,7 @@
       (mapv
         (fn [parameter OpaqueCompilerValueV1] TypeParameterV1
           (type-parameter! bridge state parameter))
-        (.objectTypeParameters bridge type))
+        (.declarationTypeParameters bridge type))
       (mapv
         (fn [property OpaqueCompilerValueV1] PropertyV1
           (property-node! bridge state type property))
@@ -406,6 +407,10 @@
       (.equal bridge kind "function")
       (->FunctionNode
         id
+        (mapv
+          (fn [parameter OpaqueCompilerValueV1] TypeParameterV1
+            (type-parameter! bridge state parameter))
+          (.declarationTypeParameters bridge type))
         (mapv
           (fn [signature OpaqueCompilerValueV1] SignatureV1
             (signature-node! bridge state signature))
@@ -588,10 +593,12 @@
        "name"
        name)]
 
-    [(FunctionNode id overloads)
+    [(FunctionNode id type-parameters overloads)
      (object
        [["id" id]
         ["kind" "function"]
+        ["typeParameters"
+         (mapv type-parameter->wire type-parameters)]
         ["overloads"
          (mapv signature->wire overloads)]])]
 

@@ -125,6 +125,7 @@
   (define function-node
     (hash 'id "n:function"
           'kind "function"
+          'typeParameters '()
           'overloads (list input-signature)))
   (fixture
    #:exports

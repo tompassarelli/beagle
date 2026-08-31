@@ -37,6 +37,7 @@
      (list
       (hash 'id "n:function"
             'kind "function"
+            'typeParameters '()
             'overloads
             (list
              (hash 'typeParameters '()

@@ -72,6 +72,7 @@
             'default 'null)
       (hash 'id "n:function"
             'kind "function"
+            'typeParameters '()
             'overloads
             (list
              (hash 'typeParameters '()

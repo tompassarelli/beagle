@@ -145,6 +145,20 @@ describe("ForeignInterfaceV1 graph semantics", () => {
     expect(page.typeParameters).toHaveLength(1);
     expect(page.typeParameters[0]).toMatchObject({ name: "T", node: itemArray.element });
     expect(nodes.get(users.typeArguments[0]).name).toBe("User");
+
+    const transformer = exportedNode(first, "Transformer");
+    expect(transformer.kind).toBe("function");
+    expect(transformer.typeParameters).toHaveLength(1);
+    const genericSignature = transformer.overloads[0];
+    expect(genericSignature.parameters[0].type).toBe(transformer.typeParameters[0].node);
+    expect(genericSignature.return).toBe(transformer.typeParameters[0].node);
+
+    const stringTransformer = exportedNode(first, "stringTransformer");
+    expect(stringTransformer.kind).toBe("function");
+    expect(stringTransformer.typeParameters).toHaveLength(0);
+    const transformerSignature = stringTransformer.overloads[0];
+    expect(nodes.get(transformerSignature.parameters[0].type).name).toBe("string");
+    expect(nodes.get(transformerSignature.return).name).toBe("string");
   });
 
   test("preserves mapped, inherited, and index readonly semantics", async () => {

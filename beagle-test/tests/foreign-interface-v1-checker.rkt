@@ -53,7 +53,7 @@
         'return return))
 
 (define (wire-function id . signatures)
-  (hash 'id id 'kind "function" 'overloads signatures))
+  (hash 'id id 'kind "function" 'typeParameters '() 'overloads signatures))
 
 (define (wire-property name type
                        #:optional [optional #f]
