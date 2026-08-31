@@ -418,7 +418,7 @@
   (let [fmt (macro-string! format-value "format")]
   (loop [i 0
    arg-i 0
-   out ""]
+   ^String out ""]
   (if (>= i (count fmt)) (if (= arg-i (count args)) [STRING-TAG out] (macro-eval-fail! "format received more arguments than directives")) (let [ch (subs fmt i (+ i 1))]
   (if (and (= ch "~") (< (+ i 1) (count fmt))) (let [directive (subs fmt (+ i 1) (+ i 2))]
   (cond

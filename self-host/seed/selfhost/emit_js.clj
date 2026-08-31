@@ -98,7 +98,7 @@
 (defn ^String with-bound! [names thunk]
   (let [saved (deref bound-vars)]
   (reset! bound-vars (add-names saved names))
-  (let [r (thunk)]
+  (let [^String r (thunk)]
   (reset! bound-vars saved)
   r)))
 
@@ -119,7 +119,7 @@
    saved-types (deref type-env)]
   (reset! bound-vars (add-names saved-bound names))
   (reset! type-env (add-types saved-types entries))
-  (let [r (thunk)]
+  (let [^String r (thunk)]
   (reset! type-env saved-types)
   (reset! bound-vars saved-bound)
   r)))
@@ -178,6 +178,9 @@
 
 (defn ^Boolean qualified-reference=? [ref ^String qualifier ^String name]
   (and (qualified-reference? ref) (= (get ref "qualifier") qualifier) (= (get ref "name") name)))
+
+(defn ^Boolean declaration-only-form? [form]
+  (and (= (get form "node") "static-call") (or (qualified-reference=? form "js" "declare-record") (qualified-reference=? form "js" "declare-type") (qualified-reference=? form "js" "declare-export"))))
 
 (defn ^Boolean qualified-reference-same-binding? [left right]
   (and (qualified-reference? left) (qualified-reference? right) (= (get left "qualifier") (get right "qualifier")) (= (get left "name") (get right "name")) (or (nil? (get left "providerId")) (nil? (get right "providerId")) (= (get left "providerId") (get right "providerId")))))
@@ -1531,6 +1534,7 @@
   (= node "defscalar") (emit-defscalar f)
   (= node "defprotocol") (throw (ex-info "protocol-form is not supported for JS target" {}))
   (= node "extend-type") (throw (ex-info "extend-type is not supported for JS target" {}))
+  (declaration-only-form? f) ""
   (and (= node "static-call") (qualified-reference=? f "js" "export")) (emit-public-esm-form! (nth (get f "args") 0))
   :else (emit-stmt-inline! f ""))))
 
@@ -1872,6 +1876,8 @@
   false)
   (catch Exception problem
     (str/includes? (ex-message problem) "not supported for JS target"))))
+  (doseq [name ["declare-record" "declare-type" "declare-export"]]
+  (expect! (str "declaration-only js/" name " is erased") (= (emit-form! {"node" "static-call" "qualifier" "js" "name" name "providerId" nil "args" []}) "")))
   (doseq [f (deref failures)]
   (println (str "  FAIL: " f)))
   (println (str "  EMIT-JS: " (count (deref passes)) " passed, " (count (deref failures)) " failed"))

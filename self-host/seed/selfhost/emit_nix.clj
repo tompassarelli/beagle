@@ -20,7 +20,7 @@
 
 (defn ^String indent [n]
   (loop [i 0
-   acc ""]
+   ^String acc ""]
   (if (>= i (* 2 n)) acc (recur (+ i 1) (str acc " ")))))
 
 (def nix-reserved-words #{"if" "then" "else" "let" "in" "with" "rec" "inherit" "assert" "or" "true" "false" "null"})
@@ -28,7 +28,7 @@
 (defn ^String hex-encode-utf8 [^String s]
   (let [size (count s)]
   (loop [index 0
-   out ""]
+   ^String out ""]
   (if (>= index size) out (let [unit-char (subs s index (+ index 1))
    unit (int (first unit-char))
    paired (and (>= unit 55296) (< unit 56320) (< (+ index 1) size))
@@ -295,7 +295,7 @@
    as-name (get target "as")
    with-as (if (absent? as-name) rest-str (emit-projected-binding as-name raw rest-str))]
   (loop [key-index (- (count keys) 1)
-   out with-as]
+   ^String out with-as]
   (if (< key-index 0) out (let [key (nth keys key-index)
    attr-name (if nominal? (mangle-name key) key)
    attr-string (str "\"" (escape-nix attr-name) "\"")
@@ -320,7 +320,7 @@
 
 (defn ^String wrap-constraint-thunks [indexed ^String body depth]
   (loop [i (- (count indexed) 1)
-   result body]
+   ^String result body]
   (if (< i 0) result (let [entry (nth indexed i)
    index (get entry "index")
    p (get entry "param")
@@ -329,12 +329,12 @@
 
 (defn ^String wrap-default-thunks [indexed ^String body depth]
   (loop [i (- (count indexed) 1)
-   result body]
+   ^String result body]
   (if (< i 0) result (let [entry (nth indexed i)
    index (get entry "index")
    defaults (vec (indexed-defaults (get entry "param")))
    with-defaults (loop [j (- (count defaults) 1)
-   inner result]
+   ^String inner result]
   (if (< j 0) inner (let [indexed-default (nth defaults j)
    default-entry (get indexed-default "entry")]
   (recur (- j 1) (str "let " (default-thunk-name index (get default-entry "key")) " = _: " (emit-expr* (get default-entry "value") depth) "; in " inner)))))]
@@ -363,7 +363,7 @@
   (if (= 0 (count (filterv constrained-binding? params))) (emit-param-chain params body depth) (let [indexed (index-params params)
    bindings (emit-sequential-param-bindings indexed body depth)]
   (loop [i (- (count indexed) 1)
-   result bindings]
+   ^String result bindings]
   (if (< i 0) result (let [index (get (nth indexed i) "index")]
   (recur (- i 1) (str (raw-binding-name index) ": " result))))))))
 
@@ -408,7 +408,7 @@
   :else (let [stmts (subvec (vec exprs) 0 (- n 1))
    initial (emit-expr* (nth exprs (- n 1)) depth)]
   (loop [i (- (count stmts) 1)
-   result initial]
+   ^String result initial]
   (if (< i 0) result (recur (- i 1) (str "builtins.deepSeq (" (emit-expr* (nth stmts i) depth) ") (" result ")"))))))))
 
 (defn ^String emit-key [key depth]
@@ -593,7 +593,7 @@
   :else (throw (ex-info "with-form has invalid record-update validator" {})))
    with-candidate (str "let " candidate-name " = " updated "; in " result)
    with-updates (loop [index (- (count updates) 1)
-   body with-candidate]
+   ^String body with-candidate]
   (if (< index 0) body (let [name (update-name index)
    rhs (emit-expr* (get (nth updates index) "value") depth)]
   (recur (- index 1) (str "let " name " = " rhs "; in builtins.deepSeq " name " (" body ")")))))]
@@ -658,8 +658,8 @@
   (cond
   (and (qualified-reference=? fn-expr "bgl" "promote") (= n 1)) (emit (nth args 0))
   (and (some? fname) (= fname "not") (= n 1)) (str "!" (pw (nth args 0)))
-  (and (some? fname) (= fname "mod") (= n 2)) (let [a (emit (nth args 0))
-   b (emit (nth args 1))]
+  (and (some? fname) (= fname "mod") (= n 2)) (let [^String a (emit (nth args 0))
+   ^String b (emit (nth args 1))]
   (str "(" a " - (" a " / " b ") * " b ")"))
   (and (some? fname) (some? (nix-infix-op fname))) (let [op (nix-infix-op fname)]
   (cond
@@ -673,7 +673,7 @@
   (and (some? fname) (= fname "concat")) (if (= n 2) (str "(" (emit (nth args 0)) " ++ " (emit (nth args 1)) ")") (str "(" (str/join " ++ " (mapv emit args)) ")"))
   (and (some? fname) (= fname "merge")) (if (= n 2) (str "(" (emit (nth args 0)) " // " (emit (nth args 1)) ")") (str "(" (str/join " // " (mapv emit args)) ")"))
   (and (some? fname) (= fname "get")) (if (< n 2) (str "builtins.getAttr " (str/join " " (mapv emit args))) (let [key-arg (nth args 1)
-   target-str (pw (nth args 0))]
+   ^String target-str (pw (nth args 0))]
   (if (get-is-keyword? key-arg) (str target-str "." (keyword-selection-field (nth args 0) (get key-arg "value"))) (str target-str ".\"${" (emit key-arg) "}\""))))
   (and (some? fname) (= fname "assoc")) (if (>= n 3) (str "(" (emit (nth args 0)) " // { " (emit (nth args 1)) " = " (emit (nth args 2)) "; })") "/* assoc needs 3 args */ null")
   (and (some? fname) (= fname "nil?")) (str "(" (emit (nth args 0)) " == null)")
@@ -694,9 +694,9 @@
   (= n 2) (str "builtins.genList (x: x + " (emit (nth args 0)) ") (" (emit (nth args 1)) " - " (emit (nth args 0)) ")")
   :else "null")
   (and (some? fname) (= fname "println")) (str "builtins.trace " (pw (nth args 0)) " null")
-  (qualified-reference? fn-expr) (let [nix-name (mangle-qualified-name fn-expr)]
+  (qualified-reference? fn-expr) (let [^String nix-name (mangle-qualified-name fn-expr)]
   (if (= 0 n) (str nix-name " null") (str nix-name " " (str/join " " (mapv pw args)))))
-  :else (let [fn-str (emit fn-expr)]
+  :else (let [^String fn-str (emit fn-expr)]
   (if (= 0 n) (str fn-str " null") (str fn-str " " (str/join " " (mapv pw args))))))))
 
 (def DERIVATION-REQUIRED-ONE-OF #{":pname" ":name"})
@@ -815,7 +815,7 @@
 
 (defn ^String emit-record-guards [entries ^String value-name ^String result]
   (loop [i (- (count entries) 1)
-   out result]
+   ^String out result]
   (if (< i 0) out (let [entry (nth entries i)
    index (get entry "index")
    field (get entry "field")
@@ -824,7 +824,7 @@
 
 (defn ^String emit-record-predicates [entries ^String body depth]
   (loop [i (- (count entries) 1)
-   out body]
+   ^String out body]
   (if (< i 0) out (let [entry (nth entries i)
    index (get entry "index")
    field (get entry "field")]

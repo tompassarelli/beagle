@@ -189,9 +189,14 @@
 (defn ^Boolean dynamic-var-sym? [^String sym]
   (and (>= (count sym) 3) (= (char-at sym 0) "*") (= (char-at sym (- (count sym) 1)) "*")))
 
+(def COMPILER-IDENTIFIER-PREFIXES ["$beagle$" "bgl____"])
+
+(defn- ^Boolean reserved-compiler-identifier? [^String sym]
+  (boolean (some (fn [^String segment] (boolean (some (fn [^String prefix] (str/starts-with? segment prefix)) COMPILER-IDENTIFIER-PREFIXES))) (str/split sym #"/"))))
+
 (defn validate-identifier! [^String sym ^String context]
-  (if (str/starts-with? sym "$beagle$") (do
-  (err! (str context " '" sym "' uses the reserved compiler identifier prefix $beagle$"))))
+  (if (reserved-compiler-identifier? sym) (do
+  (err! (str context " '" sym "' uses a reserved compiler identifier prefix"))))
   sym)
 
 (defn- ^String binding-datum->src [d]
@@ -204,7 +209,7 @@
 
 (defn- note-capitalized-binding! [name ^String where]
   (if (string? name) (do
-  (let [head (subs (str name) 0 (min 1 (count (str name))))]
+  (let [^String head (subs (str name) 0 (min 1 (count (str name))))]
   (if (and (> (count head) 0) (not (= head (str/lower-case head)))) (do
   (selfhost.rt/eprint (str "warning [capitalized-binding-name] `" (str name) "` bound as a " where " name — possible missing `(name Type)` wrapper?\n")))))))
   nil)
@@ -2109,6 +2114,7 @@
   (let [ref (lower-qualified-reference! (nth d 1))
    value (if (nil? ref) (make-ref! (nth d 1)) ref)]
   (assoc value "node" "clj-var-ref")))
+  (and (vector? d) (= (count d) 2) (= (nth d 0) "syntax")) (err! (str "Clojure Var quote expects one binding name, got: " (racket-written-datum (nth d 1))))
   (and (vector? d) (> (count d) 0)) (parse-list-form! d)
   :else NIL-LITERAL))
 
@@ -2133,33 +2139,136 @@
   (reset! found {})))))))
   (deref found)))
 
+(def REQUIRE-LIBSPEC-OPTIONS [":as" ":refer" ":rename"])
+
+(defrecord RequireBinding [source local])
+
+(defn requirebinding-source [r] (:source r))
+
+(defn requirebinding-local [r] (:local r))
+
+(defn ordered-require-bindings [refer rename]
+  (mapv (fn [^String source] (->RequireBinding source (get rename source source))) refer))
+
+(defn- unquote-require-datum [datum]
+  (if (and (vector? datum) (= (count datum) 2) (= (nth datum 0) "quote")) (nth datum 1) datum))
+
+(defn- ^Boolean plain-symbol-datum? [datum]
+  (and (string? datum) (not (str/starts-with? datum ":"))))
+
+(defn- ^Boolean duplicate-free-items? [items]
+  (loop [i 0
+   seen {}]
+  (cond
+  (>= i (count items)) true
+  (contains? seen (nth items i)) false
+  :else (recur (+ i 1) (assoc seen (nth items i) true)))))
+
+(defn- require-libspec-error! [^Boolean report? ^String message]
+  (if report? (do
+  (err! (str "require: " message))))
+  nil)
+
+(defn- ^Boolean validate-require-binding-name! [^String name ^String role ^Boolean report?]
+  (cond
+  (reserved-compiler-identifier? name) (do
+  (require-libspec-error! report? (str role " '" name "' uses a reserved compiler identifier prefix"))
+  false)
+  (str/includes? name "/") (do
+  (require-libspec-error! report? (str role " must be an unqualified bindable identifier, got: " name))
+  false)
+  :else true))
+
+(defn- ^Boolean validate-require-binding-names! [bindings ^Boolean report?]
+  (every? (fn [^RequireBinding binding] (and (validate-require-binding-name! (requirebinding-source binding) ":rename source" report?) (validate-require-binding-name! (requirebinding-local binding) ":rename final local" report?))) bindings))
+
+(defn- decode-refer! [datum ^Boolean report?]
+  (let [value (unquote-require-datum datum)]
+  (if (bracketed? value) (let [names (bracket-body value)]
+  (if (and (every? plain-symbol-datum? names) (duplicate-free-items? names)) names (require-libspec-error! report? (str ":refer must be a duplicate-free vector of symbols, got: " (racket-written-datum datum))))) (require-libspec-error! report? (str ":refer must be a duplicate-free vector of symbols, got: " (racket-written-datum datum))))))
+
+(defn- decode-rename-map! [datum ^Boolean report?]
+  (let [value (unquote-require-datum datum)]
+  (cond
+  (not (map-tagged? value)) (require-libspec-error! report? (str ":rename expects a map, got: " (racket-written-datum datum)))
+  (odd? (count (map-body value))) (require-libspec-error! report? (str ":rename expects complete key/value pairs, got: " (racket-written-datum datum)))
+  :else (let [entries (map-body value)]
+  (loop [i 0
+   rename {}]
+  (if (>= i (count entries)) rename (let [source (nth entries i)
+   target (nth entries (+ i 1))]
+  (cond
+  (or (not (plain-symbol-datum? source)) (not (plain-symbol-datum? target))) (require-libspec-error! report? (str ":rename must be a symbol-to-symbol map, got: " (racket-written-datum datum)))
+  (contains? rename source) (require-libspec-error! report? (str ":rename repeats source " source))
+  :else (recur (+ i 2) (assoc rename source target))))))))))
+
+(defn- ^Boolean validate-rename! [rename refer ^Boolean report?]
+  (let [sources (vec (keys rename))
+   bindings (ordered-require-bindings refer rename)
+   locals (mapv (fn [^RequireBinding binding] (requirebinding-local binding)) bindings)]
+  (cond
+  (not (validate-require-binding-names! bindings report?)) false
+  (not (every? (fn [^String source] (has-item? refer source)) sources)) (do
+  (require-libspec-error! report? (str ":rename may rename each explicitly referred symbol once, got: " (str rename)))
+  false)
+  (not (duplicate-free-items? locals)) (do
+  (require-libspec-error! report? (str ":rename must produce duplicate-free local names, got: " (str locals)))
+  false)
+  (not (every? (fn [^String source] (not (= source (get rename source)))) sources)) (do
+  (require-libspec-error! report? (str ":rename cannot rename a symbol to itself, got: " (str rename)))
+  false)
+  :else true)))
+
+(defn- ^Boolean validate-require-final-locals! [requires ^Boolean report?]
+  (let [bindings (reduce (fn [ordered require] (let [refer (get require "refer")]
+  (into ordered (ordered-require-bindings (if (= refer false) [] refer) (get require "rename" {}))))) [] requires)]
+  (loop [remaining bindings
+   occupied {}]
+  (if (= (count remaining) 0) true (let [binding (first remaining)
+   local (requirebinding-local binding)]
+  (if (= true (get occupied local)) (do
+  (require-libspec-error! report? (str ":rename final local " local " is referred by more than one libspec"))
+  false) (recur (rest remaining) (assoc occupied local true))))))))
+
+(defn- require-source-identity [source]
+  (cond
+  (string-literal-datum? source) {"kind" "native-esm" "value" (extract-string source)}
+  (plain-symbol-datum? source) {"kind" "beagle-namespace" "value" source}
+  :else nil))
+
 (defn- decode-require-libspec! [spec ^Boolean report?]
-  (let [unq (if (and (vector? spec) (= (count spec) 2) (= (nth spec 0) "quote")) (nth spec 1) spec)]
-  (cond
-  (bracketed? unq) (let [items (bracket-body unq)]
-  (if (and (> (count items) 0) (string? (nth items 0))) (let [rn (nth items 0)
-   n (count items)]
-  (loop [i 1
+  (let [unquoted (unquote-require-datum spec)]
+  (if (not (bracketed? unquoted)) (require-libspec-error! report? (str "libspec must use canonical vector syntax " "[source :as alias :refer [names] :rename {source local}], got: " (racket-written-datum unquoted))) (let [items (bracket-body unquoted)]
+  (if (= (count items) 0) (require-libspec-error! report? "libspec cannot be empty") (let [identity (require-source-identity (nth items 0))]
+  (if (nil? identity) (require-libspec-error! report? (str "libspec must start with a namespace symbol or native ESM string, got: " (racket-written-datum (nth items 0)))) (loop [i 1
+   seen {}
    alias false
-   refer false]
+   refer []
+   rename {}]
   (cond
-  (>= i n) {"ns" rn "alias" alias "refer" refer}
-  (and (= (nth items i) ":as") (< (+ i 1) n) (string? (nth items (+ i 1)))) (recur (+ i 2) (nth items (+ i 1)) refer)
-  (and (= (nth items i) ":refer") (< (+ i 1) n) (bracketed? (nth items (+ i 1)))) (recur (+ i 2) alias (bracket-body (nth items (+ i 1))))
-  :else (do
-  (if report? (do
-  (err! (str "require: unsupported libspec option " (str (nth items i)) " — supported: [lib], [lib :as alias], [lib :refer [syms]], [lib :as alias :refer [syms]]"))))
-  {"ns" rn "alias" alias "refer" refer})))) (do
-  (if report? (do
-  (err! (str "require: libspec must start with a namespace symbol, got: " (str unq)))))
-  nil)))
-  :else (do
-  (if report? (do
-  (err! (str "require: libspec must use canonical vector syntax [source :as alias :refer [names]], got: " (str unq)))))
-  nil))))
+  (>= i (count items)) (if (validate-rename! rename refer report?) {"ns" (get identity "value") "identity" identity "alias" alias "refer" (if (= (count refer) 0) false refer) "rename" rename} nil)
+  (not (has-item? REQUIRE-LIBSPEC-OPTIONS (nth items i))) (require-libspec-error! report? (str "unsupported libspec option " (str (nth items i)) "; supported: :as, :refer, :rename"))
+  (contains? seen (nth items i)) (require-libspec-error! report? (str "libspec option " (str (nth items i)) " appears more than once"))
+  (>= (+ i 1) (count items)) (require-libspec-error! report? (str "libspec option " (str (nth items i)) " requires a value"))
+  :else (let [option (nth items i)
+   raw-value (nth items (+ i 1))
+   next-seen (assoc seen option true)]
+  (cond
+  (= option ":as") (let [value (unquote-require-datum raw-value)]
+  (if (plain-symbol-datum? value) (recur (+ i 2) next-seen value refer rename) (require-libspec-error! report? (str ":as expects a symbol, got: " (racket-written-datum raw-value)))))
+  (= option ":refer") (let [value (decode-refer! raw-value report?)]
+  (if (nil? value) nil (recur (+ i 2) next-seen alias value rename)))
+  :else (let [value (decode-rename-map! raw-value report?)]
+  (if (nil? value) nil (recur (+ i 2) next-seen alias refer value))))))))))))))
 
 (defn- parse-require-libspec! [spec]
   (decode-require-libspec! spec true))
+
+(defn ^Boolean native-esm-require? [require]
+  (= (get (get require "identity" {}) "kind") "native-esm"))
+
+(defn ^Boolean renamed-require? [require]
+  (> (count (get require "rename" {})) 0))
 
 (defn- parse-import-spec! [spec ^String context]
   (let [unq (if (and (vector? spec) (= (count spec) 2) (= (nth spec 0) "quote")) (nth spec 1) spec)]
@@ -2174,7 +2283,7 @@
   (err! (str context ": bad import spec — expected ClassName or (package Class1 Class2 ...)"))
   []))))
 
-(defn discover-requires! [datums]
+(defn- discover-requires*! [datums ^Boolean report?]
   (let [requires (atom [])]
   (doseq [d datums]
   (if (and (vector? d) (not (bracketed? d)) (> (count d) 0)) (do
@@ -2183,15 +2292,23 @@
   (and (= head "ns") (>= (count d) 2)) (doseq [clause (subvec d 2)]
   (if (and (vector? clause) (> (count clause) 0) (= (nth clause 0) ":require")) (do
   (doseq [spec (subvec clause 1)]
-  (let [r (decode-require-libspec! spec false)]
+  (let [r (decode-require-libspec! spec report?)]
   (if (some? r) (do
   (swap! requires conj r))))))))
   (= head "require") (doseq [spec (subvec d 1)]
-  (let [r (decode-require-libspec! spec false)]
+  (let [r (decode-require-libspec! spec report?)]
   (if (some? r) (do
   (swap! requires conj r)))))
   :else nil)))))
-  (deref requires)))
+  (let [result (deref requires)]
+  (validate-require-final-locals! result report?)
+  result)))
+
+(defn discover-requires! [datums]
+  (discover-requires*! datums false))
+
+(defn discover-requires-reporting! [datums]
+  (discover-requires*! datums true))
 
 (declare inferred-module-surface*!)
 
@@ -2307,6 +2424,7 @@
   (= head "import") (doseq [spec (subvec d 1)]
   (swap! imports into (parse-import-spec! spec "import")))
   :else nil)))))
+  (validate-require-final-locals! (deref requires) true)
   (reset! CURRENT-PARSE-TARGET (deref target))
   (let [resolved-syntaxes (expand-and-resolve-program-syntax! (deref PROGRAM-SYNTAXES))
    resolved-datums (mapv mac/macro-datum resolved-syntaxes)]
@@ -2911,6 +3029,10 @@
   (and (= (get node "node") "dynamic-var") (= (get node "name") "*state*"))))
   (expect! "Clojure Var quote retains qualified identity" (let [node (parse-expr* ["syntax" "north.main/capture-facts"])]
   (and (= (get node "node") "clj-var-ref") (= (get node "qualifier") "north.main") (= (get node "name") "capture-facts"))))
+  (expect! "Clojure Var quote rejects a non-name before call lowering" (let [_ (reset-errors!)
+   node (parse-expr* ["syntax" 42])
+   errors (parse-errors)]
+  (and (= (get node "kind") "nil") (= (count errors) 1) (str/includes? (nth errors 0) "Clojure Var quote expects one binding name, got: 42"))))
   (expect! "generic call" (let [node (parse-expr* ["println" ["#%string" "hello"]])]
   (and (= (get node "node") "call") (= (get (get node "fn") "node") "ref") (= (get (get node "fn") "name") "println"))))
   (expect! "defn- private" (let [node (parse-expr* ["defn-" "helper" [BRACKET-TAG "x" "Any"] "Any" "x"])]
@@ -3074,15 +3196,40 @@
    errors (parse-errors)]
   (= (count (filterv (fn [^String message] (str/includes? message "reserved compiler identifier prefix")) errors)) 3)))
   (expect! "parse-program! require :as (fold shape)" (let [prog (parse-program! [["ns" "store.fold"] ["require" [BRACKET-TAG "store.kernel" ":as" "k"]]])]
-  (= (get prog "requires") [{"ns" "store.kernel" "alias" "k" "refer" false}])))
+  (= (get prog "requires") [{"ns" "store.kernel" "identity" {"kind" "beagle-namespace" "value" "store.kernel"} "alias" "k" "refer" false "rename" {}}])))
   (expect! "parse-program! ns docstring dropped" (let [prog (parse-program! [["ns" "store.fold" ["#%string" "Replay the log."]]])]
   (and (= (get prog "namespace") "store.fold") (= (count (get prog "forms")) 0))))
   (expect! "parse-program! ns (:require [lib :as a])" (let [prog (parse-program! [["ns" "my.app" [":require" ["#%brackets" "clojure.string" ":as" "str"]]]])]
-  (= (get prog "requires") [{"ns" "clojure.string" "alias" "str" "refer" false}])))
+  (= (get prog "requires") [{"ns" "clojure.string" "identity" {"kind" "beagle-namespace" "value" "clojure.string"} "alias" "str" "refer" false "rename" {}}])))
   (expect! "parse-program! ns :import retains complete declarations" (let [prog (parse-program! [["ns" "my.app" [":import" ["java.nio.charset" "StandardCharsets"] "java.util.zip.CRC32"]]])]
   (= (get prog "imports") ["java.nio.charset.StandardCharsets" "java.util.zip.CRC32"])))
   (expect! "parse-program! require :refer" (let [prog (parse-program! [["require" [BRACKET-TAG "my.lib" ":refer" [BRACKET-TAG "f" "g"]]]])]
-  (= (get prog "requires") [{"ns" "my.lib" "alias" false "refer" ["f" "g"]}])))
+  (= (get prog "requires") [{"ns" "my.lib" "identity" {"kind" "beagle-namespace" "value" "my.lib"} "alias" false "refer" ["f" "g"] "rename" {}}])))
+  (expect! "require libspec canonicalizes order-independent rename" (= (decode-require-libspec! [BRACKET-TAG ["#%string" "@scope/package/subpath"] ":rename" [MAP-TAG "make" "build"] ":refer" [BRACKET-TAG "make"] ":as" "pkg"] false) {"ns" "@scope/package/subpath" "identity" {"kind" "native-esm" "value" "@scope/package/subpath"} "alias" "pkg" "refer" ["make"] "rename" {"make" "build"}}))
+  (expect! "require bindings preserve source order and derive final locals once" (let [bindings (ordered-require-bindings ["parse" "UserId"] {"parse" "choose"})]
+  (and (= (mapv (fn [^RequireBinding binding] (requirebinding-source binding)) bindings) ["parse" "UserId"]) (= (mapv (fn [^RequireBinding binding] (requirebinding-local binding)) bindings) ["choose" "UserId"]))))
+  (expect! "require binding names reject compiler-reserved and qualified source/local" (let [invalid-specs [[BRACKET-TAG "pkg" ":refer" [BRACKET-TAG "$beagle$source"]] [BRACKET-TAG "pkg" ":refer" [BRACKET-TAG "source"] ":rename" [MAP-TAG "source" "bgl____local"]] [BRACKET-TAG "pkg" ":refer" [BRACKET-TAG "pkg/source"]] [BRACKET-TAG "pkg" ":refer" [BRACKET-TAG "source"] ":rename" [MAP-TAG "source" "consumer/local"]]]]
+  (reset-errors!)
+  (let [quiet-results (mapv (fn [spec] (decode-require-libspec! spec false)) invalid-specs)
+   quiet-errors (parse-errors)]
+  (reset-errors!)
+  (let [reporting-results (mapv (fn [spec] (decode-require-libspec! spec true)) invalid-specs)
+   reporting-errors (parse-errors)]
+  (and (every? (fn [result] (nil? result)) quiet-results) (= (count quiet-errors) 0) (every? (fn [result] (nil? result)) reporting-results) (= (count reporting-errors) 4) (= (count (filterv (fn [^String message] (str/includes? message "reserved compiler identifier prefix")) reporting-errors)) 2) (= (count (filterv (fn [^String message] (str/includes? message "unqualified bindable identifier")) reporting-errors)) 2))))))
+  (expect! "require final-local collision is shared by discovery and parsing" (let [datums [["require" [BRACKET-TAG "first.lib" ":refer" [BRACKET-TAG "parse"] ":rename" [MAP-TAG "parse" "choose"]] [BRACKET-TAG "second.lib" ":refer" [BRACKET-TAG "choose"]]]]
+   _ (reset-errors!)
+   discovered (discover-requires-reporting! datums)
+   discovery-errors (parse-errors)
+   program (parse-program! datums)
+   program-errors (parse-errors)
+   collision? (fn [messages] (boolean (some (fn [^String message] (str/includes? message ":rename final local choose is referred by more than one libspec")) messages)))]
+  (and (= (count discovered) 2) (= (count (get program "requires")) 2) (collision? discovery-errors) (collision? program-errors))))
+  (expect! "require libspec rejects the malformed grammar as one table" (let [invalid-specs [[BRACKET-TAG "pkg" ":as" "p" ":as" "again"] [BRACKET-TAG "pkg" ":refer" [BRACKET-TAG "make"] ":refer" [BRACKET-TAG "send"]] [BRACKET-TAG "pkg" ":refer" [BRACKET-TAG "make"] ":rename" [MAP-TAG "make" "build"] ":rename" [MAP-TAG "make" "again"]] [BRACKET-TAG "pkg" ":as"] [BRACKET-TAG "pkg" ":as" ":keyword-alias"] [BRACKET-TAG "pkg" ":refer" [BRACKET-TAG "make" "make"]] [BRACKET-TAG "pkg" ":refer" [BRACKET-TAG ["#%string" "make"]]] [BRACKET-TAG "pkg" ":rename" [MAP-TAG "make" "build"]] [BRACKET-TAG "pkg" ":refer" [BRACKET-TAG "make"] ":rename" [MAP-TAG "make" "build" "make" "again"]] [BRACKET-TAG "pkg" ":refer" [BRACKET-TAG "make" "send"] ":rename" [MAP-TAG "make" "build" "send" "build"]] [BRACKET-TAG "pkg" ":refer" [BRACKET-TAG "make" "build"] ":rename" [MAP-TAG "make" "build"]] [BRACKET-TAG "pkg" ":refer" [BRACKET-TAG "make"] ":rename" [MAP-TAG "make" "make"]] [BRACKET-TAG "pkg" ":refer" [BRACKET-TAG "make"] ":rename" [MAP-TAG "other" "build"]] [BRACKET-TAG "pkg" ":refer" [BRACKET-TAG "make"] ":rename" [MAP-TAG ":make" "build"]] [BRACKET-TAG "pkg" ":refer" [BRACKET-TAG "make"] ":rename" [BRACKET-TAG "make" "build"]] [BRACKET-TAG "pkg" ":refer"] [BRACKET-TAG "pkg" ":rename"] [BRACKET-TAG] [BRACKET-TAG ":keyword-source"]]]
+  (every? (fn [spec] (nil? (decode-require-libspec! spec false))) invalid-specs)))
+  (expect! "require identity preserves equal string and symbol text" (let [requires (discover-requires! [["require" [BRACKET-TAG "pkg.name" ":as" "source"] [BRACKET-TAG ["#%string" "pkg.name"] ":as" "foreign"]]])
+   source (nth requires 0)
+   foreign (nth requires 1)]
+  (and (= (get source "identity") {"kind" "beagle-namespace" "value" "pkg.name"}) (= (get foreign "identity") {"kind" "native-esm" "value" "pkg.name"}) (= (get source "rename") {}) (= (get foreign "rename") {}) (not (native-esm-require? source)) (native-esm-require? foreign))))
   (expect! "require discovery matches authoritative require parsing" (let [datums [["ns" "my.app" [":require" ["#%brackets" "my.lib" ":as" "m"]]] ["require" [BRACKET-TAG "other.lib" ":refer" [BRACKET-TAG "f"]]]]]
   (= (discover-requires! datums) (get (parse-program! datums) "requires"))))
   (expect! "parse-program! default target clj + gen-class false" (let [prog (parse-program! [["ns" "x.y"]])]

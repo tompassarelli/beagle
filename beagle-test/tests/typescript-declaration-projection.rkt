@@ -85,7 +85,7 @@
   (check-true (string-contains? provider-declarations
                                 "export type PublicResult = PublicAccepted | PublicRejected;"))
   (check-true (string-contains? provider-declarations
-                                "export declare const LABELS: Array<string>;"))
+                                "export declare const LABELS: Array<PublicLabel>;"))
   (check-true (string-contains? provider-declarations
                                 "export declare function choose(arg0: PublicDraft): PublicResult;"))
   (check-true (string-contains? provider-declarations
@@ -99,6 +99,12 @@
   (check-false (regexp-match? #px"\\bany\\b" provider-declarations)))
 
 (test-case "declaration-only wire refinement preserves provider runtime semantics"
+  (define labels
+    (module-interface-binding-ref provider-interface 'LABELS))
+  (check-equal? (interface-binding-type labels)
+                (type-app 'Vec (list (type-prim 'String))))
+  (check-equal? (interface-binding-js-declaration-type labels)
+                (type-app 'Vec (list (type-prim 'declarations.provider/PublicLabel))))
   (define choose
     (module-interface-binding-ref provider-interface 'choose))
   (define runtime-type (interface-binding-type choose))

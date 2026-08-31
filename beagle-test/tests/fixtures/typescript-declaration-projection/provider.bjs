@@ -34,6 +34,7 @@
   (U PublicAccepted PublicRejected))
 
 (js/export (def LABELS (Vec String) ["one" "two"]))
+(js/declare-export LABELS (Vec PublicLabel))
 (js/export
   (def choose
     (U (Fn [JsObject] JsObject)

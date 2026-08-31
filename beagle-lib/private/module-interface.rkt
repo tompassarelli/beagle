@@ -873,12 +873,55 @@
             ;; this compatibility proof without the provisional escape hatch.
             [else (provisional-imported-wire-name? name)])))]
       [else #f]))
+  (define (js-string-literal? type)
+    (and
+     (type-refinement? type)
+     (eq? (type-refinement-placement type) 'js-declaration)
+     (equal? (type-refinement-base type) (type-prim 'String))
+     (match (type-refinement-predicate type)
+       [(list 'js/literal (? string?)) #t]
+       [_ #f])))
+  (define (wire-string-enum? type [seen (seteq)])
+    (cond
+      [(js-string-literal? type) #t]
+      [(type-union? type)
+       (and
+        (pair? (type-union-alts type))
+        (andmap
+         (lambda (alternative) (wire-string-enum? alternative seen))
+         (type-union-alts type)))]
+      [(type-prim? type)
+       (define name (type-prim-name type))
+       (and
+        (not (set-member? seen name))
+        (let ([declaration (hash-ref wire-declarations name #f)])
+          (cond
+            [(and declaration
+                  (eq? (interface-type-declaration-kind declaration)
+                       'js-wire-alias))
+             (wire-string-enum?
+              (interface-type-declaration-details declaration)
+              (set-add seen name))]
+            [declaration #f]
+            [else (provisional-imported-wire-name? name)])))]
+      [else #f]))
+  (define (vec-string-enum-refinement? runtime declaration)
+    (and
+     (type-app? runtime)
+     (eq? (type-app-ctor runtime) 'Vec)
+     (= (length (type-app-args runtime)) 1)
+     (equal? (car (type-app-args runtime)) (type-prim 'String))
+     (type-app? declaration)
+     (eq? (type-app-ctor declaration) 'Vec)
+     (= (length (type-app-args declaration)) 1)
+     (wire-string-enum? (car (type-app-args declaration)))))
   (define (position-compatible? runtime declaration)
     (or
      (equal? runtime declaration)
      (and
       (equal? runtime (type-prim 'JsObject))
       (wire-object? declaration))
+     (vec-string-enum-refinement? runtime declaration)
      (let ([runtime-base (nullable-base runtime)]
            [declaration-base (js-optional-base declaration)])
        (and runtime-base
@@ -895,27 +938,30 @@
   (define (compatible-declaration? runtime declaration)
     (define runtime-functions (function-alternatives runtime))
     (define declaration-functions (function-alternatives declaration))
-    (and runtime-functions
-         declaration-functions
-         (= (length runtime-functions) (length declaration-functions))
-         (for/and ([runtime-function (in-list runtime-functions)]
-                   [declaration-function (in-list declaration-functions)])
-           (and (valid-optional-parameters?
-                 (type-fn-params declaration-function))
-                (= (length (type-fn-params runtime-function))
-                   (length (type-fn-params declaration-function)))
-                (for/and
-                    ([runtime-parameter
-                      (in-list (type-fn-params runtime-function))]
-                     [declaration-parameter
-                      (in-list (type-fn-params declaration-function))])
-                  (position-compatible?
-                   runtime-parameter declaration-parameter))
-                (equal? (type-fn-rest-type runtime-function)
-                        (type-fn-rest-type declaration-function))
-                (position-compatible?
-                 (type-fn-ret runtime-function)
-                 (type-fn-ret declaration-function))))))
+    (cond
+      [(and runtime-functions declaration-functions)
+       (and
+        (= (length runtime-functions) (length declaration-functions))
+        (for/and ([runtime-function (in-list runtime-functions)]
+                  [declaration-function (in-list declaration-functions)])
+          (and (valid-optional-parameters?
+                (type-fn-params declaration-function))
+               (= (length (type-fn-params runtime-function))
+                  (length (type-fn-params declaration-function)))
+               (for/and
+                   ([runtime-parameter
+                     (in-list (type-fn-params runtime-function))]
+                    [declaration-parameter
+                     (in-list (type-fn-params declaration-function))])
+                 (position-compatible?
+                  runtime-parameter declaration-parameter))
+               (equal? (type-fn-rest-type runtime-function)
+                       (type-fn-rest-type declaration-function))
+               (position-compatible?
+                (type-fn-ret runtime-function)
+                (type-fn-ret declaration-function)))))]
+      [(or runtime-functions declaration-functions) #f]
+      [else (position-compatible? runtime declaration)]))
   (for ([(name declaration) (in-hash declaration-overrides)])
     (when (type-has-any? declaration)
       (error 'program->module-interface
@@ -929,7 +975,7 @@
     (unless (compatible-declaration? (interface-binding-type runtime)
                                      declaration)
       (error 'program->module-interface
-             "js/declare-export ~a must preserve callable arity and may narrow only JsObject positions to checked JavaScript wire declarations or nullable positions to js/optional; runtime type ~a, declaration type ~a"
+             "js/declare-export ~a must preserve callable arity and may narrow only JsObject positions to checked JavaScript wire declarations, Vec String to a checked JavaScript string enum, or nullable positions to js/optional; runtime type ~a, declaration type ~a"
              name
              (type->string (interface-binding-type runtime))
              (type->string declaration)))

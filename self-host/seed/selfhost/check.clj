@@ -1181,7 +1181,7 @@
    n-fixed (count fixed)
    n-args (count args)
    argument-indices (vec (range (if (nil? rest-t) (if (< n-fixed n-args) n-fixed n-args) n-args)))
-   fn-display (reference->string fn-name)
+   ^String fn-display (reference->string fn-name)
    fn-leaf (reference-leaf fn-name)
    check-slot (fn [i] (let [expected (if (< i n-fixed) (nth fixed i) rest-t)
    expected-atom? (check-atom-ctor! (nth args i) expected env)

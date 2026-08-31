@@ -59,7 +59,7 @@
   (and (qualified-reference? ref) (= (get ref "qualifier") qualifier) (= (get ref "name") name)))
 
 (defn metadata-reference-key [key]
-  (if (string? key) (let [text key
+  (if (string? key) (let [^String text key
    index (str/last-index-of text "/")]
   (if (some? index) (let [offset index]
   (if (and (> offset 0) (< offset (- (count text) 1))) ["qualified-ref" (subs text 0 offset) (subs text (+ offset 1))] text)) text)) key))
@@ -68,7 +68,7 @@
   (reduce (fn [out key] (assoc out (metadata-reference-key key) (get table key))) {} (vec (keys table))))
 
 (defn reference-key-leaf [key]
-  (if (and (vector? key) (= 3 (count key)) (= "qualified-ref" (nth key 0))) (nth key 2) (if (string? key) (let [text key
+  (if (and (vector? key) (= 3 (count key)) (= "qualified-ref" (nth key 0))) (nth key 2) (if (string? key) (let [^String text key
    index (str/last-index-of text "/")]
   (if (nil? index) text (let [offset index]
   (subs text (+ offset 1))))) key)))
@@ -118,6 +118,9 @@
   (let [tag (clj-tag-for-type t)]
   (if (nil? tag) "" (str "^" tag " "))))
 
+(defn ^String clj-let-tag-prefix [t]
+  (if (and (map? t) (= (get t "kind") "prim") (= (get t "name") "Bool")) "" (clj-tag-prefix t)))
+
 (defn param-binding-target [p]
   (if (and (map? p) (contains? p "name")) (get p "name") p))
 
@@ -144,6 +147,9 @@
 
 (defn ^String emit-binding-target! [target]
   (emit-binding-form (param-binding-target target)))
+
+(defn ^String let-binding-tag-prefix [binding]
+  (if (string? (get binding "name")) (clj-let-tag-prefix (get binding "ann")) ""))
 
 (defn checked-binding-constraint [binding]
   (let [constraint (get binding "constraint")
@@ -205,7 +211,7 @@
    param (nth params index)
    target (param-binding-target param)]
   (if (and (= (get param "type") "param") (string? target)) (str (clj-tag-prefix (get param "ann")) raw) raw))) fixed-indices)
-   params-str (str/join " " (if (or (nil? rest-p) (false? rest-p)) fixed-raw (into fixed-raw ["&" CLJ-HOST-REST])))
+   ^String params-str (str/join " " (if (or (nil? rest-p) (false? rest-p)) fixed-raw (into fixed-raw ["&" CLJ-HOST-REST])))
    rest-normalization (if (or (nil? rest-p) (false? rest-p)) [] [(str (nth raw-names fixed-count) " " (emit-rest-body-value rest-p CLJ-HOST-REST))])
    predicate-bindings (loop [index 0
    acc []]
@@ -234,7 +240,7 @@
   (str/join "\n   " (loop [index 0
    acc []]
   (if (>= index (count bindings)) acc (let [b (nth bindings index)
-   target (emit-binding-target! (get b "name"))
+   target (str (let-binding-tag-prefix b) (emit-binding-target! (get b "name")))
    value (emit-expr* (get b "value"))]
   (if (constraint-present? b) (let [raw-name (str "$beagle$constraint$raw-binding$" index)
    predicate-name (str "$beagle$constraint$predicate$" index)]
@@ -242,7 +248,7 @@
 
 (defn ^String emit-with-open-chain! [bindings ^String body-str index]
   (if (= 0 (count bindings)) body-str (let [b (nth bindings 0)
-   target (emit-binding-target! (get b "name"))
+   target (str (let-binding-tag-prefix b) (emit-binding-target! (get b "name")))
    value (emit-expr* (get b "value"))
    inner (emit-with-open-chain! (subvec (vec bindings) 1) body-str (+ index 1))]
   (if (constraint-present? b) (let [predicate-name (str "$beagle$constraint$predicate$" index)
@@ -293,7 +299,7 @@
    target (emit-binding-target! (get binding "name"))]
   (str target " " (if (constraint-present? binding) (str "(if $beagle$constraint$first-iteration " raw " " "(let [$beagle$constraint$predicate$" index " " (emit-expr* (checked-binding-constraint binding)) "] " (emit-guarded-binding-value binding (str "$beagle$constraint$predicate$" index) raw) "))") raw)))) loop-indices)
    loop-bindings (mapv (fn [index] (str (nth raw-names index) " (nth $beagle$constraint$initial-values " index ")")) loop-indices)
-   body (emit-body-with-loop-context! (get e "body") "    " (count bindings))]
+   ^String body (emit-body-with-loop-context! (get e "body") "    " (count bindings))]
   (str "(let [$beagle$constraint$initial-values (let [" (str/join "\n       " init-bindings) "] [" (str/join " " raw-names) "])]\n" "  (loop [" (str/join " " loop-bindings) " $beagle$constraint$first-iteration true]\n" "    (let [" (str/join "\n         " iteration-bindings) "]\n" "      " body ")))")))))
 
 (defn ^String emit-body [exprs ^String indent]
@@ -445,9 +451,9 @@
    raw (nth raw-names index)]
   (str (nth checked-names index) " " (if (constraint-present? param) (emit-guarded-binding-value param (str "$beagle$constraint$predicate$" index) raw) raw)))) all-indices)
    call-args (if (= 0 (count predicate-bindings)) raw-names checked-names)
-   raw-method (protocol-raw-method-name protocol-name (get method "name"))
-   call (if (or (nil? rest-p) (false? rest-p)) (str "(" raw-method (if (= 0 (count call-args)) "" (str " " (str/join " " call-args))) ")") (str "(apply " raw-method " " (str/join " " call-args) ")"))
-   signature (str/join " " (if (or (nil? rest-p) (false? rest-p)) (subvec raw-names 0 fixed-count) (into (subvec raw-names 0 fixed-count) ["&" CLJ-HOST-REST])))]
+   ^String raw-method (protocol-raw-method-name protocol-name (get method "name"))
+   ^String call (if (or (nil? rest-p) (false? rest-p)) (str "(" raw-method (if (= 0 (count call-args)) "" (str " " (str/join " " call-args))) ")") (str "(apply " raw-method " " (str/join " " call-args) ")"))
+   ^String signature (str/join " " (if (or (nil? rest-p) (false? rest-p)) (subvec raw-names 0 fixed-count) (into (subvec raw-names 0 fixed-count) ["&" CLJ-HOST-REST])))]
   (str "(defn " (get method "name") " [" signature "]\n  " (cond
   (and (= 0 (count rest-normalization)) (= 0 (count predicate-bindings))) call
   (= 0 (count predicate-bindings)) (str "(let [" (str/join "\n       " rest-normalization) "]\n" "    " call ")")
@@ -914,6 +920,8 @@
   (expect! "Clojure Var reference emits identity-bearing reader surface" (= (emit-expr! {"node" "clj-var-ref" "qualifier" "north.main" "name" "capture-facts"}) "#'north.main/capture-facts"))
   (expect! "let-bindings: seq-destructure binder (no raw JSON leak)" (= (emit-let-bindings! [{"name" {"type" "seq-destructure" "names" ["a" "b"] "rest" false} "value" {"node" "ref" "name" "p"}}]) "[a b] p"))
   (expect! "let-bindings: map-destructure binder (no raw JSON leak)" (= (emit-let-bindings! [{"name" {"type" "map-destructure" "keys" ["id" "b"] "as" false} "value" {"node" "ref" "name" "m"}}]) "{:keys [id b]} m"))
+  (expect! "let-bindings: typed identifier emits the oracle local hint" (= (emit-let-bindings! [{"name" "text" "ann" {"kind" "prim" "name" "String"} "value" {"node" "ref" "name" "source"}}]) "^String text source"))
+  (expect! "let-bindings: primitive Bool initializer omits boxed local hint" (= (emit-let-bindings! [{"name" "inside" "ann" {"kind" "prim" "name" "Bool"} "value" {"node" "call" "fn" {"node" "ref" "name" "<"} "args" [{"node" "ref" "name" "value"} {"node" "literal" "kind" "number" "value" 2}]}}]) "inside (< value 2)"))
   (expect! "constrained callable captures predicate before authored binder" (let [output (emit-expr! {"node" "defn" "name" "keep" "params" [{"type" "param" "name" "value" "ann" {"kind" "prim" "name" "Int"} "constraint" {"node" "ref" "name" "positive?"}}] "rest" false "ret" {"kind" "prim" "name" "Int"} "body" [{"node" "ref" "name" "value"}] "private" false "doc" false})]
   (and (str/includes? output "[$beagle$constraint$raw-param$0]") (str/includes? output "$beagle$constraint$predicate$0 positive?") (str/includes? output "Binding constraint failed: value"))))
   (expect! "constrained let evaluates raw value once before projection" (let [output (emit-let-bindings! [{"name" "value" "constraint" {"node" "ref" "name" "positive?"} "value" {"node" "call" "fn" {"node" "ref" "name" "next-value"} "args" []}}])]

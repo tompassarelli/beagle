@@ -233,6 +233,12 @@
     (= (get ref "qualifier") qualifier)
     (= (get ref "name") name)))
 
+(defn declaration-only-form? [form Any] Bool
+  (and (= (get form "node") "static-call")
+    (or (qualified-reference=? form "js" "declare-record")
+        (qualified-reference=? form "js" "declare-type")
+        (qualified-reference=? form "js" "declare-export"))))
+
 (defn qualified-reference-same-binding?
   [left Any
    right Any] Bool
@@ -2822,6 +2828,7 @@
       (= node "defscalar") (emit-defscalar f)
       (= node "defprotocol") (throw (ex-info "protocol-form is not supported for JS target" {}))
       (= node "extend-type") (throw (ex-info "extend-type is not supported for JS target" {}))
+      (declaration-only-form? f) ""
       (and (= node "static-call") (qualified-reference=? f "js" "export"))
         (emit-public-esm-form! (nth (get f "args") 0))
       ;; Top-level effect-position forms: route ctrl-flow through the statement
@@ -3607,6 +3614,11 @@
       (do (emit-form! {"node" "defprotocol" "name" "P" "methods" []}) false)
       (catch Exception problem
         (str/includes? (ex-message problem) "not supported for JS target"))))
+  (doseq [name ["declare-record" "declare-type" "declare-export"]]
+    (expect! (str "declaration-only js/" name " is erased")
+      (= (emit-form! {"node" "static-call" "qualifier" "js"
+                      "name" name "providerId" nil "args" []})
+        "")))
 
   (doseq [f (deref failures)] (println (str "  FAIL: " f)))
   (println (str "  EMIT-JS: " (count (deref passes)) " passed, " (count (deref failures)) " failed"))
