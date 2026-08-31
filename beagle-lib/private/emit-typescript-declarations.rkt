@@ -7,6 +7,7 @@
          racket/match
          racket/string
          "ast.rkt"
+         "js-emit-utils.rkt"
          "module-interface.rkt"
          "types.rkt")
 
@@ -48,6 +49,20 @@
      [(list _ namespace name) (cons namespace name)]
      [_ #f])))
 
+(define (js-string-literal-value type)
+  (and
+   (type-refinement? type)
+   (eq? (type-refinement-placement type) 'js-declaration)
+   (match (type-refinement-predicate type)
+     [(list 'js/literal (? string? value)) value]
+     [_ #f])))
+
+(define (js-optional-base type)
+  (and (type-refinement? type)
+       (eq? (type-refinement-placement type) 'js-declaration)
+       (eq? (type-refinement-predicate type) 'js/optional)
+       (type-refinement-base type)))
+
 (define (make-type-renderer interface)
   (define current-namespace
     (symbol->string (module-interface-namespace interface)))
@@ -85,7 +100,11 @@
      (string-join
       (for/list ([parameter (in-list (type-fn-params type))]
                  [index (in-naturals)])
-        (format "arg~a: ~a" index (render-type parameter)))
+        (define optional-base (js-optional-base parameter))
+        (format "arg~a~a: ~a"
+                index
+                (if optional-base "?" "")
+                (render-type (or optional-base parameter))))
       ", ")
      (render-type (type-fn-ret type))))
 
@@ -95,7 +114,12 @@
       [(type-var? type)
        (require-typescript-identifier 'beagle-dts (type-var-name type))]
       [(type-refinement? type)
-       (render-type (type-refinement-base type))]
+       (cond
+         [(js-string-literal-value type) => js-string-lit]
+         [(js-optional-base type)
+          => (lambda (base)
+               (format "~a | undefined" (render-type base)))]
+         [else (render-type (type-refinement-base type))])]
       [(type-fn? type) (render-function type)]
       [(type-app? type)
        (define constructor (type-app-ctor type))
@@ -206,7 +230,7 @@
   (define rendered-name
     (require-typescript-identifier 'beagle-dts name))
   (case (interface-type-declaration-kind declaration)
-    [(alias js-wire-alias)
+    [(alias)
      (define exported
        (module-interface-type-export-ref interface name #f))
      (unless (and exported (interface-type-export-expansion exported))
@@ -214,6 +238,11 @@
      (format "export type ~a = ~a;"
              rendered-name
              (render-type (interface-type-export-expansion exported)))]
+    [(js-wire-alias)
+     (format "export type ~a = ~a;"
+             rendered-name
+             (render-type
+              (interface-type-declaration-details declaration)))]
     [(record)
      (emit-record-declaration interface render-type name)]
     [(js-wire-record)
@@ -247,7 +276,9 @@
 (define (emit-value-declaration render-type public-name binding)
   (define name
     (require-typescript-identifier 'beagle-dts public-name))
-  (define type (interface-binding-type binding))
+  (define type
+    (or (interface-binding-js-declaration-type binding)
+        (interface-binding-type binding)))
   (define functions (function-alternatives type))
   (if functions
       (string-join
@@ -258,7 +289,11 @@
           (string-join
            (for/list ([parameter (in-list (type-fn-params function))]
                       [index (in-naturals)])
-             (format "arg~a: ~a" index (render-type parameter)))
+             (define optional-base (js-optional-base parameter))
+             (format "arg~a~a: ~a"
+                     index
+                     (if optional-base "?" "")
+                     (render-type (or optional-base parameter))))
            ", ")
           (render-type (type-fn-ret function))))
        "\n")

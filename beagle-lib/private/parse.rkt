@@ -1496,6 +1496,7 @@
 ;; legacy nominal/JVM path.
 (define current-candidate-type-bindings (make-parameter #f))
 (define current-candidate-type-prefixes (make-parameter #f))
+(define current-local-js-declaration-types (make-parameter #f))
 (define current-module-resolution-closed? (make-parameter #f))
 (define current-parse-target (make-parameter DEFAULT-TARGET))
 
@@ -1589,8 +1590,14 @@
       [else #f]))
   (define bindings (current-candidate-type-bindings))
   (define prefixes (current-candidate-type-prefixes))
+  (define local-js-declarations (current-local-js-declaration-types))
   (cond
     [(or (not head) (not bindings)) #f]
+    [(and (current-js-declaration-type?)
+          (symbol? datum)
+          local-js-declarations
+          (hash-ref local-js-declarations datum #f))
+     (type-prim datum)]
     [(hash-ref bindings head #f)
      =>
      (lambda (entry)
@@ -1599,6 +1606,13 @@
        (define kind (interface-type-export-kind export))
        (define arity (interface-type-export-arity export))
        (define expansion (interface-type-export-expansion export))
+       (define declaration
+         (hash-ref
+          (module-interface-type-declarations interface)
+          (interface-type-export-name export)
+          #f))
+       (define declaration-kind
+         (and declaration (interface-type-declaration-kind declaration)))
        (define canonical-ref
          (qualified-ref
           (module-interface-namespace interface)
@@ -1614,7 +1628,16 @@
              written-name
              arity
              (if (= arity 1) "" "s")))
-          (or expansion (type-prim canonical-name))]
+          ;; JavaScript wire aliases are declaration identities as well as
+          ;; structural expansions.  Preserve the provider-qualified identity
+          ;; in declaration syntax so the TypeScript projection imports the
+          ;; authored alias; ordinary Beagle annotations keep their established
+          ;; alias-erasure semantics.
+          (if (and (current-js-declaration-type?)
+                   (memq declaration-kind
+                         '(js-wire-record js-wire-alias)))
+              (type-prim canonical-name)
+              (or expansion (type-prim canonical-name)))]
          [(pair? datum)
           (define args (cdr datum))
           (unless (memq kind '(parametric-union foreign))
@@ -1692,6 +1715,7 @@
                  [current-type-aliases (hasheq)]
                  [current-candidate-type-bindings (make-hash)]
                  [current-candidate-type-prefixes (make-hasheq)]
+                 [current-local-js-declaration-types (make-hasheq)]
                  [current-qualified-type-resolver
                   resolve-candidate-imported-type]
                  [current-type-surface-error
@@ -1847,6 +1871,11 @@
 
   (define datums (if needs-rewrite? (map syntax->datum stxs) raw-datums))
   (validate-reserved-type-declarations! datums)
+  (for ([datum (in-list datums)])
+    (match datum
+      [(list (or 'js/declare-record 'js/declare-type) (? symbol? name) _)
+       (hash-set! (current-local-js-declaration-types) name #t)]
+      [_ (void)]))
 
   ;; Pass 1: pull meta forms out and register macros / externs / requires.
   (define target    DEFAULT-TARGET)
@@ -5084,14 +5113,20 @@
     (validate-identifier! name "JavaScript declaration field")
     (match type-form
       [(list 'js/optional type-expression)
-       (jst-declaration-field name (parse-type type-expression) #t)]
+       (jst-declaration-field
+        name
+        (parse-js-declaration-type type-expression)
+        #t)]
       [(list* 'js/optional _)
        (raise-parse-error
         'bad-js-declare-record
         "js/optional requires exactly one field type, got: ~v"
         type-form)]
       [_
-       (jst-declaration-field name (parse-type type-form) #f)])))
+       (jst-declaration-field
+        name
+        (parse-js-declaration-type type-form)
+        #f)])))
 
 ;; Declaration-only JavaScript wire records carry a checked structural type to
 ;; host projections without creating a tagged/frozen Beagle record value.
@@ -5114,7 +5149,7 @@
   (lambda (d _subs)
     (match d
       [(list 'js/declare-type (? symbol? name) type-expression)
-       (jst-declare-type name (parse-type type-expression))]
+       (jst-declare-type name (parse-js-declaration-type type-expression))]
       [_
        (raise-parse-error
         'bad-js-declare-type
@@ -5127,7 +5162,7 @@
   (lambda (d _subs)
     (match d
       [(list 'js/declare-export (? symbol? name) type-expression)
-       (jst-declare-export name (parse-type type-expression))]
+       (jst-declare-export name (parse-js-declaration-type type-expression))]
       [_
        (raise-parse-error
         'bad-js-declare-export

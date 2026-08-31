@@ -2,10 +2,10 @@
 
 (ns declarations.provider)
 
-(defalias Label String)
+(defalias PublicLabel String)
 
 (defrecord Draft
-  [id Label
+  [id PublicLabel
    tags (Vec String)])
 
 (defrecord Accepted [draft Draft])
@@ -17,10 +17,18 @@
      (Fn [JsObject Bool] JsObject)))
 
 (js/declare-record PublicAccepted
-  [status String
+  [status (js/literal "accepted")
    note (js/optional String)])
 
-(js/declare-record PublicRejected [reason String])
+(js/declare-record PublicRejected
+  [status (js/literal "rejected")
+   reason String])
+
+(js/declare-type PublicLabel (js/enum "one" "two"))
+
+(js/declare-record PublicDraft
+  [id String
+   label PublicLabel])
 
 (js/declare-type PublicResult
   (U PublicAccepted PublicRejected))
@@ -33,5 +41,11 @@
     chooseImpl))
 
 (js/declare-export choose
-  (U (Fn [JsObject] PublicResult)
-     (Fn [JsObject Bool] PublicResult)))
+  (U (Fn [PublicDraft] PublicResult)
+     (Fn [PublicDraft Bool] PublicResult)))
+
+(js/export
+  (defn maybeLabel [label (U String Nil)] (U String Nil) label))
+
+(js/declare-export maybeLabel
+  (Fn [(js/optional String)] (js/optional String)))

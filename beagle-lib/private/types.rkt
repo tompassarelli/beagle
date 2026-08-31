@@ -126,6 +126,8 @@
         (ormap (lambda (alternative)
                  (type-has-any? alternative nested-seen))
                (type-union-alts current))]
+       [(type-refinement? current)
+        (type-has-any? (type-refinement-base current) nested-seen)]
        [(type-poly? current)
         (or (type-has-any? (type-poly-body current) nested-seen)
             (and (type-poly-bounds current)
@@ -231,6 +233,12 @@
 (define current-qualified-type-resolver
   (make-parameter (lambda (_type-datum) #f)))
 
+;; JavaScript declaration projection has a deliberately closed type-only
+;; surface.  The parameter keeps target-only literal and optional types out of
+;; ordinary Beagle annotations while allowing the existing recursive type
+;; parser to elaborate them at any declaration position.
+(define current-js-declaration-type? (make-parameter #f))
+
 ;; foreign-interface-v1.rkt installs the graph-aware relation while checking a
 ;; program that imports foreign interfaces.  The default is deliberately exact
 ;; and closed: a detached foreign type never becomes Any by accident.
@@ -309,6 +317,54 @@
 
 (define (parse-type t)
   (cond
+    [(and (current-js-declaration-type?)
+          (list? t)
+          (pair? t)
+          (eq? (car t) 'js/literal))
+     (match t
+       [(list 'js/literal (? string? value))
+        (type-refinement
+         (type-prim 'String)
+         `(js/literal ,value)
+         'js-declaration)]
+       [_
+        (error 'beagle
+               "js/literal requires exactly one string literal, got: ~v"
+               t)])]
+
+    [(and (current-js-declaration-type?)
+          (list? t)
+          (pair? t)
+          (eq? (car t) 'js/enum))
+     (define values (cdr t))
+     (unless (and (pair? values) (andmap string? values))
+       (error 'beagle
+              "js/enum requires one or more string literals, got: ~v"
+              t))
+     (unless (= (length values) (length (remove-duplicates values string=?)))
+       (error 'beagle "js/enum values must be unique, got: ~v" t))
+     (type-union
+      (for/list ([value (in-list values)])
+        (type-refinement
+         (type-prim 'String)
+         `(js/literal ,value)
+         'js-declaration)))]
+
+    [(and (current-js-declaration-type?)
+          (list? t)
+          (pair? t)
+          (eq? (car t) 'js/optional))
+     (match t
+       [(list 'js/optional nested)
+        (type-refinement
+         (parse-type nested)
+         'js/optional
+         'js-declaration)]
+       [_
+        (error 'beagle
+               "js/optional requires exactly one declaration type, got: ~v"
+               t)])]
+
     ;; Syntax is reserved before semantics: the checker rejects this node with
     ;; a structured not-yet-implemented diagnostic until proof/guard placement
     ;; lands. Preserve the authored predicate datum for that later seam.
@@ -423,6 +479,14 @@
     [(and (symbol? t) (hash-ref BUILTIN-UNION-ALIASES t #f))
      => (lambda (thunk) (thunk))]
 
+    ;; Imported JavaScript wire aliases keep their canonical declaration
+    ;; identity.  The candidate resolver distinguishes those aliases from
+    ;; ordinary transparent Beagle aliases; let it decide before the shared
+    ;; alias table erases the authored provider-qualified name.
+    [(and (current-js-declaration-type?)
+          ((current-qualified-type-resolver) t))
+     => (lambda (resolved) resolved)]
+
     ;; G1 — user type alias (defalias Name <type>): resolve to its pre-parsed
     ;; expansion. After built-in aliases / nullable sugar / type-vars, before a bare
     ;; name falls through to (type-prim name).
@@ -491,6 +555,10 @@
 
     [else
      (error 'beagle "bad type expression: ~v" t)]))
+
+(define (parse-js-declaration-type datum)
+  (parameterize ([current-js-declaration-type? #t])
+    (parse-type datum)))
 
 ;; Binding vectors remain allowed to be wholly inferred.  The flat surface is
 ;; selected only when the second form is a real type expression; this keeps
@@ -1140,6 +1208,7 @@
         [(type-fn? t)    'fn]
         [(type-app? t)   'app]
         [(type-union? t) 'union]
+        [(type-refinement? t) 'refinement]
         [(type-foreign? t) 'foreign]
         [(type-var? t)   'var]
         [(type-meta? t)  'meta]
@@ -1203,6 +1272,18 @@
              (format "(U ~a)" (string-join (map recur alts) " "))))]
       [else
        (format "(U ~a)" (string-join (map recur alts) " "))])))
+(register-type-delab! 'refinement
+  (lambda (t recur)
+    (match (list (type-refinement-placement t)
+                 (type-refinement-predicate t))
+      [(list 'js-declaration (list 'js/literal (? string? value)))
+       (format "(js/literal ~s)" value)]
+      [(list 'js-declaration 'js/optional)
+       (format "(js/optional ~a)" (recur (type-refinement-base t)))]
+      [_
+       (format "(~a where ~s)"
+               (recur (type-refinement-base t))
+               (type-refinement-predicate t))])))
 (register-type-delab! 'foreign
   (lambda (t recur)
     (define substitutions (type-foreign-substitutions t))
@@ -1267,6 +1348,11 @@
                           'ctor (symbol->string (type-app-ctor t))
                           'args (map type->jsexpr (type-app-args t)))]
     [(type-union? t) (node "union" 'alts (map type->jsexpr (type-union-alts t)))]
+    [(type-refinement? t)
+     (node "refinement"
+           'base (type->jsexpr (type-refinement-base t))
+           'predicate (format "~s" (type-refinement-predicate t))
+           'placement (symbol->string (type-refinement-placement t)))]
     [(type-foreign? t)
      (node "foreign"
            'interface-id (type-foreign-interface-id t)
@@ -1413,6 +1499,7 @@
  current-user-parametric-arities
  current-type-aliases
  current-qualified-type-resolver
+ current-js-declaration-type?
  current-foreign-type-compatible?
  register-qualified-type-name!
  current-type-surface-error
@@ -1421,6 +1508,7 @@
  any-type?
  dynamic-type?
  parse-type
+ parse-js-declaration-type
  type-expression-datum?
  type-compatible?
  type-invariant-equal?

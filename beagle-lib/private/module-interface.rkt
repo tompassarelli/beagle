@@ -16,18 +16,25 @@
          "macros.rkt"
          "types.rkt")
 
-(define INTERFACE-SCHEMA-VERSION 13)
-;; V13 adds declaration-only JavaScript wire types to the canonical checked
-;; module interface. V12 published canonical foreign interface/node references
-;; and retained exact module identity on consumer-side imported interfaces.
+(define INTERFACE-SCHEMA-VERSION 14)
+;; V14 keeps a checked JavaScript declaration view beside each runtime binding
+;; instead of replacing the runtime type imported by downstream Beagle modules.
+;; V13 added declaration-only JavaScript wire types.
 (define INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE? #t)
 (define ANY (type-prim 'Any))
 
 (struct interface-constraint (expression synchronous? provider) #:transparent)
 (struct interface-binding
   (name kind type raises constraints synchronous?
-        returns-synchronous-callable? effects)
+        returns-synchronous-callable? effects js-declaration-type)
   #:transparent)
+
+(define (runtime-interface-binding
+         name kind type raises constraints synchronous?
+         returns-synchronous-callable? effects)
+  (interface-binding
+   name kind type raises constraints synchronous?
+   returns-synchronous-callable? effects #f))
 (struct interface-macro (name kind fixed-params rest-param template)
   #:transparent)
 (struct interface-error (name members member-fields) #:transparent)
@@ -460,7 +467,7 @@
   (append
    (if (eq? (program-target prog) 'js)
        (list
-        (interface-binding
+        (runtime-interface-binding
          name
          kind
          (type-fn (map param-interface-type fields) #f record-type)
@@ -471,7 +478,7 @@
          (open-interface-effects prog)))
        '())
    (list
-    (interface-binding
+    (runtime-interface-binding
      (string->symbol (string-append "->" name-string))
      kind
      (type-fn (map param-interface-type fields) #f record-type)
@@ -482,7 +489,7 @@
      (open-interface-effects prog)))
    (if map-constructor?
        (list
-        (interface-binding
+        (runtime-interface-binding
          (string->symbol (string-append "map->" name-string))
          'map-constructor
          (type-fn (list ANY) #f record-type)
@@ -493,7 +500,7 @@
          (open-interface-effects prog)))
        '())
    (for/list ([field (in-list fields)])
-     (interface-binding
+     (runtime-interface-binding
       (string->symbol
        (string-append lower-name "-" (symbol->string (param-name field))))
       'accessor
@@ -605,7 +612,7 @@
       [(def-form name type _ _ _ private?)
        (unless private?
          (add!
-          (interface-binding
+          (runtime-interface-binding
            name
            'def
            (published-definition-type effective name (or type ANY))
@@ -617,7 +624,7 @@
       [(defonce-form name type _ _ private?)
        (unless private?
          (add!
-          (interface-binding
+          (runtime-interface-binding
            name
            'defonce
            (published-definition-type effective name (or type ANY))
@@ -631,7 +638,7 @@
          (define authored
            (function-type params rest-param return-type))
          (add!
-          (interface-binding
+          (runtime-interface-binding
            name
            'defn
            (published-definition-type effective name authored)
@@ -654,7 +661,7 @@
               (arity-clause-rest-param arity)
               (arity-clause-return-type arity))))
          (add!
-          (interface-binding
+          (runtime-interface-binding
            name
            'defn-multi
            (published-definition-type
@@ -682,7 +689,7 @@
       [(protocol-form _ methods)
        (for ([method (in-list methods)])
          (add!
-          (interface-binding
+          (runtime-interface-binding
            (protocol-method-name method)
            'protocol-method
            (function-type
@@ -699,12 +706,12 @@
            #f
            (open-interface-effects prog))))]
       [(defmulti-form name _)
-       (add! (interface-binding name 'defmulti
+       (add! (runtime-interface-binding name 'defmulti
                                 (type-fn (list ANY) ANY ANY) #f '() #f #f
                                 (open-interface-effects prog)))]
       [(defenum-form name _)
        (add!
-        (interface-binding
+        (runtime-interface-binding
          (string->symbol (string-append (symbol->string name) "-values"))
          'enum-values
          (type-app 'Set (list (type-prim name)))
@@ -729,7 +736,7 @@
        (define backing (type-prim backing-type))
        (define name-string (symbol->string name))
        (add!
-        (interface-binding
+        (runtime-interface-binding
          (string->symbol (string-append "->" name-string))
          'scalar-constructor
          (type-fn (list backing) #f scalar-type)
@@ -739,7 +746,7 @@
          #f
          (open-interface-effects prog)))
        (add!
-        (interface-binding
+        (runtime-interface-binding
          (string->symbol
           (string-append (string-downcase name-string) "-value"))
          'scalar-accessor
@@ -760,14 +767,55 @@
                "duplicate js/declare-export for ~a"
                name))
       (hash-set! declaration-overrides name (jst-declare-export-type form))))
-  (define wire-return-names
-    (for/seteq ([raw-form (in-list forms)]
-                #:do [(define form (unwrap-public-form raw-form))]
-                #:when (or (jst-declare-record? form)
-                           (jst-declare-type? form)))
-      (if (jst-declare-record? form)
-          (jst-declare-record-name form)
-          (jst-declare-type-name form))))
+  ;; The wire declaration graph is structural and declaration-only.  Resolve
+  ;; both local and imported names so JsObject may be narrowed only to a shape
+  ;; that is proven to remain an ordinary JavaScript object at runtime.
+  (define wire-declarations (make-hasheq))
+  (for ([raw-form (in-list forms)])
+    (define form (unwrap-public-form raw-form))
+    (cond
+      [(jst-declare-record? form)
+       (hash-set!
+        wire-declarations
+        (jst-declare-record-name form)
+        (interface-type-declaration
+         (jst-declare-record-name form)
+         'js-wire-record
+         #f))]
+      [(jst-declare-type? form)
+       (hash-set!
+        wire-declarations
+        (jst-declare-type-name form)
+        (interface-type-declaration
+         (jst-declare-type-name form)
+         'js-wire-alias
+         (jst-declare-type-type form)))]))
+  (for ([import (in-list (program-imported-module-interfaces prog))])
+    (define interface (module-import-interface import))
+    (define namespace (module-interface-namespace interface))
+    (for ([(name declaration)
+           (in-hash (module-interface-type-declarations interface))]
+          #:when
+          (memq (interface-type-declaration-kind declaration)
+                '(js-wire-record js-wire-alias)))
+      (hash-set!
+       wire-declarations
+       (qualify-type-name namespace name)
+       (interface-type-declaration
+        name
+        (interface-type-declaration-kind declaration)
+        (interface-type-declaration-details declaration)))))
+  (define (provisional-imported-wire-name? name)
+    (and
+     provisional?
+     (for/or ([require (in-list (program-requires prog))])
+       (define identity (require-entry-identity require))
+       (and
+        (eq? (module-identity-kind identity) 'beagle-namespace)
+        (eq? name
+             (qualify-type-name
+              (module-identity-value identity)
+              (unqualify-type-name name)))))))
   (define (function-alternatives type)
     (cond
       [(type-fn? type) (list type)]
@@ -775,9 +823,75 @@
             (andmap type-fn? (type-union-alts type)))
        (type-union-alts type)]
       [else #f]))
-  (define (wire-return? type)
-    (and (type-prim? type)
-         (set-member? wire-return-names (type-prim-name type))))
+  (define (js-optional-base type)
+    (and (type-refinement? type)
+         (eq? (type-refinement-placement type) 'js-declaration)
+         (eq? (type-refinement-predicate type) 'js/optional)
+         (type-refinement-base type)))
+  (define (nullable-base type)
+    (and
+     (type-union? type)
+     (let ([nullable
+            (filter
+             (lambda (alternative)
+               (and (type-prim? alternative)
+                    (eq? (type-prim-name alternative) 'Nil)))
+             (type-union-alts type))]
+           [values
+            (filter
+             (lambda (alternative)
+               (not (and (type-prim? alternative)
+                         (eq? (type-prim-name alternative) 'Nil))))
+             (type-union-alts type))])
+       (and (= (length nullable) 1)
+            (= (length values) 1)
+            (car values)))))
+  (define (wire-object? type [seen (seteq)])
+    (cond
+      [(type-union? type)
+       (and (pair? (type-union-alts type))
+            (andmap (lambda (alternative) (wire-object? alternative seen))
+                    (type-union-alts type)))]
+      [(type-prim? type)
+       (define name (type-prim-name type))
+       (and
+        (not (set-member? seen name))
+        (let ([declaration (hash-ref wire-declarations name #f)])
+          (cond
+            [declaration
+             (case (interface-type-declaration-kind declaration)
+               [(js-wire-record) #t]
+               [(js-wire-alias)
+                (wire-object?
+                 (interface-type-declaration-details declaration)
+                 (set-add seen name))]
+               [else #f])]
+            ;; The first parse-only overlay round knows a required candidate's
+            ;; canonical namespace but cannot retain its interface yet.  Admit
+            ;; that exact imported identity provisionally; the next interface
+            ;; round resolves its kind and every checked publication repeats
+            ;; this compatibility proof without the provisional escape hatch.
+            [else (provisional-imported-wire-name? name)])))]
+      [else #f]))
+  (define (position-compatible? runtime declaration)
+    (or
+     (equal? runtime declaration)
+     (and
+      (equal? runtime (type-prim 'JsObject))
+      (wire-object? declaration))
+     (let ([runtime-base (nullable-base runtime)]
+           [declaration-base (js-optional-base declaration)])
+       (and runtime-base
+            declaration-base
+            (position-compatible? runtime-base declaration-base)))))
+  (define (valid-optional-parameters? parameters)
+    (let loop ([remaining parameters] [optional-seen? #f])
+      (cond
+        [(null? remaining) #t]
+        [(js-optional-base (car remaining))
+         (loop (cdr remaining) #t)]
+        [optional-seen? #f]
+        [else (loop (cdr remaining) #f)])))
   (define (compatible-declaration? runtime declaration)
     (define runtime-functions (function-alternatives runtime))
     (define declaration-functions (function-alternatives declaration))
@@ -786,16 +900,22 @@
          (= (length runtime-functions) (length declaration-functions))
          (for/and ([runtime-function (in-list runtime-functions)]
                    [declaration-function (in-list declaration-functions)])
-           (and (equal? (type-fn-params runtime-function)
-                        (type-fn-params declaration-function))
+           (and (valid-optional-parameters?
+                 (type-fn-params declaration-function))
+                (= (length (type-fn-params runtime-function))
+                   (length (type-fn-params declaration-function)))
+                (for/and
+                    ([runtime-parameter
+                      (in-list (type-fn-params runtime-function))]
+                     [declaration-parameter
+                      (in-list (type-fn-params declaration-function))])
+                  (position-compatible?
+                   runtime-parameter declaration-parameter))
                 (equal? (type-fn-rest-type runtime-function)
                         (type-fn-rest-type declaration-function))
-                (or (equal? (type-fn-ret runtime-function)
-                            (type-fn-ret declaration-function))
-                    (and (equal? (type-fn-ret runtime-function)
-                                 (type-prim 'JsObject))
-                         (wire-return?
-                          (type-fn-ret declaration-function))))))))
+                (position-compatible?
+                 (type-fn-ret runtime-function)
+                 (type-fn-ret declaration-function))))))
   (for ([(name declaration) (in-hash declaration-overrides)])
     (when (type-has-any? declaration)
       (error 'program->module-interface
@@ -809,12 +929,17 @@
     (unless (compatible-declaration? (interface-binding-type runtime)
                                      declaration)
       (error 'program->module-interface
-             "js/declare-export ~a must preserve callable parameters and may refine only a JsObject return to a JavaScript wire declaration"
-             name))
+             "js/declare-export ~a must preserve callable arity and may narrow only JsObject positions to checked JavaScript wire declarations or nullable positions to js/optional; runtime type ~a, declaration type ~a"
+             name
+             (type->string (interface-binding-type runtime))
+             (type->string declaration)))
     (hash-set!
      out
      name
-     (struct-copy interface-binding runtime [type declaration])))
+     (struct-copy
+      interface-binding
+      runtime
+      [js-declaration-type declaration])))
   out)
 
 (define (declared-interface-bindings prog)
@@ -823,12 +948,12 @@
   (define extern-bindings
     (for/hasheq ([(name type) (in-hash (program-declared-externs prog))])
       (values name
-              (interface-binding name 'extern type #f '() #f #f
+              (runtime-interface-binding name 'extern type #f '() #f #f
                                  (open-interface-effects prog)))))
   (for/fold ([bindings extern-bindings])
             ([name (in-hash-keys (program-declared-macros prog))])
     (hash-set bindings name
-              (interface-binding name 'macro ANY #f '() #f #f
+              (runtime-interface-binding name 'macro ANY #f '() #f #f
                                  (open-interface-effects prog)))))
 
 (define (program-interface-macros prog)
@@ -1046,6 +1171,11 @@
       (map recur (type-app-args type)))]
     [(type-union? type)
      (type-union (map recur (type-union-alts type)))]
+    [(type-refinement? type)
+     (type-refinement
+      (recur (type-refinement-base type))
+      (type-refinement-predicate type)
+      (type-refinement-placement type))]
     [(type-fn? type)
      (type-fn
       (map recur (type-fn-params type))
@@ -1210,6 +1340,11 @@
            ,@(map type->canonical-datum (type-app-args type)))]
     [(type-union? type)
      `(union ,@(map type->canonical-datum (type-union-alts type)))]
+    [(type-refinement? type)
+     `(refinement
+       ,(type->canonical-datum (type-refinement-base type))
+       ,(type-refinement-predicate type)
+       ,(type-refinement-placement type))]
     [(type-fn? type)
      `(fn
        (params ,@(map type->canonical-datum (type-fn-params type)))
@@ -1383,7 +1518,11 @@
                     (interface-binding-constraints binding))
                (interface-binding-synchronous? binding)
                (interface-binding-returns-synchronous-callable? binding)
-               (interface-binding-effects binding))))
+               (interface-binding-effects binding)
+               (and
+                (interface-binding-js-declaration-type binding)
+                (type->canonical-datum
+                 (interface-binding-js-declaration-type binding))))))
     (macros
      ,@(for/list ([name (in-list (sort (hash-keys macro-fingerprints)
                                       symbol<?))])
@@ -1673,7 +1812,14 @@
          (qualify-provider-local-type-references
           (interface-binding-type binding)
           (program-namespace prog)
-          local-type-names)]))))
+          local-type-names)]
+        [js-declaration-type
+         (and
+          (interface-binding-js-declaration-type binding)
+          (qualify-provider-local-type-references
+           (interface-binding-js-declaration-type binding)
+           (program-namespace prog)
+           local-type-names))]))))
   (define qualified-candidate-bindings (qualify-bindings bindings))
   (define qualified-bindings (qualify-bindings conformed-bindings))
   (define public-esm-exports

@@ -7,3 +7,16 @@
 
 (declare-extern echoImpl (Fn [ImportedResult] ImportedResult))
 (js/export (def echo (Fn [ImportedResult] ImportedResult) echoImpl))
+
+;; The provider's declaration view must not replace the runtime Beagle type.
+;; This call stays JsObject -> JsObject after PublicDraft/PublicResult project
+;; to TypeScript.
+(js/export
+  (defn forward [draft JsObject] JsObject
+    (provider/choose draft)))
+
+(js/declare-export forward
+  (Fn [provider/PublicDraft] provider/PublicResult))
+
+(js/declare-record ForwardedLabel
+  [label provider/PublicLabel])

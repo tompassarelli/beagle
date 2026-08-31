@@ -1,0 +1,10 @@
+#lang beagle/js
+
+(ns declarations.invalid-scalar-narrowing)
+
+(js/declare-type PublicLabel (js/enum "one" "two"))
+
+(js/export
+  (defn choose [value JsObject] JsObject value))
+
+(js/declare-export choose (Fn [PublicLabel] PublicLabel))

@@ -1087,7 +1087,8 @@
         'foreign-value
         (foreign-export-type interface export)
         #f '() #t #f
-        (normalized-obligations-v1-open 'js 'hosted-js)))))
+        (normalized-obligations-v1-open 'js 'hosted-js)
+        #f))))
   (define public-esm-exports
     (for/hasheq ([export (in-list runtime-exports)])
       (values (string->symbol (hash-ref export 'name))
