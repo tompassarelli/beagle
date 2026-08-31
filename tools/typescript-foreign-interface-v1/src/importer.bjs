@@ -35,6 +35,7 @@
    synthetic-forms (Atom (Vec String))
    synthetic-values (Atom (Map String String))
    literal-enums (Atom (Map String String))
+   anonymous-records (Atom (Map String String))
    extra-imports (Atom (Map String (Vec String)))
    needs-process (Atom Bool)
    needs-pad-end (Atom Bool)
@@ -234,6 +235,60 @@
                      (string-literal-scalar-form name))))
           name)))))
 
+(defn register-synthetic-record!
+  [state ImportStateV1
+   record-name String
+   fields (Vec String)] String
+  (do
+    (swap! (importstatev1-local-types state)
+           (fn [types (Map String Bool)] (Map String Bool)
+             (assoc types record-name true)))
+    (swap! (importstatev1-synthetic-forms state)
+           (fn [forms (Vec String)] (Vec String)
+             (conj forms
+               (str "(defrecord " record-name " [" (join-with " " fields) "])"))))
+    record-name))
+
+(defn fresh-anonymous-record-name
+  [state ImportStateV1] String
+  (loop [ordinal Int (+ (count (deref (importstatev1-anonymous-records state))) 1)]
+    (let [candidate String (str "TypeScriptAnonymousObjectV" ordinal)]
+      (if (contains? (deref (importstatev1-local-types state)) candidate)
+        (recur (+ ordinal 1))
+        candidate))))
+
+(defn ensure-anonymous-object-record!
+  [state ImportStateV1
+   type OpaqueTypeScriptTypeV1] String
+  (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
+        key String (.typeDisplay bridge type)
+        existing (U String Nil)
+        (get (deref (importstatev1-anonymous-records state)) key)]
+    (if existing
+      existing
+      (let [record-name String (fresh-anonymous-record-name state)]
+        (do
+          ;; Register before traversing fields so recursive anonymous shapes
+          ;; resolve to the same checked record instead of recursing forever.
+          (swap! (importstatev1-anonymous-records state)
+                 (fn [records (Map String String)] (Map String String)
+                   (assoc records key record-name)))
+          (let [properties (Vec OpaqueCompilerValueV1)
+                (: (.sort bridge (.typeProperties bridge type))
+                   (Vec OpaqueCompilerValueV1))
+                fields (Vec String)
+                (reduce
+                  (fn [values (Vec String)
+                       property OpaqueCompilerValueV1] (Vec String)
+                    (into values
+                      [(.symbolName bridge property)
+                       (type->beagle! state
+                         (.propertyType bridge type property)
+                         true)]))
+                  []
+                  properties)]
+            (register-synthetic-record! state record-name fields)))))))
+
 (defn type->beagle!
   [state ImportStateV1
    type OpaqueTypeScriptTypeV1
@@ -328,7 +383,9 @@
       (let [indexes (Vec OpaqueCompilerValueV1)
             (: (.indexInfos bridge type) (Vec OpaqueCompilerValueV1))
             signatures (Vec OpaqueCompilerValueV1)
-            (: (.callSignatures bridge type) (Vec OpaqueCompilerValueV1))]
+            (: (.callSignatures bridge type) (Vec OpaqueCompilerValueV1))
+            construct-signatures (Vec OpaqueCompilerValueV1)
+            (: (.constructSignatures bridge type) (Vec OpaqueCompilerValueV1))]
         (cond
           (not (empty? indexes))
           (let [index OpaqueCompilerValueV1 (first indexes)]
@@ -340,10 +397,12 @@
           (and (not (identical? type-name "anonymous"))
                (not (identical? type-name "__type")))
           (do (note-imported-type! state type type-name) type-name)
+          (empty? construct-signatures)
+          (ensure-anonymous-object-record! state type)
           :else
           (diagnostic! state (.sourceFile bridge (importstatev1-context state))
-            "TSI_ANONYMOUS_OBJECT_TYPE"
-            "anonymous object type requires a contextual interface or synthesized record")))
+            "TSI_ANONYMOUS_OBJECT_CONSTRUCT"
+            "anonymous construct-signature object type cannot be represented as a record")))
       (or (identical? kind "any") (identical? kind "unknown"))
       (diagnostic! state (.sourceFile bridge (importstatev1-context state))
         "TSI_DYNAMIC_TYPE"
@@ -1408,15 +1467,7 @@
                    true)])))
           []
           properties)]
-    (do
-      (swap! (importstatev1-local-types state)
-             (fn [types (Map String Bool)] (Map String Bool)
-               (assoc types record-name true)))
-      (swap! (importstatev1-synthetic-forms state)
-             (fn [forms (Vec String)] (Vec String)
-               (conj forms
-                 (str "(defrecord " record-name " [" (join-with " " fields) "])"))))
-      record-name)))
+    (register-synthetic-record! state record-name fields)))
 
 (defn unwrap-expression
   [state ImportStateV1
@@ -1595,7 +1646,7 @@
           (: (.nodeList bridge source-file "statements") (Vec OpaqueTypeScriptNodeV1))
           state ImportStateV1
           (->ImportStateV1 bridge context namespace module-mappings
-            (atom []) (atom {}) (atom []) (atom {}) (atom {}) (atom {})
+            (atom []) (atom {}) (atom []) (atom {}) (atom {}) (atom {}) (atom {})
             (atom false) (atom false) (atom 0) (atom 0))
           _ Nil (collect-local-types! state statements)
           forms (Vec String) (emit-top-level! state statements)
