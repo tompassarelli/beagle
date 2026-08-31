@@ -195,6 +195,7 @@
 
 (define (checkout-tree?)
   (or (file-exists? (build-path repository-root ".git"))
+      (directory-exists? (build-path repository-root ".git"))
       (link-exists? (build-path repository-root ".git"))))
 
 (define (nix-store-identity path)
