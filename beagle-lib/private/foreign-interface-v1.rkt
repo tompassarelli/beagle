@@ -272,11 +272,24 @@
             (or rest-seen? rest?)))))
 
 (define (normalize-signature where value)
-  (object! where value '(typeParameters parameters return) '())
+  (object! where value '(typeParameters parameters return)
+           '(capturedTypeParameters))
   (define type-parameters
     (normalize-type-parameters
      (format "~a.typeParameters" where)
      (hash-ref value 'typeParameters)))
+  (define captured-type-parameters
+    (normalize-type-parameters
+     (format "~a.capturedTypeParameters" where)
+     (hash-ref value 'capturedTypeParameters '())))
+  (define all-parameter-nodes
+    (append (map (lambda (parameter) (hash-ref parameter 'node))
+                 type-parameters)
+            (map (lambda (parameter) (hash-ref parameter 'node))
+                 captured-type-parameters)))
+  (unless (unique? all-parameter-nodes values)
+    (schema-error where
+                  "local and captured type parameters must be disjoint"))
   (define parameters
     (for/list ([parameter
                 (in-list
@@ -288,6 +301,7 @@
                               parameters
                               "parameter")
   (hash 'typeParameters type-parameters
+        'capturedTypeParameters captured-type-parameters
         'parameters parameters
         'return (node-ref! (format "~a.return" where)
                            (hash-ref value 'return))))
@@ -645,11 +659,15 @@
   (define producer (or normalized-bound-producer wire-producer))
   (if producer (hash-set normalized 'producer producer) normalized))
 
+(define (signature-all-type-parameters signature)
+  (append (hash-ref signature 'capturedTypeParameters)
+          (hash-ref signature 'typeParameters)))
+
 (define (signature-references signature)
+  (define type-parameters (signature-all-type-parameters signature))
   (append
    (append*
-    (for/list ([parameter
-                (in-list (hash-ref signature 'typeParameters))])
+    (for/list ([parameter (in-list type-parameters)])
       (filter values
               (list (hash-ref parameter 'node)
                     (hash-ref parameter 'constraint)
@@ -741,7 +759,40 @@
     (validate-type-parameter-entries!
      (format "~a.typeParameters" (car entry))
      (hash-ref (cdr entry) 'typeParameters)
+     node-table)
+    (validate-type-parameter-entries!
+     (format "~a.capturedTypeParameters" (car entry))
+     (hash-ref (cdr entry) 'capturedTypeParameters)
      node-table)))
+
+(define (validate-signature-captures! node node-table)
+  (define node-id (hash-ref node 'id))
+  (define (reject-captures field signatures)
+    (for ([signature (in-list signatures)]
+          [index (in-naturals)])
+      (unless (null? (hash-ref signature 'capturedTypeParameters))
+        (schema-error
+         (format "nodes[~a].~a[~a].capturedTypeParameters"
+                 node-id field index)
+         "captured declaration parameters are permitted only on construct signatures"))))
+  (case (string->symbol (hash-ref node 'kind))
+    [(object)
+     (reject-captures 'callSignatures (hash-ref node 'callSignatures))
+     (for ([signature (in-list (hash-ref node 'constructSignatures))]
+           [index (in-naturals)])
+       (define captured (hash-ref signature 'capturedTypeParameters))
+       (unless (null? captured)
+         (define return-id (hash-ref signature 'return))
+         (define return-node (hash-ref node-table return-id))
+         (unless (and (string=? (hash-ref return-node 'kind) "object")
+                      (equal? captured (hash-ref return-node 'typeParameters)))
+           (schema-error
+            (format "nodes[~a].constructSignatures[~a].capturedTypeParameters"
+                    node-id index)
+            "must exactly re-expose the direct returned object's declaration parameters"))))]
+    [(function)
+     (reject-captures 'overloads (hash-ref node 'overloads))]
+    [else (void)]))
 
 (define (validate-type-parameter-ownership! nodes)
   (define owners (make-hash))
@@ -922,6 +973,7 @@
                       "unknown obligation ~a" (hash-ref node 'obligationId)))))
   (for ([node (in-list nodes)])
     (validate-node-type-parameters! node node-table)
+    (validate-signature-captures! node node-table)
     (validate-reference-instantiation! node node-table))
   (validate-type-parameter-ownership! nodes)
   (validate-exported-binders! exports node-table)
@@ -1012,11 +1064,14 @@
              (nullable-node-id->jsexpr (hash-ref parameter 'default))))
 
 (define (signature->jsexpr signature)
-  (hash-set
+  (hash-set*
    signature
    'typeParameters
    (map signature-type-parameter->jsexpr
-        (hash-ref signature 'typeParameters))))
+        (hash-ref signature 'typeParameters))
+   'capturedTypeParameters
+   (map signature-type-parameter->jsexpr
+        (hash-ref signature 'capturedTypeParameters))))
 
 (define (tuple-element->jsexpr element)
   (if (hash-ref element 'name)
@@ -1284,73 +1339,108 @@
   (hash-ref (foreign-interface-v1-nodes interface) node-id))
 
 ;; Substitutions are lexical captures, not a bag of every parameter reachable
-;; through the declaration graph.  In particular, a method's <U> is its own
-;; binder while an anonymous result object mentioning an outer <T> must retain
-;; T.  References contribute their argument expressions, never the target's
-;; declaration binders: those are instantiated only when the reference is
-;; traversed.
-(define (free-type-parameter-ids interface root-id)
-  (define seen (mutable-set))
-  (define free (mutable-set))
-  (define (visit-signature signature bound)
-    (define locally-bound
-      (for/fold ([scope bound])
-                ([parameter (in-list (hash-ref signature 'typeParameters))])
-        (set-add scope (hash-ref parameter 'node))))
-    (for ([parameter (in-list (hash-ref signature 'typeParameters))])
-      (for ([reference
-             (in-list (filter values
-                              (list (hash-ref parameter 'constraint)
-                                    (hash-ref parameter 'default))))])
-        (visit reference locally-bound)))
-    (for ([parameter (in-list (hash-ref signature 'parameters))])
-      (visit (hash-ref parameter 'type) locally-bound))
-    (visit (hash-ref signature 'return) locally-bound))
-  (define (visit node-id bound)
-    (define state
-      (cons node-id (sort (set->list bound) string<?)))
-    (unless (set-member? seen state)
-      (set-add! seen state)
-      (define node (node-at interface node-id))
-      (case (string->symbol (hash-ref node 'kind))
-        [(primitive literal unsupported) (void)]
-        [(type-parameter)
-         (unless (set-member? bound node-id) (set-add! free node-id))
-         (for ([reference
-                (in-list (filter values
-                                 (list (hash-ref node 'constraint)
-                                       (hash-ref node 'default))))])
-           (visit reference bound))]
-        [(union intersection)
-         (for ([member (in-list (hash-ref node 'members))])
-           (visit member bound))]
-        [(array) (visit (hash-ref node 'element) bound)]
-        [(tuple)
-         (for ([element (in-list (hash-ref node 'elements))])
-           (visit (hash-ref element 'type) bound))]
-        [(object)
-         ;; Object parameters are declaration slots and therefore free in an
-         ;; instantiated object view.  Only nested signature parameters bind.
-         (for ([parameter (in-list (hash-ref node 'typeParameters))])
-           (visit (hash-ref parameter 'node) bound))
-         (for ([property (in-list (hash-ref node 'properties))])
-           (visit (hash-ref property 'type) bound))
-         (for ([index (in-list (hash-ref node 'indexes))])
-           (visit (hash-ref index 'key) bound)
-           (visit (hash-ref index 'value) bound))
-         (for ([entry (in-list (node-signature-entries node))])
-           (visit-signature (cdr entry) bound))]
-        [(function)
-         (for ([parameter (in-list (hash-ref node 'typeParameters))])
-           (visit (hash-ref parameter 'node) bound))
-         (for ([signature (in-list (hash-ref node 'overloads))])
-           (visit-signature signature bound))]
-        [(reference)
-         (for ([argument (in-list (hash-ref node 'typeArguments))])
-           (visit argument bound))]
-        [(brand) (visit (hash-ref node 'base) bound)])))
-  (visit root-id (set))
+;; through the declaration graph. Each graph edge therefore carries the
+;; exact signature binders that mask it.  Solving the resulting finite
+;; monotone dataflow once per immutable interface avoids enumerating the
+;; combinatorial (node, bound-set) state space of large recursive declarations.
+(define free-type-parameter-table-cache (make-weak-hasheq))
+
+(define (signature-free-edges signature)
+  (define type-parameters (signature-all-type-parameters signature))
+  (define excluded
+    (for/set ([parameter (in-list type-parameters)])
+      (hash-ref parameter 'node)))
+  (append
+   (for/list ([parameter (in-list type-parameters)])
+     (cons (hash-ref parameter 'node) excluded))
+   (for/list ([parameter (in-list (hash-ref signature 'parameters))])
+     (cons (hash-ref parameter 'type) excluded))
+   (list (cons (hash-ref signature 'return) excluded))))
+
+(define (node-free-edges node)
+  (define unmasked (set))
+  (define (edges ids)
+    (for/list ([node-id (in-list ids)]) (cons node-id unmasked)))
+  (case (string->symbol (hash-ref node 'kind))
+    [(primitive literal unsupported) '()]
+    [(type-parameter)
+     (edges (filter values
+                    (list (hash-ref node 'constraint)
+                          (hash-ref node 'default))))]
+    [(union intersection) (edges (hash-ref node 'members))]
+    [(array) (edges (list (hash-ref node 'element)))]
+    [(tuple)
+     (edges (map (lambda (element) (hash-ref element 'type))
+                 (hash-ref node 'elements)))]
+    [(object)
+     (append
+      (edges (map (lambda (parameter) (hash-ref parameter 'node))
+                  (hash-ref node 'typeParameters)))
+      (edges (map (lambda (property) (hash-ref property 'type))
+                  (hash-ref node 'properties)))
+      (edges
+       (append*
+        (for/list ([index (in-list (hash-ref node 'indexes))])
+          (list (hash-ref index 'key) (hash-ref index 'value)))))
+      (append*
+       (for/list ([entry (in-list (node-signature-entries node))])
+         (signature-free-edges (cdr entry)))))]
+    [(function)
+     (append
+      (edges (map (lambda (parameter) (hash-ref parameter 'node))
+                  (hash-ref node 'typeParameters)))
+      (append*
+       (for/list ([signature (in-list (hash-ref node 'overloads))])
+         (signature-free-edges signature))))]
+    [(reference) (edges (hash-ref node 'typeArguments))]
+    [(brand) (edges (list (hash-ref node 'base)))]))
+
+(define (build-free-type-parameter-table interface)
+  (define nodes (foreign-interface-v1-nodes interface))
+  (define free
+    (for/hash ([(node-id node) (in-hash nodes)])
+      (values node-id
+              (if (string=? (hash-ref node 'kind) "type-parameter")
+                  (set node-id)
+                  (set)))))
+  (define reverse-edges (make-hash))
+  (for ([(parent-id node) (in-hash nodes)])
+    (for ([edge (in-list (node-free-edges node))])
+      (hash-update! reverse-edges (car edge)
+                    (lambda (prior)
+                      (cons (cons parent-id (cdr edge)) prior))
+                    '())))
+  (define scheduled (mutable-set))
+  (define initial
+    (for/list ([(node-id node) (in-hash nodes)]
+               #:when (string=? (hash-ref node 'kind) "type-parameter"))
+      (set-add! scheduled node-id)
+      node-id))
+  (let propagate ([pending initial])
+    (unless (null? pending)
+      (define child-id (car pending))
+      (set-remove! scheduled child-id)
+      (define next (cdr pending))
+      (for ([reverse-edge (in-list (hash-ref reverse-edges child-id '()))])
+        (define parent-id (car reverse-edge))
+        (define excluded (cdr reverse-edge))
+        (define prior (hash-ref free parent-id))
+        (define updated
+          (set-union prior
+                     (set-subtract (hash-ref free child-id) excluded)))
+        (unless (equal? prior updated)
+          (set! free (hash-set free parent-id updated))
+          (unless (set-member? scheduled parent-id)
+            (set-add! scheduled parent-id)
+            (set! next (cons parent-id next)))))
+      (propagate next)))
   free)
+
+(define (free-type-parameter-ids interface root-id)
+  (hash-ref
+   (hash-ref! free-type-parameter-table-cache interface
+              (lambda () (build-free-type-parameter-table interface)))
+   root-id))
 
 (define (immutable-bindings bindings)
   (if bindings
@@ -1509,9 +1599,11 @@
               (define (render-id node-id bindings)
                 (render-view (make-foreign-view node-id bindings)))
               (define (signature-text signature bindings)
+                (define type-parameters
+                  (signature-all-type-parameters signature))
                 (define local-ids
                   (map (lambda (parameter) (hash-ref parameter 'node))
-                       (hash-ref signature 'typeParameters)))
+                       type-parameters))
                 (define signature-bindings
                   (for/fold ([remaining bindings])
                             ([parameter-id (in-list local-ids)])
@@ -1525,7 +1617,7 @@
                       (string-join
                        (for/list
                            ([parameter
-                             (in-list (hash-ref signature 'typeParameters))])
+                             (in-list type-parameters)])
                          (hash-ref parameter 'name))
                        ", ")))
                  (string-join
@@ -2026,7 +2118,7 @@
                  parameters))
               (and
                (not rest?)
-               (null? (hash-ref signature 'typeParameters))
+               (null? (signature-all-type-parameters signature))
                (for/and
                    ([arity (in-range required (add1 (length parameters)))])
                  (type-compatible?
@@ -2143,7 +2235,7 @@
 (define (signature-bindings interface signature base-bindings expressions actuals)
   (and
    (signature-accepts-arity? interface signature (length actuals))
-   (let* ([type-parameters (hash-ref signature 'typeParameters)]
+   (let* ([type-parameters (signature-all-type-parameters signature)]
           [inferable
            (for/set ([parameter (in-list type-parameters)])
              (hash-ref parameter 'node))]
@@ -2159,9 +2251,10 @@
                     ([(rest-min rest-max argument-id)
                       (rest-parameter-contract interface rest-parameter)])
                   argument-id))])
-     ;; Signature parameters are lexical binders.  A recursive graph may carry
-     ;; a same-node substitution from an enclosing result view; shadow it
-     ;; before this overload performs transactional inference.
+     ;; Locally declared and exact class-captured signature parameters both
+     ;; establish per-call inference slots.  A recursive graph may carry a
+     ;; same-node substitution from an enclosing result view; shadow it before
+     ;; this overload performs transactional inference.
      (for ([parameter-id (in-set inferable)])
        (hash-remove! bindings parameter-id))
      (and

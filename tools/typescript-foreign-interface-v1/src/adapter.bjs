@@ -23,6 +23,7 @@
 
 (defrecord SignatureV1
   [typeParameters (Vec TypeParameterV1)
+   capturedTypeParameters (Vec TypeParameterV1)
    parameters (Vec ParameterV1)
    returnNode String])
 
@@ -234,6 +235,10 @@
       (fn [parameter OpaqueCompilerValueV1] TypeParameterV1
         (type-parameter! bridge state parameter))
       (.signatureTypeParameters bridge signature))
+    (mapv
+      (fn [parameter OpaqueCompilerValueV1] TypeParameterV1
+        (type-parameter! bridge state parameter))
+      (.signatureCapturedTypeParameters bridge signature))
     (mapv
       (fn [parameter OpaqueCompilerValueV1] ParameterV1
         (parameter-node! bridge state signature parameter))
@@ -487,6 +492,9 @@
   (object
     [["typeParameters"
       (mapv type-parameter->wire (signaturev1-typeParameters value))]
+     ["capturedTypeParameters"
+      (mapv type-parameter->wire
+            (signaturev1-capturedTypeParameters value))]
      ["parameters"
       (mapv parameter->wire (signaturev1-parameters value))]
      ["return" (signaturev1-returnNode value)]]))

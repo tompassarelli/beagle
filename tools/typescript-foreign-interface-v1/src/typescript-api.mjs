@@ -693,6 +693,65 @@ export function createCompilerBridge({
     };
     return declarations.every(standardLibraryDeclaration) ? kind : null;
   };
+  const signatureTypeParameterGroups = (signature) => {
+    const declarationNode = signature.declaration;
+    const enclosingClass = declarationNode
+      && ts.isConstructorDeclaration(declarationNode)
+      && (ts.isClassDeclaration(declarationNode.parent)
+          || ts.isClassExpression(declarationNode.parent))
+      ? declarationNode.parent
+      : null;
+    const local = [];
+    const captured = [];
+    const syntheticLocalOwnerKinds = new Set([
+      ts.SyntaxKind.ArrowFunction,
+      ts.SyntaxKind.CallSignature,
+      ts.SyntaxKind.ConstructSignature,
+      ts.SyntaxKind.Constructor,
+      ts.SyntaxKind.ConstructorType,
+      ts.SyntaxKind.FunctionDeclaration,
+      ts.SyntaxKind.FunctionExpression,
+      ts.SyntaxKind.FunctionType,
+      ts.SyntaxKind.MethodDeclaration,
+      ts.SyntaxKind.MethodSignature,
+    ]);
+    const syntheticCapturedOwnerKinds = new Set([
+      ts.SyntaxKind.ClassDeclaration,
+      ts.SyntaxKind.ClassExpression,
+      ts.SyntaxKind.InterfaceDeclaration,
+      ts.SyntaxKind.TypeAliasDeclaration,
+    ]);
+    for (const parameter of signature.getTypeParameters?.() ?? []) {
+      const declarations = parameter.symbol?.declarations ?? [];
+      const ownerKinds = declarations.map((item) => item.parent?.kind);
+      if (declarationNode && declarations.some((item) => item.parent === declarationNode)) {
+        local.push(parameter);
+      } else if (enclosingClass && declarations.some((item) => item.parent === enclosingClass)) {
+        captured.push(parameter);
+      } else if (!declarationNode
+                 && ownerKinds.length > 0
+                 && ownerKinds.every((kind) => syntheticLocalOwnerKinds.has(kind))) {
+        local.push(parameter);
+      } else if (ownerKinds.length > 0
+                 && ownerKinds.every((kind) => syntheticCapturedOwnerKinds.has(kind))) {
+        captured.push(parameter);
+      } else {
+        const declarationKind = declarationNode
+          ? ts.SyntaxKind[declarationNode.kind]
+          : "<synthetic>";
+        const parameterOwners = declarations
+          .map((item) => ts.SyntaxKind[item.parent?.kind] ?? "<none>")
+          .join(", ");
+        const targetKind = signature.target?.declaration
+          ? ts.SyntaxKind[signature.target.declaration.kind]
+          : "<synthetic>";
+        throw new Error(
+          `TypeScript ${declarationKind} signature (target ${targetKind}) type parameter ${parameter.symbol?.getName?.() ?? "<anonymous>"} has no exact lexical signature or enclosing-class owner; declaration parents: ${parameterOwners || "<none>"}`,
+        );
+      }
+    }
+    return { captured, local };
+  };
   const typeKind = (context, type) => {
     if (forcedCodes.has(type)) return "unsupported";
     if (brand(context, type)) return "brand";
@@ -739,9 +798,26 @@ export function createCompilerBridge({
     moduleMapping(mappings, specifier) { return mappings.get(specifier) ?? null; },
     "nominalReference?": (type) => Boolean(type.symbol?.valueDeclaration && ts.isClassDeclaration(type.symbol.valueDeclaration)),
     declarationTypeParameters(type) {
-      const candidates = type.typeParameters ?? type.aliasTypeArguments ?? [];
-      return candidates.every((candidate) => hasFlag(candidate.flags, ts.TypeFlags.TypeParameter))
-        ? candidates
+      // Alias arguments are use-site substitutions, not lexical declarations.
+      // An uninstantiated generic alias is the one exception: the compiler
+      // exposes its own declaration parameters through aliasTypeArguments.
+      // Require exact parent identity with the alias declaration so a use such
+      // as Readonly<T> cannot steal the surrounding signature's T.
+      const direct = type.typeParameters ?? [];
+      if (direct.length > 0) {
+        return direct.every((candidate) => hasFlag(candidate.flags, ts.TypeFlags.TypeParameter))
+          ? direct
+          : [];
+      }
+      const aliasDeclarations = new Set(type.aliasSymbol?.declarations ?? []);
+      const aliasArguments = type.aliasTypeArguments ?? [];
+      return aliasArguments.length > 0
+        && aliasArguments.every((candidate) => (
+          hasFlag(candidate.flags, ts.TypeFlags.TypeParameter)
+          && (candidate.symbol?.declarations ?? [])
+            .some((item) => aliasDeclarations.has(item.parent))
+        ))
+        ? aliasArguments
         : [];
     },
     "optionalSymbol?": (symbol) => hasFlag(symbol.flags, ts.SymbolFlags.Optional),
@@ -816,9 +892,10 @@ export function createCompilerBridge({
     resolveAlias(symbol) { return hasFlag(symbol.flags, ts.SymbolFlags.Alias) ? this.context.checker.getAliasedSymbol(symbol) : symbol; },
     "restParameter?": (symbol) => Boolean(declaration(symbol)?.dotDotDotToken),
     signatureParameters: (signature) => signature.getParameters(),
+    signatureCapturedTypeParameters: (signature) => signatureTypeParameterGroups(signature).captured,
     signatureMinimumArgumentCount: (signature) => signature.minArgumentCount,
     signatureReturnType(signature) { return this.context.checker.getReturnTypeOfSignature(signature); },
-    signatureTypeParameters: (signature) => signature.getTypeParameters?.() ?? [],
+    signatureTypeParameters: (signature) => signatureTypeParameterGroups(signature).local,
     sort(values) {
       return [...values].sort((a, b) => {
         const key = (value) => typeof value === "string" ? value

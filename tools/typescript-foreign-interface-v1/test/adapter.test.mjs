@@ -146,6 +146,14 @@ describe("ForeignInterfaceV1 graph semantics", () => {
     expect(page.typeParameters[0]).toMatchObject({ name: "T", node: itemArray.element });
     expect(nodes.get(users.typeArguments[0]).name).toBe("User");
 
+    const genericBoxConstructor = exportedNode(first, "GenericBox");
+    const genericBoxSignature = genericBoxConstructor.constructSignatures[0];
+    const genericBoxInstance = nodes.get(genericBoxSignature.return);
+    expect(genericBoxSignature.typeParameters).toEqual([]);
+    expect(genericBoxSignature.capturedTypeParameters).toEqual(genericBoxInstance.typeParameters);
+    expect(genericBoxSignature.capturedTypeParameters).toHaveLength(1);
+    expect(genericBoxSignature.capturedTypeParameters[0].name).toBe("T");
+
     const transformer = exportedNode(first, "Transformer");
     expect(transformer.kind).toBe("function");
     expect(transformer.typeParameters).toHaveLength(1);

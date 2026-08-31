@@ -120,6 +120,49 @@
      "missing Bun must be diagnosed before adapter materialization"))))
 
 (test-case
+ "generic class constructors retain one lexical owner per type parameter"
+ (with-isolated-adapter-cache
+  (lambda (project-root _adapter-cache)
+    (write-source!
+     (build-path project-root "package.json")
+     "{\"name\":\"resolver-test\",\"private\":true,\"type\":\"module\"}\n")
+    (define package-root
+      (build-path project-root "node_modules" "@fixture" "generic-class"))
+    (make-directory* package-root)
+    (write-source!
+     (build-path package-root "package.json")
+     (string-append
+      "{\"name\":\"@fixture/generic-class\",\"version\":\"1.0.0\","
+      "\"type\":\"module\",\"exports\":{\".\":{"
+      "\"beagle\":\"./index.d.ts\","
+      "\"types\":\"./index.d.ts\","
+      "\"default\":\"./index.js\"}}}\n"))
+    (write-source!
+     (build-path package-root "index.d.ts")
+     (string-append
+      "export declare class GenericBox<T> {\n"
+      "  constructor(value: T);\n"
+      "  readonly value: T;\n"
+      "}\n"))
+    (define source-path (build-path project-root "generic-class.bjs"))
+    (write-source!
+     source-path
+     (string-append
+      "#lang beagle/js\n"
+      "(ns resolver-test.generic-class\n"
+      "  (:require [\"@fixture/generic-class\" :refer [GenericBox]]))\n"
+      "(def constructor GenericBox GenericBox)\n"))
+
+    (define closure
+      (resolve-production-module-source-closure
+       (list (module-source-input "resolver-test/generic-class.bjs" source-path))
+       '()))
+    (check-equal?
+     (hash-count
+      (module-source-closure-foreign-module-resolutions closure))
+     1))))
+
+(test-case
  "production resolution checks and emits exact native ESM interfaces"
  (with-isolated-adapter-cache
   (lambda (project-root adapter-cache)

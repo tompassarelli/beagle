@@ -116,8 +116,10 @@
         'default default))
 
 (define (signature #:type-parameters [type-parameters '()]
+                   #:captured-type-parameters [captured-type-parameters '()]
                    #:parameters [parameters '()])
   (hash 'typeParameters type-parameters
+        'capturedTypeParameters captured-type-parameters
         'parameters parameters
         'return "n:string"))
 
@@ -661,8 +663,8 @@
           STRING-NODE
           parameter-node))))
 
-(reject "reference targets must be object declarations"
-        #rx"reference target must be an object declaration"
+(reject "reference targets must be object or function declarations"
+        #rx"reference target must be an object or function declaration"
         (type-fi
          "n:reference"
          (list (reference-node #:target "n:string") STRING-NODE)))
@@ -709,6 +711,74 @@
 (reject "type-parameter nodes require a lexical declaration owner"
         #rx"exactly one lexical declaration owner; got 0"
         (type-fi "n:t" (list (type-parameter-node "n:t" "T"))))
+
+(test-case
+ "construct signatures re-expose exact returned declaration parameters"
+ (define declaration (type-parameter "T" "n:t"))
+ (define instance
+   (hash-set*
+    (object-node #:type-parameters (list declaration))
+    'id "n:instance"
+    'name "GenericBox"))
+ (define constructor
+   (hash-set*
+    (object-node)
+    'id "n:constructor"
+    'name "GenericBox"
+    'constructSignatures
+    (list
+     (hash-set
+      (signature #:captured-type-parameters (list declaration))
+      'return "n:instance"))))
+ (define graph
+   (validate-foreign-interface-v1
+    (fixture
+     #:exports
+     (list (hash 'name "GenericBox"
+                 'space "both"
+                 'node "n:constructor"
+                 'runtimeName "GenericBox"))
+     #:nodes
+     (sort (list constructor
+                 instance
+                 (type-parameter-node "n:t" "T"))
+           string<?
+           #:key (lambda (node) (hash-ref node 'id))))))
+ (define constructor-node
+   (node-by-id (foreign-interface-v1->jsexpr graph) "n:constructor"))
+ (check-equal?
+  (hash-ref
+   (first (hash-ref constructor-node 'constructSignatures))
+   'capturedTypeParameters)
+  (list declaration)))
+
+(reject
+ "construct-signature captures must match returned declaration parameters"
+ #rx"must exactly re-expose the direct returned object's declaration parameters"
+ (let* ([declaration (type-parameter "T" "n:t")]
+        [constructor
+         (hash-set*
+          (object-node)
+          'id "n:constructor"
+          'constructSignatures
+          (list
+           (hash-set
+            (signature #:captured-type-parameters (list declaration))
+            'return "n:instance")))]
+        [instance
+         (hash-set* (object-node) 'id "n:instance" 'name "Instance")])
+   (fixture
+    #:exports
+    (list (hash 'name "GenericBox"
+                'space "value"
+                'node "n:constructor"
+                'runtimeName "GenericBox"))
+    #:nodes
+    (sort (list constructor
+                instance
+                (type-parameter-node "n:t" "T"))
+          string<?
+          #:key (lambda (node) (hash-ref node 'id))))))
 
 (reject
  "type-parameter nodes cannot be shared by declaration owners"
