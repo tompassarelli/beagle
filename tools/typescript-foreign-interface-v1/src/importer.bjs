@@ -42,21 +42,30 @@
    counter (Atom Int)
    supported-count (Atom Int)])
 
-(defn join-with [separator String values (Vec String)] String
+(defn join-with
+  [separator String
+   values (Vec String)] String
   (if (empty? values)
     ""
     (reduce
-      (fn [result String value String] String
+      (fn
+        [result String
+         value String] String
         (str result separator value))
       (first values)
       (rest values))))
 
-(defn parenthesize [head String values (Vec String)] String
+(defn parenthesize
+  [head String
+   values (Vec String)] String
   (str "(" head
        (if (empty? values) "" (str " " (join-with " " values)))
        ")"))
 
-(defn bridge-node [state ImportStateV1 node OpaqueTypeScriptNodeV1 field String] OpaqueTypeScriptNodeV1
+(defn bridge-node
+  [state ImportStateV1
+   node OpaqueTypeScriptNodeV1
+   field String] OpaqueTypeScriptNodeV1
   (.nodeField (importstatev1-bridge state) node field))
 
 (defn bridge-nodes
@@ -66,10 +75,14 @@
   (: (.nodeList (importstatev1-bridge state) node field)
      (Vec OpaqueTypeScriptNodeV1)))
 
-(defn node-kind [state ImportStateV1 node OpaqueTypeScriptNodeV1] String
+(defn node-kind
+  [state ImportStateV1
+   node OpaqueTypeScriptNodeV1] String
   (.nodeKind (importstatev1-bridge state) node))
 
-(defn node-name [state ImportStateV1 node OpaqueTypeScriptNodeV1] String
+(defn node-name
+  [state ImportStateV1
+   node OpaqueTypeScriptNodeV1] String
   (.nodeName (importstatev1-bridge state) node))
 
 (defn present? [value OpaqueTypeScriptNodeV1] Bool
@@ -83,12 +96,10 @@
    node OpaqueTypeScriptNodeV1
    code String
    message String] String
-  (let [location OpaqueCompilerValueV1
-        (.location (importstatev1-bridge state)
+  (let [location OpaqueCompilerValueV1 (.location (importstatev1-bridge state)
                    (importstatev1-context state)
                    node)
-        diagnostic SourceDiagnosticV1
-        (->SourceDiagnosticV1
+        diagnostic SourceDiagnosticV1 (->SourceDiagnosticV1
           code
           message
           (: (.-file location) String)
@@ -100,7 +111,9 @@
                (conj values diagnostic)))
       "__typescript_import_unsupported__")))
 
-(defn next-temporary! [state ImportStateV1 prefix String] String
+(defn next-temporary!
+  [state ImportStateV1
+   prefix String] String
   (let [value Int (swap! (importstatev1-counter state) inc)]
     (str prefix value)))
 
@@ -121,8 +134,7 @@
    type OpaqueTypeScriptTypeV1] String
   (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)]
     (if (identical? (.typeKind bridge type) "union")
-      (let [members (Vec String)
-            (distinct-strings
+      (let [members (Vec String) (distinct-strings
               (mapv
                 (fn [member OpaqueTypeScriptTypeV1] String
                   (type->beagle! state member true))
@@ -139,22 +151,19 @@
   [state ImportStateV1
    signature OpaqueCompilerValueV1] String
   (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
-        parameters (Vec OpaqueCompilerValueV1)
-        (: (.signatureParameters bridge signature) (Vec OpaqueCompilerValueV1))
+        parameters (Vec OpaqueCompilerValueV1) (: (.signatureParameters bridge signature) (Vec OpaqueCompilerValueV1))
         required-count Int (.signatureMinimumArgumentCount bridge signature)
-        parameter-types (Vec String)
-        (map-indexed
-          (fn [index Int parameter OpaqueCompilerValueV1] String
-            (let [type OpaqueTypeScriptTypeV1
-                  (.parameterType bridge signature parameter)]
+        parameter-types (Vec String) (map-indexed
+          (fn
+            [index Int
+             parameter OpaqueCompilerValueV1] String
+            (let [type OpaqueTypeScriptTypeV1 (.parameterType bridge signature parameter)]
               (if (>= index required-count)
                 (optional-parameter-type->beagle! state type)
                 (type->beagle! state type true))))
           parameters)
-        return-type String
-        (type->beagle! state (.signatureReturnType bridge signature) true)
-        arities (Vec String)
-        (mapv
+        return-type String (type->beagle! state (.signatureReturnType bridge signature) true)
+        arities (Vec String) (mapv
           (fn [arity Int] String
             (parenthesize "Fn"
               [(str "[" (join-with " " (subvec parameter-types 0 arity)) "]")
@@ -166,7 +175,9 @@
 
 (defn distinct-strings [values (Vec String)] (Vec String)
   (reduce
-    (fn [result (Vec String) value String] (Vec String)
+    (fn
+      [result (Vec String)
+       value String] (Vec String)
       (if (.includes result value) result (conj result value)))
     []
     values))
@@ -187,8 +198,7 @@
   [state ImportStateV1
    type OpaqueTypeScriptTypeV1
    name String] Nil
-  (let [specifier (U String Nil)
-        (.typeImportSpecifier
+  (let [specifier (U String Nil) (.typeImportSpecifier
           (importstatev1-bridge state)
           (importstatev1-context state)
           type)]
@@ -202,16 +212,14 @@
   (and (identical? (.typeKind (importstatev1-bridge state) type) "literal")
        (identical? (.literalKind (importstatev1-bridge state) type) "string")))
 
-(defn string-literal-scalar-form
-  [name String] String
+(defn string-literal-scalar-form [name String] String
   (str "(defscalar " name " String)"))
 
 (defn ensure-literal-enum!
   [state ImportStateV1
    members (Vec OpaqueTypeScriptTypeV1)] String
   (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
-        values (Vec String)
-        (sort (distinct-strings
+        values (Vec String) (sort (distinct-strings
                 (mapv (fn [member OpaqueTypeScriptTypeV1] String
                         (str (.literalValue bridge member)))
                       members)))
@@ -219,8 +227,7 @@
         existing (U String Nil) (get (deref (importstatev1-literal-enums state)) key)]
     (if existing
       existing
-      (let [name String
-            (str "TypeScriptStringLiteralV"
+      (let [name String (str "TypeScriptStringLiteralV"
                  (+ (count (deref (importstatev1-literal-enums state))) 1))]
         (do
           (swap! (importstatev1-literal-enums state)
@@ -289,6 +296,87 @@
                   properties)]
             (register-synthetic-record! state record-name fields)))))))
 
+(defn ensure-opaque-boundary-type!
+  [state ImportStateV1
+   kind String] String
+  (let [name String (if (identical? kind "unknown")
+          "TypeScriptUnknownV1"
+          "TypeScriptObjectV1")]
+    (if (contains? (deref (importstatev1-local-types state)) name)
+      name
+      (do
+        (swap! (importstatev1-local-types state)
+               (fn [types (Map String Bool)] (Map String Bool)
+                 (assoc types name true)))
+        (swap! (importstatev1-synthetic-forms state)
+               (fn [forms (Vec String)] (Vec String)
+                 (conj forms (str "(defrecord " name " [])"))))
+        name))))
+
+(defn partial-record-type-arguments
+  [state ImportStateV1
+   type OpaqueTypeScriptTypeV1] (Vec OpaqueTypeScriptTypeV1)
+  (: (.partialRecordTypeArguments (importstatev1-bridge state) type)
+     (Vec OpaqueTypeScriptTypeV1)))
+
+(defn partial-type->beagle!
+  [state ImportStateV1
+   type OpaqueTypeScriptTypeV1] String
+  (let [arguments (Vec OpaqueTypeScriptTypeV1)
+        (partial-record-type-arguments state type)]
+    (if (identical? (count arguments) 2)
+      (parenthesize "Map"
+        [(type->beagle! state (first arguments) true)
+         (type->beagle! state (nth arguments 1) true)])
+      (diagnostic! state
+        (.sourceFile (importstatev1-bridge state) (importstatev1-context state))
+        "TSI_PARTIAL_TYPE"
+        (str "Partial type "
+             (.typeDisplay (importstatev1-bridge state) type)
+             " requires a named record or Record<K, V>")))))
+
+(defn optional-property-type->beagle!
+  [state ImportStateV1
+   owner OpaqueTypeScriptTypeV1
+   property OpaqueCompilerValueV1] String
+  (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
+        type OpaqueTypeScriptTypeV1 (.propertyType bridge owner property)
+        source String (type->beagle! state type true)
+        already-optional? Bool (and (identical? (.typeKind bridge type) "union")
+          (some
+            (fn [member OpaqueTypeScriptTypeV1] Bool
+              (let [kind String (.typeKind bridge member)]
+                (or (identical? kind "undefined")
+                    (identical? kind "null"))))
+            (type-members state type)))]
+    (if (or already-optional? (not (.optionalSymbol? bridge property)))
+      source
+      (parenthesize "U" [source "Nil"]))))
+
+(defn partial-record-form!
+  [state ImportStateV1
+   name String
+   type OpaqueTypeScriptTypeV1] String
+  (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
+        properties (Vec OpaqueCompilerValueV1)
+        (: (.sort bridge (.typeProperties bridge type))
+           (Vec OpaqueCompilerValueV1))
+        fields (Vec String) (reduce
+          (fn
+            [values (Vec String)
+             property OpaqueCompilerValueV1] (Vec String)
+            (into values
+              [(.symbolName bridge property)
+               (optional-property-type->beagle! state type property)]))
+          []
+          properties)]
+    (if (empty? properties)
+      (diagnostic! state (.sourceFile bridge (importstatev1-context state))
+        "TSI_PARTIAL_RECORD"
+        (str "Partial type " (.typeDisplay bridge type)
+             " has no finite record fields"))
+      (str "(defrecord " name " [" (join-with " " fields) "])"))))
+
 (defn type->beagle!
   [state ImportStateV1
    type OpaqueTypeScriptTypeV1
@@ -296,8 +384,7 @@
   (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
         kind String (.typeKind bridge type)
         type-name String (.typeName bridge type)
-        local-name? Bool
-        (and use-local-name
+        local-name? Bool (and use-local-name
              (.typeLocal? bridge type)
              (contains? (deref (importstatev1-local-types state)) type-name))]
     (cond
@@ -317,15 +404,30 @@
           (identical? literal-kind "number") "Number"
           (identical? literal-kind "boolean") "Bool"
           :else "Int"))
-      (identical? kind "type-parameter") type-name
+      (identical? kind "type-parameter")
+      (let [element-type OpaqueTypeScriptTypeV1 (.typeParameterArrayElementType bridge type)]
+        (if (present? element-type)
+          (parenthesize "Vec" [(str type-name "Element")])
+          type-name))
+      (identical? kind "indexed-access")
+      (let [owner OpaqueTypeScriptTypeV1 (.indexedAccessObjectType bridge type)
+            owner-element OpaqueTypeScriptTypeV1 (if (present? owner)
+              (.typeParameterArrayElementType bridge owner)
+              nil)]
+        (if (present? owner-element)
+          (str (.typeName bridge owner) "Element")
+          (let [constraint OpaqueTypeScriptTypeV1 (.baseConstraint bridge type)]
+            (if (present? constraint)
+              (type->beagle! state constraint true)
+              (diagnostic! state (.sourceFile bridge (importstatev1-context state))
+                "TSI_INDEXED_ACCESS"
+                (str "cannot resolve indexed access type " (.typeDisplay bridge type)))))))
       (identical? kind "array")
       (parenthesize "Vec"
         [(type->beagle! state (.arrayElementType bridge type) true)])
       (identical? kind "tuple")
-      (let [elements (Vec OpaqueCompilerValueV1)
-            (: (.tupleElements bridge type) (Vec OpaqueCompilerValueV1))
-            element-types (Vec OpaqueTypeScriptTypeV1)
-            (mapv (fn [element OpaqueCompilerValueV1] OpaqueTypeScriptTypeV1
+      (let [elements (Vec OpaqueCompilerValueV1) (: (.tupleElements bridge type) (Vec OpaqueCompilerValueV1))
+            element-types (Vec OpaqueTypeScriptTypeV1) (mapv (fn [element OpaqueCompilerValueV1] OpaqueTypeScriptTypeV1
                     (.tupleElementType bridge element))
                   elements)]
         (if (and (not (empty? element-types))
@@ -347,8 +449,7 @@
                            (string-literal-type? state member))
                          raw-members))
           (ensure-literal-enum! state raw-members)
-          (let [members (Vec String)
-                (distinct-strings
+          (let [members (Vec String) (distinct-strings
                   (mapv
                     (fn [member OpaqueTypeScriptTypeV1] String
                       (type->beagle! state member true))
@@ -357,16 +458,14 @@
               (first members)
               (parenthesize "U" members)))))
       (identical? kind "function")
-      (let [signatures (Vec OpaqueCompilerValueV1)
-            (: (.callSignatures bridge type) (Vec OpaqueCompilerValueV1))]
+      (let [signatures (Vec OpaqueCompilerValueV1) (: (.callSignatures bridge type) (Vec OpaqueCompilerValueV1))]
         (if (identical? (count signatures) 1)
           (signature->type! state (first signatures))
           (diagnostic! state (.sourceFile bridge (importstatev1-context state))
             "TSI_TYPE_OVERLOAD"
             (str "function type has " (count signatures) " overloads"))))
       (identical? kind "reference")
-      (let [arguments (Vec String)
-            (mapv
+      (let [arguments (Vec String) (mapv
               (fn [argument OpaqueTypeScriptTypeV1] String
                 (type->beagle! state argument true))
               (type-arguments state type))]
@@ -376,6 +475,7 @@
           (parenthesize "Vec" arguments)
           (identical? type-name "Readonly")
           (if (empty? arguments) type-name (first arguments))
+          (identical? type-name "Partial") (partial-type->beagle! state type)
           (identical? type-name "Record")
           (parenthesize "Map" arguments)
           :else (parenthesize type-name arguments)))
@@ -403,15 +503,59 @@
           (diagnostic! state (.sourceFile bridge (importstatev1-context state))
             "TSI_ANONYMOUS_OBJECT_CONSTRUCT"
             "anonymous construct-signature object type cannot be represented as a record")))
-      (or (identical? kind "any") (identical? kind "unknown"))
+      (or (identical? kind "unknown")
+          (identical? kind "non-primitive-object"))
+      (ensure-opaque-boundary-type! state kind)
+      (identical? kind "any")
       (diagnostic! state (.sourceFile bridge (importstatev1-context state))
         "TSI_DYNAMIC_TYPE"
-        (str "TypeScript " kind " cannot enter typed Beagle source"))
+        "TypeScript any cannot enter typed Beagle source")
       :else
       (diagnostic! state (.sourceFile bridge (importstatev1-context state))
         "TSI_UNSUPPORTED_TYPE"
         (str "unsupported TypeScript type " (.typeDisplay bridge type)
              " (kind " kind ")")))))
+
+(defn flow-ascribe!
+  [state ImportStateV1
+   node OpaqueTypeScriptNodeV1
+   source String] String
+  (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
+        declared OpaqueTypeScriptTypeV1 (.declaredType bridge node)
+        actual OpaqueTypeScriptTypeV1 (.typeAt bridge node)]
+    (if (and (present? declared)
+             (or (identical? (.typeKind bridge declared) "any")
+                 (identical? (.typeKind bridge declared) "unknown")
+                 (identical? (.typeKind bridge declared) "object-keyword"))
+             (.flowAscriptionType? bridge actual))
+      (str "(: " source " " (type->beagle! state actual true) ")")
+      source)))
+
+(defn type-parameter-binding!
+  [state ImportStateV1
+   type OpaqueTypeScriptTypeV1] String
+  (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
+        name String (.typeName bridge type)
+        element OpaqueTypeScriptTypeV1 (.typeParameterArrayElementType bridge type)]
+    (if (present? element)
+      (str "(" name "Element <: " (type->beagle! state element true) ")")
+      (let [constraint OpaqueTypeScriptTypeV1 (.typeParameterConstraint bridge type)]
+        (if (and (present? constraint)
+                 (not (identical? (.typeDisplay bridge constraint) "{}")))
+          (str "(" name " <: " (type->beagle! state constraint true) ")")
+          name)))))
+
+(defn function-type-scheme!
+  [state ImportStateV1
+   signature OpaqueCompilerValueV1] String
+  (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
+        parameters (Vec OpaqueTypeScriptTypeV1) (: (.signatureTypeParameters bridge signature) (Vec OpaqueTypeScriptTypeV1))]
+    (str "(forall ["
+         (join-with " "
+           (mapv (fn [parameter OpaqueTypeScriptTypeV1] String
+                   (type-parameter-binding! state parameter))
+                 parameters))
+         "] " (signature->type! state signature) ")")))
 
 (defn emit-binding-name!
   [state ImportStateV1
@@ -421,16 +565,15 @@
       (identical? kind "Identifier") (node-name state binding)
       (identical? kind "ObjectBindingPattern")
       (let [elements (Vec OpaqueTypeScriptNodeV1) (bridge-nodes state binding "elements")
-            names (Vec String)
-            (mapv
+            names (Vec String) (mapv
               (fn [element OpaqueTypeScriptNodeV1] String
                 (node-name state (bridge-node state element "name")))
               elements)
-            defaults (Vec String)
-            (reduce
-              (fn [values (Vec String) element OpaqueTypeScriptNodeV1] (Vec String)
-                (let [initializer OpaqueTypeScriptNodeV1
-                      (bridge-node state element "initializer")]
+            defaults (Vec String) (reduce
+              (fn
+                [values (Vec String)
+                 element OpaqueTypeScriptNodeV1] (Vec String)
+                (let [initializer OpaqueTypeScriptNodeV1 (bridge-node state element "initializer")]
                   (if (present? initializer)
                     (into values
                       [(node-name state (bridge-node state element "name"))
@@ -448,7 +591,9 @@
            (join-with " "
              (mapv
                (fn [element OpaqueTypeScriptNodeV1] String
-                 (node-name state (bridge-node state element "name")))
+                 (if (identical? (node-kind state element) "OmittedExpression")
+                   "_"
+                   (node-name state (bridge-node state element "name"))))
                (bridge-nodes state binding "elements")))
            "]")
       :else
@@ -464,13 +609,13 @@
          (.typeAt (importstatev1-bridge state) parameter)
          true)))
 
-(defn emit-arrow! [state ImportStateV1 node OpaqueTypeScriptNodeV1] String
+(defn emit-arrow!
+  [state ImportStateV1
+   node OpaqueTypeScriptNodeV1] String
   (let [parameters (Vec OpaqueTypeScriptNodeV1) (bridge-nodes state node "parameters")
-        return-type OpaqueTypeScriptTypeV1
-        (.returnType (importstatev1-bridge state) node)
+        return-type OpaqueTypeScriptTypeV1 (.returnType (importstatev1-bridge state) node)
         body OpaqueTypeScriptNodeV1 (bridge-node state node "body")
-        body-source String
-        (if (identical? (node-kind state body) "Block")
+        body-source String (if (identical? (node-kind state body) "Block")
           (emit-statements! state (bridge-nodes state body "statements"))
           (emit-expression! state body))]
     (str "(fn [" (join-with " " (mapv (fn [p OpaqueTypeScriptNodeV1] String
@@ -486,10 +631,8 @@
     (if (and (identical? (count parameters) 2)
              (identical? (node-name state (bridge-node state (first parameters) "name")) "_"))
       (let [index-parameter OpaqueTypeScriptNodeV1 (nth parameters 1)
-            return-type OpaqueTypeScriptTypeV1
-            (.returnType (importstatev1-bridge state) node)
-            body-source String
-            (if (identical? (node-kind state body) "Block")
+            return-type OpaqueTypeScriptTypeV1 (.returnType (importstatev1-bridge state) node)
+            body-source String (if (identical? (node-kind state body) "Block")
               (emit-statements! state (bridge-nodes state body "statements"))
               (emit-expression! state body))]
         (str "(fn ["
@@ -515,8 +658,7 @@
    type OpaqueTypeScriptTypeV1] (U String Nil)
   (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
         name String (.typeName bridge type)
-        specifier (U String Nil)
-        (.typeImportSpecifier bridge (importstatev1-context state) type)]
+        specifier (U String Nil) (.typeImportSpecifier bridge (importstatev1-context state) type)]
     (if (and specifier
              (not (identical? name "anonymous"))
              (not (identical? name "__type"))
@@ -532,8 +674,7 @@
    type OpaqueTypeScriptTypeV1] OpaqueTypeScriptTypeV1
   (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)]
     (if (identical? (.typeKind bridge type) "union")
-      (let [members (Vec OpaqueTypeScriptTypeV1)
-            (filterv
+      (let [members (Vec OpaqueTypeScriptTypeV1) (filterv
               (fn [member OpaqueTypeScriptTypeV1] Bool
                 (let [kind String (.typeKind bridge member)]
                   (and (not (identical? kind "undefined"))
@@ -559,90 +700,119 @@
         nil))
     properties))
 
+(defn object-property-source!
+  [state ImportStateV1
+   properties (Vec OpaqueTypeScriptNodeV1)
+   name String] String
+  (reduce
+    (fn
+      [current String
+       property OpaqueTypeScriptNodeV1] String
+      (let [kind String (node-kind state property)]
+        (cond
+          (and (or (identical? kind "PropertyAssignment")
+                   (identical? kind "ShorthandPropertyAssignment"))
+               (identical? (node-name state (bridge-node state property "name")) name))
+          (if (identical? kind "PropertyAssignment")
+            (emit-expression! state (bridge-node state property "initializer"))
+            (node-name state (bridge-node state property "name")))
+          (identical? kind "SpreadAssignment")
+          (let [temporary String (next-temporary! state "spread-value-")
+                expression OpaqueTypeScriptNodeV1 (bridge-node state property "expression")
+                spread String (emit-expression! state expression)
+                spread-type String (type->beagle! state
+                  (.typeAt (importstatev1-bridge state) expression)
+                  true)
+                key String (.jsonString (importstatev1-bridge state) name)]
+            (str "(let [" temporary " " spread-type " " spread "] "
+                 "(if (contains? " temporary " " key ") "
+                 "(get " temporary " " key ") " current "))"))
+          :else current)))
+    "nil"
+    properties))
+
 (defn emit-object!
   [state ImportStateV1
    node OpaqueTypeScriptNodeV1
-  forced-record (U String Nil)] String
+   forced-record (U String Nil)] String
   (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
         properties (Vec OpaqueTypeScriptNodeV1) (bridge-nodes state node "properties")
         raw-contextual OpaqueTypeScriptTypeV1 (.contextualType bridge node)
-        contextual OpaqueTypeScriptTypeV1
-        (if (present? raw-contextual)
+        contextual OpaqueTypeScriptTypeV1 (if (present? raw-contextual)
           (contextual-object-type state raw-contextual)
           raw-contextual)
-        record-name (U String Nil)
-        (if forced-record
+        record-name (U String Nil) (if forced-record
           forced-record
           (if (present? contextual)
             (let [local (U String Nil) (local-record-name state contextual)]
-              (if local local (imported-record-name! state contextual)))
-            nil))]
+              (if local
+                local
+                (let [matched (U String Nil) (.contextualRecordName bridge
+                        (importstatev1-context state) node)]
+                  (if matched matched (imported-record-name! state contextual)))))
+            nil))
+        record-type OpaqueTypeScriptTypeV1 (if (and record-name
+                 (present? (.localTypeByName bridge
+                             (importstatev1-context state) record-name)))
+          (.localTypeByName bridge (importstatev1-context state) record-name)
+          contextual)]
     (if record-name
-      (let [type OpaqueTypeScriptTypeV1
-            (if (present? contextual) contextual (.typeAt bridge node))
-            fields (Vec OpaqueCompilerValueV1)
-            (: (.typeProperties bridge type) (Vec OpaqueCompilerValueV1))
-            arguments (Vec String)
-            (mapv
+      (let [type OpaqueTypeScriptTypeV1 (if (present? record-type) record-type (.typeAt bridge node))
+            fields (Vec OpaqueCompilerValueV1) (: (.typeProperties bridge type) (Vec OpaqueCompilerValueV1))
+            arguments (Vec String) (mapv
               (fn [field OpaqueCompilerValueV1] String
-                (let [name String (.symbolName bridge field)
-                      value (U OpaqueTypeScriptNodeV1 Nil)
-                      (property-value state properties name)]
-                  (if value (emit-expression! state value) "nil")))
+                (object-property-source! state properties (.symbolName bridge field)))
               fields)]
         (parenthesize (str "->" record-name) arguments))
-      (str "{"
-           (join-with " "
-             (mapv
-               (fn [property OpaqueTypeScriptNodeV1] String
-                 (let [kind String (node-kind state property)
-                       name String (node-name state (bridge-node state property "name"))]
-                   (cond
-                     (identical? kind "PropertyAssignment")
-                     (str (.literalJson bridge (bridge-node state property "name"))
-                          " "
-                          (emit-expression! state (bridge-node state property "initializer")))
-                     (identical? kind "ShorthandPropertyAssignment")
-                     (str (.literalJson bridge (bridge-node state property "name"))
-                          " " name)
-                     :else
-                     (diagnostic! state property "TSI_OBJECT_PROPERTY"
-                       (str "unsupported object property " kind)))))
-               properties))
-           "}"))))
+      (let [parts (Vec String) (mapv
+              (fn [property OpaqueTypeScriptNodeV1] String
+                (let [kind String (node-kind state property)
+                      name String (node-name state (bridge-node state property "name"))]
+                  (cond
+                    (identical? kind "PropertyAssignment")
+                    (str "{" (.literalJson bridge (bridge-node state property "name"))
+                         " "
+                         (emit-expression! state (bridge-node state property "initializer"))
+                         "}")
+                    (identical? kind "ShorthandPropertyAssignment")
+                    (str "{" (.literalJson bridge (bridge-node state property "name"))
+                         " " name "}")
+                    (identical? kind "SpreadAssignment")
+                    (emit-expression! state (bridge-node state property "expression"))
+                    :else
+                    (diagnostic! state property "TSI_OBJECT_PROPERTY"
+                      (str "unsupported object property " kind)))))
+              properties)]
+        (parenthesize "merge" (into ["{}"] parts))))))
 
-(defn emit-array! [state ImportStateV1 node OpaqueTypeScriptNodeV1] String
+(defn emit-array!
+  [state ImportStateV1
+   node OpaqueTypeScriptNodeV1] String
   (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
         elements (Vec OpaqueTypeScriptNodeV1) (bridge-nodes state node "elements")
-        spread? Bool
-        (some (fn [element OpaqueTypeScriptNodeV1] Bool
+        spread? Bool (some (fn [element OpaqueTypeScriptNodeV1] Bool
                 (identical? (node-kind state element) "SpreadElement"))
               elements)
         inferred-type OpaqueTypeScriptTypeV1 (.typeAt bridge node)
         contextual-type OpaqueTypeScriptTypeV1 (.contextualType bridge node)
-        array-type OpaqueTypeScriptTypeV1
-        (if (and (present? contextual-type)
+        array-type OpaqueTypeScriptTypeV1 (if (and (present? contextual-type)
                  (identical? (.typeKind bridge contextual-type) "tuple"))
           contextual-type
           inferred-type)
         tuple? Bool (identical? (.typeKind bridge array-type) "tuple")
-        tuple-elements (Vec OpaqueCompilerValueV1)
-        (if tuple?
+        tuple-elements (Vec OpaqueCompilerValueV1) (if tuple?
           (: (.tupleElements bridge array-type) (Vec OpaqueCompilerValueV1))
           [])
-        tuple-types (Vec OpaqueTypeScriptTypeV1)
-        (mapv (fn [element OpaqueCompilerValueV1] OpaqueTypeScriptTypeV1
+        tuple-types (Vec OpaqueTypeScriptTypeV1) (mapv (fn [element OpaqueCompilerValueV1] OpaqueTypeScriptTypeV1
                 (.tupleElementType bridge element))
               tuple-elements)
-        literal-scalar (U String Nil)
-        (if (and (not (empty? tuple-types))
+        literal-scalar (U String Nil) (if (and (not (empty? tuple-types))
                  (every? (fn [type OpaqueTypeScriptTypeV1] Bool
                            (string-literal-type? state type))
                          tuple-types))
           (ensure-literal-enum! state tuple-types)
           nil)
-        vector-source String
-        (if spread?
+        vector-source String (if spread?
           "[]"
           (str "[" (join-with " " (mapv (fn [element OpaqueTypeScriptNodeV1] String
                                               (let [source String (emit-expression! state element)]
@@ -652,7 +822,9 @@
                                             elements)) "]"))]
     (if spread?
       (reduce
-        (fn [result String element OpaqueTypeScriptNodeV1] String
+        (fn
+          [result String
+           element OpaqueTypeScriptNodeV1] String
           (if (identical? (node-kind state element) "SpreadElement")
             (str "(into " result " "
                  (emit-expression! state (bridge-node state element "expression")) ")")
@@ -665,12 +837,15 @@
                " " vector-source "] " temporary ")"))
         vector-source))))
 
-(defn emit-template! [state ImportStateV1 node OpaqueTypeScriptNodeV1] String
+(defn emit-template!
+  [state ImportStateV1
+   node OpaqueTypeScriptNodeV1] String
   (let [head OpaqueTypeScriptNodeV1 (bridge-node state node "head")
         spans (Vec OpaqueTypeScriptNodeV1) (bridge-nodes state node "templateSpans")
-        parts (Vec String)
-        (reduce
-          (fn [values (Vec String) span OpaqueTypeScriptNodeV1] (Vec String)
+        parts (Vec String) (reduce
+          (fn
+            [values (Vec String)
+             span OpaqueTypeScriptNodeV1] (Vec String)
             (into values
               [(emit-expression! state (bridge-node state span "expression"))
                (.literalJson (importstatev1-bridge state)
@@ -686,8 +861,7 @@
         receiver OpaqueTypeScriptNodeV1 (bridge-node state node "expression")
         name String (node-name state (bridge-node state node "name"))
         optional? Bool (.nodeOptional? bridge node)
-        receiver-source String
-        (if (and optional?
+        receiver-source String (if (and optional?
                  (identical? (node-kind state receiver) "ElementAccessExpression"))
           (str "(nth "
                (emit-expression! state (bridge-node state receiver "expression")) " "
@@ -695,15 +869,12 @@
                " nil)")
           (emit-expression! state receiver))
         receiver-type OpaqueTypeScriptTypeV1 (.typeAt bridge receiver)
-        receiver-indexes (Vec OpaqueCompilerValueV1)
-        (: (.indexInfos bridge receiver-type) (Vec OpaqueCompilerValueV1))
+        receiver-indexes (Vec OpaqueCompilerValueV1) (: (.indexInfos bridge receiver-type) (Vec OpaqueCompilerValueV1))
         map-receiver? Bool (not (empty? receiver-indexes))
-        synthetic-record (U String Nil)
-        (if (identical? (node-kind state receiver) "Identifier")
+        synthetic-record (U String Nil) (if (identical? (node-kind state receiver) "Identifier")
           (get (deref (importstatev1-synthetic-values state)) (node-name state receiver))
           nil)
-        record-name (U String Nil)
-        (if synthetic-record synthetic-record (local-record-name state receiver-type))]
+        record-name (U String Nil) (if synthetic-record synthetic-record (local-record-name state receiver-type))]
     (cond
       (and (identical? (node-kind state receiver) "Identifier")
            (identical? (node-name state receiver) "process")
@@ -723,12 +894,10 @@
       optional?
       (let [temporary String (next-temporary! state "optional-value-")
             raw-receiver-type String (type->beagle! state receiver-type true)
-            receiver-type-source String
-            (if (identical? (node-kind state receiver) "ElementAccessExpression")
+            receiver-type-source String (if (identical? (node-kind state receiver) "ElementAccessExpression")
               (parenthesize "U" [raw-receiver-type "Nil"])
               raw-receiver-type)
-            access String
-            (cond
+            access String (cond
               (identical? name "length") (str "(count " temporary ")")
               map-receiver? (str "(get " temporary " " (.jsonString bridge name) ")")
               record-name (str "(" (.toLowerCase record-name) "-" name " " temporary ")")
@@ -744,8 +913,7 @@
 (defn emit-condition!
   [state ImportStateV1
    node OpaqueTypeScriptNodeV1] String
-  (let [kind String
-        (.typeKind (importstatev1-bridge state)
+  (let [kind String (.typeKind (importstatev1-bridge state)
                    (.typeAt (importstatev1-bridge state) node))
         source String (emit-expression! state node)]
     (cond
@@ -765,12 +933,13 @@
               (let [prototype OpaqueTypeScriptNodeV1 (bridge-node state has-own "expression")]
                 (and (identical? (node-kind state prototype) "PropertyAccessExpression")
                      (identical? (node-name state (bridge-node state prototype "name")) "prototype")
-                     (let [object-node OpaqueTypeScriptNodeV1
-                           (bridge-node state prototype "expression")]
+                     (let [object-node OpaqueTypeScriptNodeV1 (bridge-node state prototype "expression")]
                        (and (identical? (node-kind state object-node) "Identifier")
                             (identical? (node-name state object-node) "Object")))))))))
 
-(defn emit-call! [state ImportStateV1 node OpaqueTypeScriptNodeV1] String
+(defn emit-call!
+  [state ImportStateV1
+   node OpaqueTypeScriptNodeV1] String
   (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
         callee OpaqueTypeScriptNodeV1 (bridge-node state node "expression")
         arguments (Vec OpaqueTypeScriptNodeV1) (bridge-nodes state node "arguments")
@@ -792,8 +961,7 @@
             receiver-name String (if (identical? receiver-kind "Identifier")
                                    (node-name state receiver)
                                    "")
-            argument-sources (Vec String)
-            (if (and (identical? receiver-name "Array")
+            argument-sources (Vec String) (if (and (identical? receiver-name "Array")
                      (identical? method "from"))
               []
               (mapv
@@ -802,8 +970,7 @@
                     (emit-expression! state (bridge-node state argument "expression"))
                     (emit-expression! state argument)))
                 arguments))
-            spread? Bool
-            (some (fn [argument OpaqueTypeScriptNodeV1] Bool
+            spread? Bool (some (fn [argument OpaqueTypeScriptNodeV1] Bool
                     (identical? (node-kind state argument) "SpreadElement"))
                   arguments)
             receiver-type OpaqueTypeScriptTypeV1 (.typeAt bridge receiver)
@@ -813,8 +980,7 @@
                (identical? (count arguments) 2))
           (let [descriptor OpaqueTypeScriptNodeV1 (nth arguments 0)
                 mapper OpaqueTypeScriptNodeV1 (nth arguments 1)
-                length-value (U OpaqueTypeScriptNodeV1 Nil)
-                (if (identical? (node-kind state descriptor) "ObjectLiteralExpression")
+                length-value (U OpaqueTypeScriptNodeV1 Nil) (if (identical? (node-kind state descriptor) "ObjectLiteralExpression")
                   (property-value state (bridge-nodes state descriptor "properties") "length")
                   nil)]
             (if (and length-value
@@ -829,7 +995,10 @@
                (not spread?))
           (parenthesize method argument-sources)
           (and (or (identical? receiver-name "Math")
-                   (identical? receiver-name "Number"))
+                   (identical? receiver-name "Number")
+                   (identical? receiver-name "JSON")
+                   (identical? receiver-name "Object")
+                   (identical? receiver-name "Array"))
                (not spread?))
           (parenthesize (str receiver-name "/" method) argument-sources)
           (and (identical? receiver-name "Math") spread?
@@ -839,6 +1008,14 @@
           (if (identical? (count arguments) 1)
             (str "(mapv " (first argument-sources) " " receiver-source ")")
             (diagnostic! state node "TSI_MAP_ARITY" "Array.map requires one callback"))
+          (identical? method "filter")
+          (if (identical? (count arguments) 1)
+            (str "(filterv " (first argument-sources) " " receiver-source ")")
+            (diagnostic! state node "TSI_FILTER_ARITY" "Array.filter requires one callback"))
+          (identical? method "some")
+          (if (identical? (count arguments) 1)
+            (str "(not (nil? (some " (first argument-sources) " " receiver-source ")))")
+            (diagnostic! state node "TSI_SOME_ARITY" "Array.some requires one callback"))
           (identical? method "join")
           (let [separator String (if (empty? argument-sources) "\",\"" (first argument-sources))]
             (str "(apply str (interpose " separator " " receiver-source "))"))
@@ -871,9 +1048,10 @@
                 (emit-expression! state argument))
               arguments)))))
 
-(defn emit-binary! [state ImportStateV1 node OpaqueTypeScriptNodeV1] String
-  (let [operator String
-        (.nodeTokenKind (importstatev1-bridge state)
+(defn emit-binary!
+  [state ImportStateV1
+   node OpaqueTypeScriptNodeV1] String
+  (let [operator String (.nodeTokenKind (importstatev1-bridge state)
                         (bridge-node state node "operatorToken"))
         left OpaqueTypeScriptNodeV1 (bridge-node state node "left")
         right OpaqueTypeScriptNodeV1 (bridge-node state node "right")
@@ -882,23 +1060,35 @@
     (cond
       (identical? operator "EqualsEqualsEqualsToken")
       (str "(identical? " left-source " " right-source ")")
+      (identical? operator "EqualsEqualsToken")
+      (if (or (identical? (node-kind state left) "NullKeyword")
+              (identical? (node-kind state right) "NullKeyword"))
+        (str "(nil? " (if (identical? (node-kind state left) "NullKeyword")
+                         right-source
+                         left-source) ")")
+        (str "(identical? " left-source " " right-source ")"))
       (identical? operator "ExclamationEqualsEqualsToken")
       (str "(not (identical? " left-source " " right-source "))")
+      (identical? operator "ExclamationEqualsToken")
+      (if (or (identical? (node-kind state left) "NullKeyword")
+              (identical? (node-kind state right) "NullKeyword"))
+        (str "(not (nil? " (if (identical? (node-kind state left) "NullKeyword")
+                               right-source
+                               left-source) "))")
+        (str "(not (identical? " left-source " " right-source "))"))
       (identical? operator "AmpersandAmpersandToken")
       (str "(and " left-source " " right-source ")")
       (identical? operator "BarBarToken")
       (str "(or " left-source " " right-source ")")
       (identical? operator "QuestionQuestionToken")
       (let [temporary String (next-temporary! state "coalesce-value-")
-            coalesce-source String
-            (if (identical? (node-kind state left) "ElementAccessExpression")
+            coalesce-source String (if (identical? (node-kind state left) "ElementAccessExpression")
               (str "(nth "
                    (emit-expression! state (bridge-node state left "expression")) " "
                    (emit-expression! state (bridge-node state left "argumentExpression"))
                    " nil)")
               left-source)
-            type-source String
-            (if (and (identical? (node-kind state left) "PropertyAccessExpression")
+            type-source String (if (and (identical? (node-kind state left) "PropertyAccessExpression")
                      (identical? (node-name state (bridge-node state left "name")) "length"))
               (if (.nodeOptional? (importstatev1-bridge state) left)
                 "(U Nil Int)"
@@ -913,8 +1103,7 @@
       (identical? operator "EqualsToken")
       (str "(set! " left-source " " right-source ")")
       :else
-      (let [name (U String Nil)
-            (get {"PlusToken" "+"
+      (let [name (U String Nil) (get {"PlusToken" "+"
                   "MinusToken" "-"
                   "AsteriskToken" "*"
                   "SlashToken" "/"
@@ -940,7 +1129,36 @@
       (diagnostic! state node "TSI_META_PROPERTY"
         (str "unsupported TypeScript meta-property " (.nodeText bridge node))))))
 
-(defn emit-expression! [state ImportStateV1 node OpaqueTypeScriptNodeV1] String
+(defn emit-new!
+  [state ImportStateV1
+   node OpaqueTypeScriptNodeV1] String
+  (let [callee OpaqueTypeScriptNodeV1 (bridge-node state node "expression")
+        arguments (Vec OpaqueTypeScriptNodeV1) (bridge-nodes state node "arguments")
+        name String (node-name state callee)]
+    (if (and (identical? (node-kind state callee) "Identifier")
+             (identical? name "Set")
+             (identical? (count arguments) 1))
+      (str "(set " (emit-expression! state (first arguments)) ")")
+      (diagnostic! state node "TSI_NEW_EXPRESSION"
+        (str "unsupported TypeScript constructor " name)))))
+
+(defn emit-type-ascription!
+  [state ImportStateV1
+   node OpaqueTypeScriptNodeV1] String
+  (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
+        expression OpaqueTypeScriptNodeV1 (bridge-node state node "expression")
+        type-node OpaqueTypeScriptNodeV1 (bridge-node state node "type")
+        source String (emit-expression! state expression)
+        type OpaqueTypeScriptTypeV1 (.typeAt bridge node)]
+    (if (or (identical? (.nodeText bridge type-node) "const")
+            (identical? (.typeKind bridge type) "any")
+            (identical? (.typeKind bridge type) "unknown"))
+      source
+      (str "(: " source " " (type->beagle! state type true) ")"))))
+
+(defn emit-expression!
+  [state ImportStateV1
+   node OpaqueTypeScriptNodeV1] String
   (do
     (note-supported! state)
     (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
@@ -948,7 +1166,9 @@
       (cond
         (identical? kind "Identifier")
         (let [name String (node-name state node)]
-          (if (identical? name "undefined") "nil" name))
+          (if (identical? name "undefined")
+            "nil"
+            (flow-ascribe! state node name)))
         (identical? kind "StringLiteral") (.literalJson bridge node)
         (identical? kind "NumericLiteral")
         (let [contextual OpaqueTypeScriptTypeV1 (.contextualType bridge node)]
@@ -969,12 +1189,21 @@
         (identical? kind "ArrowFunction") (emit-arrow! state node)
         (identical? kind "CallExpression") (emit-call! state node)
         (identical? kind "MetaProperty") (emit-meta-property! state node)
-        (identical? kind "PropertyAccessExpression") (emit-property-get! state node)
+        (identical? kind "NewExpression") (emit-new! state node)
+        (identical? kind "TypeOfExpression")
+        (str "(js/typeof " (emit-expression! state (bridge-node state node "expression")) ")")
+        (identical? kind "PropertyAccessExpression")
+        (flow-ascribe! state node (emit-property-get! state node))
         (identical? kind "ElementAccessExpression")
-        (let [receiver String (emit-expression! state (bridge-node state node "expression"))
-              argument String (emit-expression! state (bridge-node state node "argumentExpression"))]
-          (str "(nth " receiver " " argument
-               (if (.nodeOptional? bridge node) " nil" "") ")"))
+        (let [receiver-node OpaqueTypeScriptNodeV1 (bridge-node state node "expression")
+              receiver String (emit-expression! state receiver-node)
+              argument String (emit-expression! state (bridge-node state node "argumentExpression"))
+              indexes (Vec OpaqueCompilerValueV1) (: (.indexInfos bridge (.typeAt bridge receiver-node)) (Vec OpaqueCompilerValueV1))
+              source String (if (empty? indexes)
+                (str "(nth " receiver " " argument
+                     (if (.nodeOptional? bridge node) " nil" "") ")")
+                (str "(get " receiver " " argument ")"))]
+          (flow-ascribe! state node source))
         (identical? kind "BinaryExpression") (emit-binary! state node)
         (identical? kind "PrefixUnaryExpression")
         (let [operator String (.prefixOperatorKind bridge node)
@@ -996,8 +1225,10 @@
              (emit-expression! state (bridge-node state node "whenFalse")) ")")
         (identical? kind "ObjectLiteralExpression") (emit-object! state node nil)
         (identical? kind "ArrayLiteralExpression") (emit-array! state node)
-        (or (identical? kind "AsExpression")
-            (identical? kind "NonNullExpression")
+        (identical? kind "AsExpression") (emit-type-ascription! state node)
+        (identical? kind "SatisfiesExpression")
+        (emit-expression! state (bridge-node state node "expression"))
+        (or (identical? kind "NonNullExpression")
             (identical? kind "ParenthesizedExpression"))
         (emit-expression! state (bridge-node state node "expression"))
         :else
@@ -1032,8 +1263,7 @@
   [state ImportStateV1
    node OpaqueTypeScriptNodeV1
    done-name String] String
-  (let [statements (Vec OpaqueTypeScriptNodeV1)
-        (if (identical? (node-kind state node) "Block")
+  (let [statements (Vec OpaqueTypeScriptNodeV1) (if (identical? (node-kind state node) "Block")
           (bridge-nodes state node "statements")
           [node])]
     (join-with " "
@@ -1044,8 +1274,7 @@
               (identical? kind "ExpressionStatement")
               (emit-expression! state (bridge-node state statement "expression"))
               (identical? kind "IfStatement")
-              (let [then-node OpaqueTypeScriptNodeV1
-                    (bridge-node state statement "thenStatement")]
+              (let [then-node OpaqueTypeScriptNodeV1 (bridge-node state statement "thenStatement")]
                 (if (or (identical? (node-kind state then-node) "BreakStatement")
                         (and (identical? (node-kind state then-node) "Block")
                              (some (fn [candidate OpaqueTypeScriptNodeV1] Bool
@@ -1075,10 +1304,8 @@
   [state ImportStateV1
    statement OpaqueTypeScriptNodeV1] (U PureForMutationV1 Nil)
   (if (identical? (node-kind state statement) "ExpressionStatement")
-    (let [expression OpaqueTypeScriptNodeV1
-          (bridge-node state statement "expression")
-          operator String
-          (.nodeTokenKind (importstatev1-bridge state)
+    (let [expression OpaqueTypeScriptNodeV1 (bridge-node state statement "expression")
+          operator String (.nodeTokenKind (importstatev1-bridge state)
                           (bridge-node state expression "operatorToken"))
           left OpaqueTypeScriptNodeV1 (bridge-node state expression "left")
           right OpaqueTypeScriptNodeV1 (bridge-node state expression "right")]
@@ -1104,38 +1331,31 @@
    statement OpaqueTypeScriptNodeV1
    remaining (Vec OpaqueTypeScriptNodeV1)] String
   (let [initializer OpaqueTypeScriptNodeV1 (bridge-node state statement "initializer")
-        declaration OpaqueTypeScriptNodeV1
-        (first (bridge-nodes state initializer "declarations"))
+        declaration OpaqueTypeScriptNodeV1 (first (bridge-nodes state initializer "declarations"))
         binding OpaqueTypeScriptNodeV1 (bridge-node state declaration "name")
         binding-source String (emit-binding-name! state binding)
-        binding-type String
-        (type->beagle! state
+        binding-type String (type->beagle! state
           (.typeAt (importstatev1-bridge state) declaration)
           true)
         collection-node OpaqueTypeScriptNodeV1 (bridge-node state statement "expression")
         collection-source String (emit-expression! state collection-node)
-        collection-type String
-        (type->beagle! state
+        collection-type String (type->beagle! state
           (.typeAt (importstatev1-bridge state) collection-node)
           true)
         body-node OpaqueTypeScriptNodeV1 (bridge-node state statement "statement")
-        statements (Vec OpaqueTypeScriptNodeV1)
-        (if (identical? (node-kind state body-node) "Block")
+        statements (Vec OpaqueTypeScriptNodeV1) (if (identical? (node-kind state body-node) "Block")
           (bridge-nodes state body-node "statements")
           [body-node])
         last-statement OpaqueTypeScriptNodeV1 (last statements)
-        guarded? Bool
-        (and (identical? (node-kind state last-statement) "IfStatement")
+        guarded? Bool (and (identical? (node-kind state last-statement) "IfStatement")
              (break-statement? state (bridge-node state last-statement "thenStatement"))
              (not (present? (bridge-node state last-statement "elseStatement"))))
-        mutation-statements (Vec OpaqueTypeScriptNodeV1)
-        (if guarded? (vec (butlast statements)) statements)
-        mutations (Vec PureForMutationV1)
-        (reduce
-          (fn [values (Vec PureForMutationV1)
-               candidate OpaqueTypeScriptNodeV1] (Vec PureForMutationV1)
-            (let [mutation (U PureForMutationV1 Nil)
-                  (pure-for-mutation! state candidate)]
+        mutation-statements (Vec OpaqueTypeScriptNodeV1) (if guarded? (vec (butlast statements)) statements)
+        mutations (Vec PureForMutationV1) (reduce
+          (fn
+            [values (Vec PureForMutationV1)
+             candidate OpaqueTypeScriptNodeV1] (Vec PureForMutationV1)
+            (let [mutation (U PureForMutationV1 Nil) (pure-for-mutation! state candidate)]
               (if mutation
                 (conj values mutation)
                 (do
@@ -1144,16 +1364,13 @@
                   values))))
           []
           mutation-statements)
-        state-names (Vec String)
-        (distinct-strings
+        state-names (Vec String) (distinct-strings
           (mapv (fn [mutation PureForMutationV1] String
                   (pureformutationv1-name mutation))
                 mutations))
-        state-types (Vec String)
-        (mapv
+        state-types (Vec String) (mapv
           (fn [name String] String
-            (let [mutation (U PureForMutationV1 Nil)
-                  (some
+            (let [mutation (U PureForMutationV1 Nil) (some
                     (fn [candidate PureForMutationV1] (U PureForMutationV1 Nil)
                       (if (identical? (pureformutationv1-name candidate) name)
                         candidate
@@ -1164,20 +1381,20 @@
                 (diagnostic! state statement "TSI_FOR_STATE"
                   (str "cannot type for-of state " name)))))
           state-names)
-        state-record-name String
-        (str "TypeScriptForStateV" (swap! (importstatev1-counter state) inc))
+        state-record-name String (str "TypeScriptForStateV" (swap! (importstatev1-counter state) inc))
         state-result-name String (next-temporary! state "for-state-")
-        state-record-fields (Vec String)
-        (reduce
-          (fn [values (Vec String) index Int] (Vec String)
+        state-record-fields (Vec String) (reduce
+          (fn
+            [values (Vec String)
+             index Int] (Vec String)
             (into values [(nth state-names index) (nth state-types index)]))
           []
           (vec (range (count state-names))))
-        state-result String
-        (parenthesize (str "->" state-record-name) state-names)
-        state-access-bindings (Vec String)
-        (reduce
-          (fn [values (Vec String) index Int] (Vec String)
+        state-result String (parenthesize (str "->" state-record-name) state-names)
+        state-access-bindings (Vec String) (reduce
+          (fn
+            [values (Vec String)
+             index Int] (Vec String)
             (into values
               [(nth state-names index)
                (nth state-types index)
@@ -1186,29 +1403,29 @@
           []
           (vec (range (count state-names))))
         items-name String (next-temporary! state "for-items-")
-        loop-bindings (Vec String)
-        (reduce
-          (fn [values (Vec String) index Int] (Vec String)
+        loop-bindings (Vec String) (reduce
+          (fn
+            [values (Vec String)
+             index Int] (Vec String)
             (into values
               [(nth state-names index)
                (nth state-types index)
                (nth state-names index)]))
           [items-name collection-type collection-source]
           (vec (range (count state-names))))
-        mutation-bindings (Vec String)
-        (reduce
-          (fn [values (Vec String) mutation PureForMutationV1] (Vec String)
+        mutation-bindings (Vec String) (reduce
+          (fn
+            [values (Vec String)
+             mutation PureForMutationV1] (Vec String)
             (into values
               [(pureformutationv1-name mutation)
                (pureformutationv1-type mutation)
                (pureformutationv1-value mutation)]))
           []
           mutations)
-        recur-source String
-        (parenthesize "recur"
+        recur-source String (parenthesize "recur"
           (into [(str "(vec (rest " items-name "))")] state-names))
-        iteration-source String
-        (str "(let [" binding-source " " binding-type " (first " items-name ")"
+        iteration-source String (str "(let [" binding-source " " binding-type " (first " items-name ")"
              (if (empty? mutation-bindings)
                ""
                (str " " (join-with " " mutation-bindings)))
@@ -1220,8 +1437,7 @@
                     " " state-result " " recur-source ")")
                recur-source)
              ")")
-        loop-source String
-        (str "(loop [" (join-with " " loop-bindings) "] "
+        loop-source String (str "(loop [" (join-with " " loop-bindings) "] "
              "(if (empty? " items-name ") " state-result " "
              iteration-source "))")]
     (if (empty? mutations)
@@ -1237,6 +1453,43 @@
              "(let [" (join-with " " state-access-bindings) "] "
              (emit-statements! state remaining) "))")))))
 
+(defn emit-throw!
+  [state ImportStateV1
+   statement OpaqueTypeScriptNodeV1] String
+  (let [expression OpaqueTypeScriptNodeV1 (bridge-node state statement "expression")]
+    (if (identical? (node-kind state expression) "NewExpression")
+      (let [callee OpaqueTypeScriptNodeV1 (bridge-node state expression "expression")
+            arguments (Vec OpaqueTypeScriptNodeV1) (bridge-nodes state expression "arguments")]
+        (if (and (identical? (node-kind state callee) "Identifier")
+                 (identical? (node-name state callee) "Error")
+                 (identical? (count arguments) 1))
+          (str "(throw (ex-info " (emit-expression! state (first arguments)) " {}))")
+          (str "(throw " (emit-expression! state expression) ")")))
+      (str "(throw " (emit-expression! state expression) ")"))))
+
+(defn emit-try!
+  [state ImportStateV1
+   statement OpaqueTypeScriptNodeV1] String
+  (let [try-block OpaqueTypeScriptNodeV1 (bridge-node state statement "tryBlock")
+        catch-clause OpaqueTypeScriptNodeV1 (bridge-node state statement "catchClause")
+        finally-block OpaqueTypeScriptNodeV1 (bridge-node state statement "finallyBlock")
+        catch-source String (if (present? catch-clause)
+          (let [variable OpaqueTypeScriptNodeV1 (bridge-node state catch-clause "variableDeclaration")
+                name String (if (present? variable)
+                  (node-name state (bridge-node state variable "name"))
+                  "typescript-error")
+                block OpaqueTypeScriptNodeV1 (bridge-node state catch-clause "block")]
+            (str " (catch Any " name " "
+                 (emit-statements! state (bridge-nodes state block "statements")) ")"))
+          "")
+        finally-source String (if (present? finally-block)
+          (str " (finally "
+               (emit-statements! state (bridge-nodes state finally-block "statements")) ")")
+          "")]
+    (str "(try "
+         (emit-statements! state (bridge-nodes state try-block "statements"))
+         catch-source finally-source ")")))
+
 (defn emit-statements!
   [state ImportStateV1
    statements (Vec OpaqueTypeScriptNodeV1)] String
@@ -1249,14 +1502,15 @@
         (identical? kind "ReturnStatement")
         (let [expression OpaqueTypeScriptNodeV1 (bridge-node state statement "expression")]
           (if (present? expression) (emit-expression! state expression) "nil"))
+        (identical? kind "ThrowStatement") (emit-throw! state statement)
+        (identical? kind "TryStatement") (emit-try! state statement)
         (identical? kind "VariableStatement")
-        (let [declaration-list OpaqueTypeScriptNodeV1
-              (bridge-node state statement "declarationList")
-              declarations (Vec OpaqueTypeScriptNodeV1)
-              (bridge-nodes state declaration-list "declarations")
-              bindings (Vec String)
-              (reduce
-                (fn [values (Vec String) declaration OpaqueTypeScriptNodeV1] (Vec String)
+        (let [declaration-list OpaqueTypeScriptNodeV1 (bridge-node state statement "declarationList")
+              declarations (Vec OpaqueTypeScriptNodeV1) (bridge-nodes state declaration-list "declarations")
+              bindings (Vec String) (reduce
+                (fn
+                  [values (Vec String)
+                   declaration OpaqueTypeScriptNodeV1] (Vec String)
                   (let [name-node OpaqueTypeScriptNodeV1 (bridge-node state declaration "name")
                         initializer OpaqueTypeScriptNodeV1 (bridge-node state declaration "initializer")]
                     (into values
@@ -1264,7 +1518,9 @@
                        (type->beagle! state
                          (.typeAt (importstatev1-bridge state) declaration)
                          true)
-                       (emit-expression! state initializer)])))
+                       (if (present? initializer)
+                         (emit-expression! state initializer)
+                         "nil")])))
                 []
                 declarations)]
           (str "(let [" (join-with " " bindings) "] "
@@ -1275,8 +1531,7 @@
           (str "(do " (emit-expression! state (bridge-node state statement "expression")) " "
                (emit-statements! state remaining) ")"))
         (identical? kind "IfStatement")
-        (let [condition String
-              (emit-condition! state (bridge-node state statement "expression"))
+        (let [condition String (emit-condition! state (bridge-node state statement "expression"))
               then-node OpaqueTypeScriptNodeV1 (bridge-node state statement "thenStatement")
               else-node OpaqueTypeScriptNodeV1 (bridge-node state statement "elseStatement")
               then-source String (emit-statement-body! state then-node)]
@@ -1298,12 +1553,15 @@
         (diagnostic! state statement "TSI_UNSUPPORTED_STATEMENT"
           (str "unsupported TypeScript statement " kind))))))
 
-(defn emit-interface! [state ImportStateV1 node OpaqueTypeScriptNodeV1] String
+(defn emit-interface!
+  [state ImportStateV1
+   node OpaqueTypeScriptNodeV1] String
   (let [name String (node-name state node)
         members (Vec OpaqueTypeScriptNodeV1) (bridge-nodes state node "members")
-        fields (Vec String)
-        (reduce
-          (fn [values (Vec String) member OpaqueTypeScriptNodeV1] (Vec String)
+        fields (Vec String) (reduce
+          (fn
+            [values (Vec String)
+             member OpaqueTypeScriptNodeV1] (Vec String)
             (let [kind String (node-kind state member)
                   field-name String (node-name state member)]
               (cond
@@ -1316,8 +1574,7 @@
                 (identical? kind "MethodSignature")
                 (into values
                   [field-name
-                   (let [signature OpaqueCompilerValueV1
-                         (.getSignatureFromDeclaration
+                   (let [signature OpaqueCompilerValueV1 (.getSignatureFromDeclaration
                            (importstatev1-bridge state) member)]
                      (if (present? signature)
                        (signature->type! state signature)
@@ -1344,13 +1601,23 @@
                 (identical? (.literalKind (importstatev1-bridge state) member) "string")))
          (type-members state type))))
 
-(defn emit-type-alias! [state ImportStateV1 node OpaqueTypeScriptNodeV1] String
+(defn emit-type-alias!
+  [state ImportStateV1
+   node OpaqueTypeScriptNodeV1] String
   (let [name String (node-name state node)
-        type OpaqueTypeScriptTypeV1
-        (.typeAt (importstatev1-bridge state) (bridge-node state node "name"))]
-    (if (literal-string-union? state type)
+        bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
+        type-node OpaqueTypeScriptNodeV1 (bridge-node state node "type")
+        type OpaqueTypeScriptTypeV1 (.typeAt bridge (bridge-node state node "name"))]
+    (cond
+      (present? (.partialBaseType bridge type))
+      (let [record-arguments (Vec OpaqueTypeScriptTypeV1)
+            (partial-record-type-arguments state type)]
+        (if (identical? (count record-arguments) 2)
+          (str "(defalias " name " " (partial-type->beagle! state type) ")")
+          (partial-record-form! state name type)))
+      (literal-string-union? state type)
       (string-literal-scalar-form name)
-      (str "(defalias " name " " (type->beagle! state type false) ")"))))
+      :else (str "(defalias " name " " (type->beagle! state type false) ")"))))
 
 (defn parameter-default?
   [state ImportStateV1
@@ -1380,15 +1647,16 @@
   [state ImportStateV1
    parameters (Vec OpaqueTypeScriptNodeV1)] (Vec String)
   (reduce
-    (fn [values (Vec String)
-         parameter OpaqueTypeScriptNodeV1] (Vec String)
+    (fn
+      [values (Vec String)
+       parameter OpaqueTypeScriptNodeV1] (Vec String)
       (let [name-node OpaqueTypeScriptNodeV1 (bridge-node state parameter "name")]
         (if (identical? (node-kind state name-node) "ObjectBindingPattern")
           (reduce
-            (fn [nested (Vec String)
-                 element OpaqueTypeScriptNodeV1] (Vec String)
-              (let [initializer OpaqueTypeScriptNodeV1
-                    (bridge-node state element "initializer")]
+            (fn
+              [nested (Vec String)
+               element OpaqueTypeScriptNodeV1] (Vec String)
+              (let [initializer OpaqueTypeScriptNodeV1 (bridge-node state element "initializer")]
                 (if (present? initializer)
                   (let [name String (node-name state (bridge-node state element "name"))]
                     (into nested
@@ -1405,32 +1673,34 @@
     []
     parameters))
 
-(defn emit-function! [state ImportStateV1 node OpaqueTypeScriptNodeV1] String
-  (let [name String (node-name state node)
+(defn emit-function!
+  [state ImportStateV1
+   node OpaqueTypeScriptNodeV1] String
+  (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
+        name String (node-name state node)
         parameters (Vec OpaqueTypeScriptNodeV1) (bridge-nodes state node "parameters")
-        return-type String
-        (type->beagle! state (.returnType (importstatev1-bridge state) node) true)
+        return-type String (type->beagle! state (.returnType bridge node) true)
         body OpaqueTypeScriptNodeV1 (bridge-node state node "body")
         raw-body-source String (emit-statements! state (bridge-nodes state body "statements"))
         default-bindings (Vec String) (destructure-default-bindings! state parameters)
-        body-source String
-        (if (empty? default-bindings)
+        body-source String (if (empty? default-bindings)
           raw-body-source
           (str "(let [" (join-with " " default-bindings) "] " raw-body-source ")"))
         first-default Int (first-default-index state parameters)
-        declaration String
-        (if (identical? first-default (count parameters))
+        signature OpaqueCompilerValueV1 (.getSignatureFromDeclaration bridge node)
+        type-parameters (Vec OpaqueTypeScriptTypeV1) (if (present? signature)
+          (: (.signatureTypeParameters bridge signature) (Vec OpaqueTypeScriptTypeV1))
+          [])
+        ordinary-declaration String (if (identical? first-default (count parameters))
           (str "(defn " name " ["
                (join-with " "
                  (mapv (fn [parameter OpaqueTypeScriptNodeV1] String
                          (emit-parameter! state parameter))
                        parameters))
                "] " return-type " " body-source ")")
-          (let [arities (Vec String)
-                (mapv
+          (let [arities (Vec String) (mapv
                   (fn [arity Int] String
-                    (let [present-parameters (Vec OpaqueTypeScriptNodeV1)
-                          (subvec parameters 0 arity)]
+                    (let [present-parameters (Vec OpaqueTypeScriptNodeV1) (subvec parameters 0 arity)]
                       (if (identical? arity (count parameters))
                         (str "(["
                              (join-with " "
@@ -1438,9 +1708,10 @@
                                        (emit-parameter! state parameter))
                                      parameters))
                              "] " return-type " " body-source ")")
-                        (let [call-arguments (Vec String)
-                              (map-indexed
-                                (fn [index Int parameter OpaqueTypeScriptNodeV1] String
+                        (let [call-arguments (Vec String) (map-indexed
+                                (fn
+                                  [index Int
+                                   parameter OpaqueTypeScriptNodeV1] String
                                   (if (< index arity)
                                     (parameter-call-name! state parameter)
                                     (emit-expression! state
@@ -1454,8 +1725,20 @@
                                "] " return-type " "
                                (parenthesize name call-arguments) ")")))))
                   (range first-default (+ (count parameters) 1)))]
-            (str "(defn " name " " (join-with " " arities) ")")))]
-    (if (.nodeExported? (importstatev1-bridge state) node)
+            (str "(defn " name " " (join-with " " arities) ")")))
+        declaration String (if (empty? type-parameters)
+          ordinary-declaration
+          (if (identical? first-default (count parameters))
+            (str "(def " name " " (function-type-scheme! state signature) " "
+                 "(fn ["
+                 (join-with " "
+                   (mapv (fn [parameter OpaqueTypeScriptNodeV1] String
+                           (emit-parameter! state parameter))
+                         parameters))
+                 "] " return-type " " body-source "))")
+            (diagnostic! state node "TSI_GENERIC_DEFAULT_PARAMETERS"
+              "generic functions with default parameters require an explicit lowering")))]
+    (if (.nodeExported? bridge node)
       (str "(js/export " declaration ")")
       declaration)))
 
@@ -1465,12 +1748,12 @@
    object-node OpaqueTypeScriptNodeV1] String
   (let [record-name String (str name "Value")
         properties (Vec OpaqueTypeScriptNodeV1) (bridge-nodes state object-node "properties")
-        fields (Vec String)
-        (reduce
-          (fn [values (Vec String) property OpaqueTypeScriptNodeV1] (Vec String)
+        fields (Vec String) (reduce
+          (fn
+            [values (Vec String)
+             property OpaqueTypeScriptNodeV1] (Vec String)
             (let [property-name String (node-name state (bridge-node state property "name"))
-                  initializer OpaqueTypeScriptNodeV1
-                  (if (identical? (node-kind state property) "PropertyAssignment")
+                  initializer OpaqueTypeScriptNodeV1 (if (identical? (node-kind state property) "PropertyAssignment")
                     (bridge-node state property "initializer")
                     (bridge-node state property "name"))]
               (into values
@@ -1496,32 +1779,28 @@
    target String
    type OpaqueTypeScriptTypeV1] String
   (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
-        signatures (Vec OpaqueCompilerValueV1)
-        (: (.callSignatures bridge type) (Vec OpaqueCompilerValueV1))]
+        signatures (Vec OpaqueCompilerValueV1) (: (.callSignatures bridge type) (Vec OpaqueCompilerValueV1))]
     (if (identical? (count signatures) 1)
       (let [signature OpaqueCompilerValueV1 (first signatures)
-            parameters (Vec OpaqueCompilerValueV1)
-            (: (.signatureParameters bridge signature) (Vec OpaqueCompilerValueV1))
+            parameters (Vec OpaqueCompilerValueV1) (: (.signatureParameters bridge signature) (Vec OpaqueCompilerValueV1))
             required-count Int (.signatureMinimumArgumentCount bridge signature)
-            parameter-types (Vec String)
-            (map-indexed
-              (fn [index Int parameter OpaqueCompilerValueV1] String
-                (let [parameter-type OpaqueTypeScriptTypeV1
-                      (.parameterType bridge signature parameter)]
+            parameter-types (Vec String) (map-indexed
+              (fn
+                [index Int
+                 parameter OpaqueCompilerValueV1] String
+                (let [parameter-type OpaqueTypeScriptTypeV1 (.parameterType bridge signature parameter)]
                   (if (>= index required-count)
                     (optional-parameter-type->beagle! state parameter-type)
                     (type->beagle! state parameter-type true))))
               parameters)
-            return-type String
-            (type->beagle! state (.signatureReturnType bridge signature) true)
-            clauses (Vec String)
-            (mapv
+            return-type String (type->beagle! state (.signatureReturnType bridge signature) true)
+            clauses (Vec String) (mapv
               (fn [arity Int] String
-                (let [names (Vec String)
-                      (mapv (fn [index Int] String (str "argument" index)) (range arity))
-                      bindings (Vec String)
-                      (reduce
-                        (fn [values (Vec String) index Int] (Vec String)
+                (let [names (Vec String) (mapv (fn [index Int] String (str "argument" index)) (range arity))
+                      bindings (Vec String) (reduce
+                        (fn
+                          [values (Vec String)
+                           index Int] (Vec String)
                           (into values [(nth names index) (nth parameter-types index)]))
                         []
                         (vec (range arity)))]
@@ -1533,34 +1812,30 @@
         "TSI_FUNCTION_ALIAS_OVERLOAD"
         (str "function alias " name " has multiple TypeScript signatures")))))
 
-(defn emit-variable! [state ImportStateV1 node OpaqueTypeScriptNodeV1] (Vec String)
-  (let [declarations (Vec OpaqueTypeScriptNodeV1)
-        (bridge-nodes state (bridge-node state node "declarationList") "declarations")]
+(defn emit-variable!
+  [state ImportStateV1
+   node OpaqueTypeScriptNodeV1] (Vec String)
+  (let [declarations (Vec OpaqueTypeScriptNodeV1) (bridge-nodes state (bridge-node state node "declarationList") "declarations")]
     (mapv
       (fn [declaration OpaqueTypeScriptNodeV1] String
         (let [name String (node-name state (bridge-node state declaration "name"))
               initializer OpaqueTypeScriptNodeV1 (bridge-node state declaration "initializer")
               unwrapped OpaqueTypeScriptNodeV1 (unwrap-expression state initializer)
-              declaration-type OpaqueTypeScriptTypeV1
-              (.typeAt (importstatev1-bridge state) declaration)
-              function-alias? Bool
-              (and (.nodeExported? (importstatev1-bridge state) node)
+              declaration-type OpaqueTypeScriptTypeV1 (.typeAt (importstatev1-bridge state) declaration)
+              function-alias? Bool (and (.nodeExported? (importstatev1-bridge state) node)
                    (identical? (node-kind state unwrapped) "Identifier")
                    (identical? (.typeKind (importstatev1-bridge state) declaration-type)
                                "function"))
-              synthetic-record (U String Nil)
-              (if (identical? (node-kind state unwrapped) "ObjectLiteralExpression")
+              synthetic-record (U String Nil) (if (identical? (node-kind state unwrapped) "ObjectLiteralExpression")
                 (let [candidate (U String Nil) (local-record-name state declaration-type)]
                   (if candidate nil (synthesize-object-record! state name unwrapped)))
                 nil)
-              type-source String
-              (if synthetic-record
+              type-source String (if synthetic-record
                 synthetic-record
                 (type->beagle! state
                   declaration-type
                   true))
-              value-source String
-              (if synthetic-record
+              value-source String (if synthetic-record
                 (emit-object! state unwrapped synthetic-record)
                 (emit-expression! state initializer))
               form String (str "(def " name " " type-source " " value-source ")")]
@@ -1577,31 +1852,37 @@
               :else form))))
       declarations)))
 
-(defn emit-import! [state ImportStateV1 node OpaqueTypeScriptNodeV1] String
+(defn emit-import!
+  [state ImportStateV1
+   node OpaqueTypeScriptNodeV1] String
   (let [specifier String (.nodeText (importstatev1-bridge state)
                                     (bridge-node state node "moduleSpecifier"))
         clause OpaqueTypeScriptNodeV1 (bridge-node state node "importClause")
         named OpaqueTypeScriptNodeV1 (bridge-node state clause "namedBindings")
         elements (Vec OpaqueTypeScriptNodeV1) (bridge-nodes state named "elements")
-        names (Vec String)
-        (sort
+        names (Vec String) (sort
           (distinct-strings
             (into
               (mapv (fn [element OpaqueTypeScriptNodeV1] String
                       (node-name state element))
                     elements)
               (get (deref (importstatev1-extra-imports state)) specifier []))))
-        mapped (U String Nil)
-        (.moduleMapping
+        mapped (U String Nil) (.moduleMapping
           (importstatev1-bridge state)
           (importstatev1-module-mappings state)
           specifier)
-        module-name String
-        (if (.startsWith specifier ".")
+        inferred (U String Nil) (.relativeModuleNamespace
+          (importstatev1-bridge state)
+          (importstatev1-namespace state)
+          specifier)
+        module-name String (if (.startsWith specifier ".")
           (if mapped
             mapped
-            (diagnostic! state node "TSI_RELATIVE_MODULE_MAPPING"
-              (str "relative module " specifier " requires an exact --module-map entry")))
+            (if inferred
+              inferred
+              (diagnostic! state node "TSI_RELATIVE_MODULE_MAPPING"
+                (str "relative module " specifier " cannot be derived from namespace "
+                     (importstatev1-namespace state)))))
           (str "\"" specifier "\""))]
     (str "[" module-name " :refer [" (join-with " " names) "]]")))
 
@@ -1630,7 +1911,9 @@
   [state ImportStateV1
    statements (Vec OpaqueTypeScriptNodeV1)] (Vec String)
   (reduce
-    (fn [forms (Vec String) statement OpaqueTypeScriptNodeV1] (Vec String)
+    (fn
+      [forms (Vec String)
+       statement OpaqueTypeScriptNodeV1] (Vec String)
       (let [kind String (node-kind state statement)]
         (cond
           (identical? kind "ImportDeclaration") forms
@@ -1663,21 +1946,17 @@
             (atom false) (atom false) (atom 0) (atom 0))
           _ Nil (collect-local-types! state statements)
           forms (Vec String) (emit-top-level! state statements)
-          imports (Vec String)
-          (mapv (fn [statement OpaqueTypeScriptNodeV1] String (emit-import! state statement))
+          imports (Vec String) (mapv (fn [statement OpaqueTypeScriptNodeV1] String (emit-import! state statement))
                 (filterv (fn [statement OpaqueTypeScriptNodeV1] Bool
                            (identical? (node-kind state statement) "ImportDeclaration"))
                          statements))
-          ns-form String
-          (if (empty? imports)
+          ns-form String (if (empty? imports)
             (str "(ns " namespace ")")
             (str "(ns " namespace " (:require " (join-with " " imports) "))"))
-          preludes (Vec String)
-          (into
+          preludes (Vec String) (into
             (if (deref (importstatev1-needs-process state)) (process-prelude) [])
             (if (deref (importstatev1-needs-pad-end state)) [(pad-end-prelude)] []))
-          source String
-          (str "#lang beagle/js\n\n" ns-form "\n\n"
+          source String (str "#lang beagle/js\n\n" ns-form "\n\n"
                (join-with "\n\n"
                  (into preludes
                    (into (deref (importstatev1-synthetic-forms state)) forms)))

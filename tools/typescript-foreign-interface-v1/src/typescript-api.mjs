@@ -123,7 +123,7 @@ const UNSUPPORTED_CODES = new Map([
   [ts.TypeFlags.Substitution, "TS_SUBSTITUTION"],
 ]);
 
-const declaration = (symbol) => symbol.valueDeclaration ?? symbol.declarations?.[0];
+const declaration = (symbol) => symbol?.valueDeclaration ?? symbol?.declarations?.[0];
 const exactFlag = (type, flag) => type.flags === flag;
 const hasFlag = (value, flag) => (value & flag) !== 0;
 const canonicalNodeKind = (node) => {
@@ -193,7 +193,9 @@ const canonicalTokenKind = (node) => {
     [ts.SyntaxKind.LessThanEqualsToken, "LessThanEqualsToken"],
     [ts.SyntaxKind.GreaterThanToken, "GreaterThanToken"],
     [ts.SyntaxKind.GreaterThanEqualsToken, "GreaterThanEqualsToken"],
+    [ts.SyntaxKind.EqualsEqualsToken, "EqualsEqualsToken"],
     [ts.SyntaxKind.EqualsEqualsEqualsToken, "EqualsEqualsEqualsToken"],
+    [ts.SyntaxKind.ExclamationEqualsToken, "ExclamationEqualsToken"],
     [ts.SyntaxKind.ExclamationEqualsEqualsToken, "ExclamationEqualsEqualsToken"],
     [ts.SyntaxKind.AmpersandAmpersandToken, "AmpersandAmpersandToken"],
     [ts.SyntaxKind.BarBarToken, "BarBarToken"],
@@ -807,7 +809,8 @@ export function createCompilerBridge({
   const typeKind = (context, type) => {
     if (forcedCodes.has(type)) return "unsupported";
     let kind;
-    if (exactFlag(type, ts.TypeFlags.NonPrimitive)
+    if (exactFlag(type, ts.TypeFlags.IndexedAccess)) kind = "indexed-access";
+    else if (exactFlag(type, ts.TypeFlags.NonPrimitive)
         || context.checker.typeToString(type) === "object") kind = "non-primitive-object";
     else if (brand(context, type)) kind = "brand";
     else if (context.checker.isTupleType(type)) kind = "tuple";
@@ -860,10 +863,32 @@ export function createCompilerBridge({
     },
     array: () => [],
     arrayElementType(type) { return this.context.checker.getElementTypeOfArrayType(type); },
+    baseConstraint(type) { return this.context.checker.getBaseConstraintOfType(type) ?? null; },
     brandBase: (type) => type.types.find((member) => !exactFlag(member, ts.TypeFlags.Object)) ?? type.types[0],
     brandName(type) { return brand(this.context, type); },
     callSignatures: (type) => type.getCallSignatures(),
     constructSignatures: (type) => type.getConstructSignatures(),
+    contextualRecordName(context, node) {
+      const contextual = context.checker.getContextualType(node);
+      if (!contextual) return null;
+      const actual = context.checker.getTypeAtLocation(node);
+      const candidates = contextual.isUnion?.() ? contextual.types : [contextual];
+      const names = candidates.flatMap((candidate) => {
+        if (hasFlag(candidate.flags, ts.TypeFlags.Null | ts.TypeFlags.Undefined)) return [];
+        const symbol = candidate.aliasSymbol ?? candidate.symbol;
+        const source = declaration(symbol)?.getSourceFile();
+        if (!symbol || source !== context.source) return [];
+        return context.checker.isTypeAssignableTo(actual, candidate) ? [symbol.getName()] : [];
+      });
+      return names.length === 1 ? names[0] : null;
+    },
+    declaredType(node) {
+      const symbol = this.context.checker.getSymbolAtLocation(node.name ?? node);
+      const declared = declaration(symbol);
+      return symbol && declared
+        ? this.context.checker.getTypeOfSymbolAtLocation(symbol, declared)
+        : null;
+    },
     equal: Object.is,
     exportType(symbol) {
       const context = this.context;
@@ -872,9 +897,21 @@ export function createCompilerBridge({
         : context.checker.getDeclaredTypeOfSymbol(symbol);
       return type;
     },
+    "flowAscriptionType?"(type) {
+      const kind = typeKind(this.context, type);
+      if (["string", "number", "boolean", "bigint", "literal", "array", "tuple", "reference"].includes(kind)) {
+        return true;
+      }
+      if (kind === "union") return type.types.every((member) => this["flowAscriptionType?"](member));
+      if (kind !== "object") return false;
+      if (this.context.checker.getIndexInfosOfType(type).length > 0) return true;
+      const name = type.aliasSymbol?.getName() ?? type.symbol?.getName();
+      return Boolean(name && name !== "anonymous" && name !== "__type");
+    },
     indexInfos(type) { return this.context.checker.getIndexInfosOfType(type); },
     indexKeyType: (index) => index.keyType,
     indexValueType: (index) => index.type,
+    indexedAccessObjectType: (type) => type.objectType ?? null,
     literalKind(type) {
       const enumValue = enumMemberValue(this.context, type);
       return typeof enumValue === "string" ? "string"
@@ -892,6 +929,25 @@ export function createCompilerBridge({
     },
     moduleExports(context) { this.context = context; return context.checker.getExportsOfModule(context.moduleSymbol); },
     moduleMapping(mappings, specifier) { return mappings.get(specifier) ?? null; },
+    relativeModuleNamespace(namespace, specifier) {
+      if (!specifier.startsWith(".")) return null;
+      const segments = namespace.split(".");
+      segments.pop();
+      for (const segment of specifier.split("/")) {
+        if (segment === "." || segment === "") continue;
+        if (segment === "..") {
+          if (segments.length === 0) return null;
+          segments.pop();
+        } else {
+          segments.push(segment.replace(/\.(?:d\.)?[cm]?[jt]sx?$/, ""));
+        }
+      }
+      return segments.length > 0 ? segments.join(".") : null;
+    },
+    localTypeByName(context, name) {
+      const statement = context.source.statements.find((candidate) => candidate.name?.getText?.() === name);
+      return statement?.name ? context.checker.getTypeAtLocation(statement.name) : null;
+    },
     "nominalReference?": (type) => Boolean(type.symbol?.valueDeclaration && ts.isClassDeclaration(type.symbol.valueDeclaration)),
     declarationTypeParameters,
     "optionalSymbol?": (symbol) => hasFlag(symbol.flags, ts.SymbolFlags.Optional),
@@ -903,6 +959,17 @@ export function createCompilerBridge({
       if (declaration(symbol)?.dotDotDotToken) return false;
       return hasFlag(symbol.flags, ts.SymbolFlags.Optional)
         || index >= signature.minArgumentCount;
+    },
+    partialBaseType(type) {
+      return type.aliasSymbol?.getName() === "Partial"
+        ? type.aliasTypeArguments?.[0] ?? null
+        : null;
+    },
+    partialRecordTypeArguments(type) {
+      const base = this.partialBaseType(type);
+      return base?.aliasSymbol?.getName() === "Record"
+        ? base.aliasTypeArguments ?? []
+        : [];
     },
     pad: (value, width) => String(value).padStart(width, "0"),
     parameterType(signature, parameter) { return this.context.checker.getTypeOfSymbolAtLocation(parameter, declaration(parameter) ?? signature.declaration); },
@@ -1051,6 +1118,12 @@ export function createCompilerBridge({
     typeMembers: (type) => type.types,
     typeName: (type) => type.aliasSymbol?.getName() ?? type.symbol?.getName() ?? "anonymous",
     typeParameterConstraint: (type) => type.getConstraint?.() ?? type.constraint ?? null,
+    typeParameterArrayElementType(type) {
+      const constraint = type.getConstraint?.() ?? type.constraint ?? null;
+      return constraint && this.context.checker.isArrayLikeType(constraint)
+        ? this.context.checker.getIndexTypeOfType(constraint, ts.IndexKind.Number)
+        : null;
+    },
     typeParameterDefault: (type) => type.getDefault?.() ?? type.default ?? null,
     unsupportedCode,
     weakMap: () => new WeakMap(),
