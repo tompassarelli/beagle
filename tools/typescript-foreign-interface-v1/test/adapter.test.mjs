@@ -94,7 +94,7 @@ const graphRefs = (value) => {
     for (const [key, child] of Object.entries(item)) {
       if (["node", "type", "return", "constraint", "default", "target", "element", "key", "value", "base"].includes(key)
           && typeof child === "string" && /^n\d+$/.test(child)) refs.add(child);
-      if (["members", "typeArguments"].includes(key) && Array.isArray(child)) child.forEach((id) => refs.add(id));
+      if (["members", "typeArguments", "types"].includes(key) && Array.isArray(child)) child.forEach((id) => refs.add(id));
       visit(child);
     }
   };
@@ -134,10 +134,33 @@ describe("ForeignInterfaceV1 graph semantics", () => {
     expect(parse.overloads.map(({ parameters }) => nodes.get(parameters[0].type).name)).toEqual(["string", "number"]);
 
     const generic = exportedNode(first, "select").overloads[0].typeParameters[0];
+    expect(exportedNode(first, "select").overloads[0].parameters[1].optional).toBeTrue();
+    expect(exportedNode(first, "collect").overloads[0].parameters[0]).toMatchObject({
+      optional: false,
+      rest: true,
+    });
     expect(nodes.get(generic.constraint).name).toBe("Entity");
     expect(nodes.get(generic.default).name).toBe("User");
     expect(nodes.get(exportedNode(first, "UserId").base).name).toBe("string");
     expect(exportedNode(first, "Mode").members.map((id) => nodes.get(id).value).sort()).toEqual(["careful", "fast"]);
+    const templateText = exportedNode(first, "TemplateText");
+    expect(templateText).toMatchObject({
+      kind: "template-literal",
+      texts: ["item-", ""],
+    });
+    expect(nodes.get(templateText.types[0])).toMatchObject({
+      kind: "primitive",
+      name: "string",
+    });
+
+    const directionExport = byName(first, "Direction");
+    const direction = exportedNode(first, "Direction");
+    expect(directionExport.space).toBe("value");
+    expect(direction.kind).toBe("object");
+    expect(direction.properties.map(({ name, type }) => [name, nodes.get(type).value])).toEqual([
+      ["Down", "down"],
+      ["Up", "up"],
+    ]);
 
     const users = exportedNode(first, "users");
     const page = nodes.get(users.target);
@@ -168,10 +191,20 @@ describe("ForeignInterfaceV1 graph semantics", () => {
     expect(nodes.get(transformerSignature.parameters[0].type).name).toBe("string");
     expect(nodes.get(transformerSignature.return).name).toBe("string");
 
+    const objectSignature = exportedNode(first, "acceptObject").overloads[0];
+    expect(nodes.get(objectSignature.typeParameters[0].constraint)).toMatchObject({
+      kind: "primitive",
+      name: "object",
+    });
+
     expect(exportedNode(first, "ArrayBuffer")).toMatchObject({
       kind: "object",
       name: "ArrayBuffer",
     });
+    expect(exportedNode(first, "User").identity).toMatch(
+      /project\/(?:fixture\/)?node_modules\/@fixture\/foreign-interface-v1\/types\/public\.d\.ts#User@sha256:[0-9a-f]{64}$/,
+    );
+    expect(obligationCode(first, "Maybe")).toBe("TS_GENERIC_ALIAS_ROOT");
   });
 
   test("preserves mapped, inherited, and index readonly semantics", async () => {
@@ -204,9 +237,7 @@ describe("ForeignInterfaceV1 graph semantics", () => {
     const graph = await produce();
     expect(obligationCode(graph, "OpenConditional")).toBe("TS_OPEN_CONDITIONAL");
     expect(obligationCode(graph, "OpenIndexed")).toBe("TS_INDEXED_ACCESS");
-    expect(obligationCode(graph, "TemplateText")).toBe("TS_TEMPLATE_LITERAL");
     expect(obligationCode(graph, "UpperText")).toBe("TS_STRING_MAPPING");
-    expect(obligationCode(graph, "Direction")).toBe("TS_ENUM");
     expect(obligationCode(graph, "uniqueToken")).toBe("TS_UNIQUE_SYMBOL");
   });
 });
@@ -230,7 +261,7 @@ describe("provenance authority", () => {
     expect(consulted.get("adapter/node_modules/typescript/lib/lib.es5.d.ts")).toBe(
       fileSha256(resolve(adapterRoot, "node_modules/typescript/lib/lib.es5.d.ts")),
     );
-    expect(consulted.get("runtime/core.js")).toBe(fileSha256(resolve(runtimeRoot, "core.js")));
+    expect(consulted.has("runtime/core.js")).toBeFalse();
     expect(consulted.get("project/bun.lock")).toBe(fileSha256(project.lockfile));
     expect(consulted.get("project/node_modules/@fixture/foreign-interface-v1/types/beagle.ts")).toBe(
       fileSha256(project.entry),

@@ -210,6 +210,12 @@
            'members
            (hasheq
             'length (p 'Int)
+            'concat (type-fn
+                     '()
+                     (type-union
+                      (list (tv 'Element)
+                            (type-app 'Vec (list (tv 'Element)))))
+                     (type-app 'Vec (list (tv 'Element))))
             'indexOf (type-fn (list (tv 'Element)) #f (p 'Int))))
    'String
    (hasheq 'vars '()
@@ -245,6 +251,15 @@
    (hasheq 'vars '()
            'members
            (hasheq 'now (fn-of '() 'Float)))
+   'JsImportMeta
+   (hasheq 'vars '()
+           'members
+           (hasheq 'dir (p 'String)
+                   'file (p 'String)
+                   'path (p 'String)
+                   'url (p 'String)
+                   'main (p 'Bool)
+                   'resolve (fn-of '(String) 'String)))
    'JsMap
    (hasheq 'vars '(K V)
            'members

@@ -126,6 +126,18 @@
   (check-true
    (string-contains?
     provider-declarations
+    "submitInput: (arg0: string) => Promise<void>;"))
+  (check-true
+   (string-contains?
+    provider-declarations
+    "events: () => AsyncIterable<WireEvent>;"))
+  (check-true
+   (string-contains?
+    provider-declarations
+    "export type WireEventWriter = import(\"./writer.js\").WireEventWriter;"))
+  (check-true
+   (string-contains?
+    provider-declarations
     "export declare const BridgeProviderTeardownTimeoutError: {\n  new(arg0: number): BridgeProviderTeardownTimeoutError;\n};"))
   (for ([name (in-list '(PublicAccepted PublicRejected PublicDraft
                          PublicLabel PublicResult))])

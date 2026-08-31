@@ -107,14 +107,12 @@ const TYPE_KINDS = new Map([
 
 const UNSUPPORTED_CODES = new Map([
   [ts.TypeFlags.Conditional, "TS_OPEN_CONDITIONAL"],
-  [ts.TypeFlags.TemplateLiteral, "TS_TEMPLATE_LITERAL"],
   [ts.TypeFlags.StringMapping, "TS_STRING_MAPPING"],
   [ts.TypeFlags.Enum, "TS_ENUM"], [ts.TypeFlags.EnumLiteral, "TS_ENUM"],
   [ts.TypeFlags.UniqueESSymbol, "TS_UNIQUE_SYMBOL"],
   [ts.TypeFlags.Index, "TS_INDEX_TYPE"],
   [ts.TypeFlags.IndexedAccess, "TS_INDEXED_ACCESS"],
   [ts.TypeFlags.Substitution, "TS_SUBSTITUTION"],
-  [ts.TypeFlags.NonPrimitive, "TS_NON_PRIMITIVE"],
 ]);
 
 const declaration = (symbol) => symbol.valueDeclaration ?? symbol.declarations?.[0];
@@ -752,22 +750,85 @@ export function createCompilerBridge({
     }
     return { captured, local };
   };
+  const declarationTypeParameters = (type) => {
+    // Alias arguments are use-site substitutions, not lexical declarations.
+    // An uninstantiated generic alias is the one exception: the compiler
+    // exposes its own declaration parameters through aliasTypeArguments.
+    // Require exact parent identity with the alias declaration so a use such
+    // as Readonly<T> cannot steal the surrounding signature's T.
+    const direct = type.typeParameters ?? [];
+    if (direct.length > 0) {
+      return direct.every((candidate) => hasFlag(candidate.flags, ts.TypeFlags.TypeParameter))
+        ? direct
+        : [];
+    }
+    const aliasDeclarations = new Set(type.aliasSymbol?.declarations ?? []);
+    const aliasArguments = type.aliasTypeArguments ?? [];
+    return aliasArguments.length > 0
+      && aliasArguments.every((candidate) => (
+        hasFlag(candidate.flags, ts.TypeFlags.TypeParameter)
+        && (candidate.symbol?.declarations ?? [])
+          .some((item) => aliasDeclarations.has(item.parent))
+      ))
+      ? aliasArguments
+      : [];
+  };
+  const enumMemberValue = (context, type) => {
+    const symbol = type.aliasSymbol ?? type.symbol;
+    if (!symbol) return undefined;
+    const member = declaration(symbol);
+    if (!member || !ts.isEnumMember(member)) return undefined;
+    const initializer = member.initializer;
+    if (ts.isStringLiteral(initializer)) return initializer.text;
+    if (ts.isNumericLiteral(initializer)) return Number(initializer.text);
+    if (ts.isPrefixUnaryExpression(initializer)
+        && initializer.operator === ts.SyntaxKind.MinusToken
+        && ts.isNumericLiteral(initializer.operand)) {
+      return -Number(initializer.operand.text);
+    }
+    return undefined;
+  };
   const typeKind = (context, type) => {
     if (forcedCodes.has(type)) return "unsupported";
-    if (brand(context, type)) return "brand";
-    if (context.checker.isTupleType(type)) return "tuple";
-    if (context.checker.isArrayType(type)) return "array";
-    if (hasFlag(type.flags, ts.TypeFlags.Boolean)) return "boolean";
-    const primitive = TYPE_KINDS.get(type.flags);
-    if (primitive) return primitive;
-    if (hasFlag(type.flags, ts.TypeFlags.Enum | ts.TypeFlags.EnumLiteral | ts.TypeFlags.UniqueESSymbol)) return "unsupported";
-    if (type.isUnion?.()) return "union";
-    if (type.isIntersection?.()) return "intersection";
-    if (!exactFlag(type, ts.TypeFlags.Object)) return "unsupported";
-    if (hasFlag(type.objectFlags, ts.ObjectFlags.Reference) && type.target !== type) return "reference";
-    if (type.getCallSignatures().length > 0 && type.getProperties().length === 0) return "function";
-    const shape = type.objectFlags & ts.ObjectFlags.ObjectTypeKindMask;
-    return shape !== 0 && (shape & ~SUPPORTED_OBJECT_FLAGS) === 0 ? "object" : "unsupported";
+    let kind;
+    if (exactFlag(type, ts.TypeFlags.NonPrimitive)
+        || context.checker.typeToString(type) === "object") kind = "non-primitive-object";
+    else if (brand(context, type)) kind = "brand";
+    else if (context.checker.isTupleType(type)) kind = "tuple";
+    else if (context.checker.isArrayType(type)) kind = "array";
+    else if (enumMemberValue(context, type) !== undefined) kind = "literal";
+    else if (exactFlag(type, ts.TypeFlags.TemplateLiteral)) kind = "template-literal";
+    else if (hasFlag(type.flags, ts.TypeFlags.Boolean)) kind = "boolean";
+    else {
+      const primitive = TYPE_KINDS.get(type.flags);
+      if (primitive) kind = primitive;
+      else if (hasFlag(type.flags, ts.TypeFlags.Enum | ts.TypeFlags.EnumLiteral | ts.TypeFlags.UniqueESSymbol)) kind = "unsupported";
+      else if (type.isUnion?.()) kind = "union";
+      else if (type.isIntersection?.()) kind = "intersection";
+      else if (!exactFlag(type, ts.TypeFlags.Object)) kind = "unsupported";
+      else if (hasFlag(type.objectFlags, ts.ObjectFlags.Reference) && type.target !== type) kind = "reference";
+      else if (type.getCallSignatures().length > 0 && type.getProperties().length === 0) kind = "function";
+      else {
+        const shape = type.objectFlags & ts.ObjectFlags.ObjectTypeKindMask;
+        kind = shape !== 0 && (shape & ~SUPPORTED_OBJECT_FLAGS) === 0 ? "object" : "unsupported";
+      }
+    }
+    // ForeignInterfaceV1 gives lexical type-parameter ownership to object and
+    // function nodes. A generic alias whose root is a union, tuple, array,
+    // reference, or another non-owner shape cannot be represented without
+    // leaking free type variables into the graph. Preserve that boundary as
+    // one explicit obligation on the alias root instead of emitting an
+    // invalid orphan parameter node.
+    if (kind !== "unsupported"
+        && kind !== "object"
+        && kind !== "function"
+        && type.aliasSymbol
+        && declarationTypeParameters(type).length > 0
+    ) {
+      forcedCodes.set(type, "TS_GENERIC_ALIAS_ROOT");
+      return "unsupported";
+    }
+    return kind;
   };
   return {
     array: () => [],
@@ -782,45 +843,40 @@ export function createCompilerBridge({
       const type = hasFlag(symbol.flags, ts.SymbolFlags.Value)
         ? context.checker.getTypeOfSymbolAtLocation(symbol, declaration(symbol))
         : context.checker.getDeclaredTypeOfSymbol(symbol);
-      if (symbol.declarations?.some(ts.isEnumDeclaration)) forcedCodes.set(type, "TS_ENUM");
       return type;
     },
     indexInfos(type) { return this.context.checker.getIndexInfosOfType(type); },
     indexKeyType: (index) => index.keyType,
     indexValueType: (index) => index.type,
-    literalKind: (type) => exactFlag(type, ts.TypeFlags.StringLiteral) ? "string"
-      : exactFlag(type, ts.TypeFlags.NumberLiteral) ? "number"
-      : exactFlag(type, ts.TypeFlags.BooleanLiteral) ? "boolean" : "bigint",
-    literalValue: (type) => exactFlag(type, ts.TypeFlags.BooleanLiteral)
-      ? type.intrinsicName === "true"
-      : typeof type.value === "object" ? String(type.value.base10Value) : type.value,
+    literalKind(type) {
+      const enumValue = enumMemberValue(this.context, type);
+      return typeof enumValue === "string" ? "string"
+        : typeof enumValue === "number" ? "number"
+        : hasFlag(type.flags, ts.TypeFlags.StringLiteral) ? "string"
+        : hasFlag(type.flags, ts.TypeFlags.NumberLiteral) ? "number"
+        : hasFlag(type.flags, ts.TypeFlags.BooleanLiteral) ? "boolean" : "bigint";
+    },
+    literalValue(type) {
+      const enumValue = enumMemberValue(this.context, type);
+      if (enumValue !== undefined) return enumValue;
+      return hasFlag(type.flags, ts.TypeFlags.BooleanLiteral)
+        ? type.intrinsicName === "true"
+        : typeof type.value === "object" ? String(type.value.base10Value) : type.value;
+    },
     moduleExports(context) { this.context = context; return context.checker.getExportsOfModule(context.moduleSymbol); },
     moduleMapping(mappings, specifier) { return mappings.get(specifier) ?? null; },
     "nominalReference?": (type) => Boolean(type.symbol?.valueDeclaration && ts.isClassDeclaration(type.symbol.valueDeclaration)),
-    declarationTypeParameters(type) {
-      // Alias arguments are use-site substitutions, not lexical declarations.
-      // An uninstantiated generic alias is the one exception: the compiler
-      // exposes its own declaration parameters through aliasTypeArguments.
-      // Require exact parent identity with the alias declaration so a use such
-      // as Readonly<T> cannot steal the surrounding signature's T.
-      const direct = type.typeParameters ?? [];
-      if (direct.length > 0) {
-        return direct.every((candidate) => hasFlag(candidate.flags, ts.TypeFlags.TypeParameter))
-          ? direct
-          : [];
-      }
-      const aliasDeclarations = new Set(type.aliasSymbol?.declarations ?? []);
-      const aliasArguments = type.aliasTypeArguments ?? [];
-      return aliasArguments.length > 0
-        && aliasArguments.every((candidate) => (
-          hasFlag(candidate.flags, ts.TypeFlags.TypeParameter)
-          && (candidate.symbol?.declarations ?? [])
-            .some((item) => aliasDeclarations.has(item.parent))
-        ))
-        ? aliasArguments
-        : [];
-    },
+    declarationTypeParameters,
     "optionalSymbol?": (symbol) => hasFlag(symbol.flags, ts.SymbolFlags.Optional),
+    "optionalParameter?": (signature, symbol) => {
+      const index = signature.getParameters().indexOf(symbol);
+      if (index < 0) {
+        throw new Error("parameter symbol is absent from its owning signature");
+      }
+      if (declaration(symbol)?.dotDotDotToken) return false;
+      return hasFlag(symbol.flags, ts.SymbolFlags.Optional)
+        || index >= signature.minArgumentCount;
+    },
     pad: (value, width) => String(value).padStart(width, "0"),
     parameterType(signature, parameter) { return this.context.checker.getTypeOfSymbolAtLocation(parameter, declaration(parameter) ?? signature.declaration); },
     propertiesOfType(type) { return this.context.checker.getPropertiesOfType(type); },
@@ -911,6 +967,10 @@ export function createCompilerBridge({
     symbolSpace(symbol) {
       const value = hasFlag(symbol.flags, ts.SymbolFlags.Value);
       const type = hasFlag(symbol.flags, ts.SymbolFlags.Type);
+      // ForeignInterfaceV1 can faithfully project an enum's runtime object
+      // and literal-valued members today.  Do not advertise the distinct enum
+      // type space until the wire can carry a separate type node.
+      if (symbol.declarations?.some(ts.isEnumDeclaration)) return "value";
       return value && type ? "both" : value ? "value" : "type";
     },
     tupleElementName: (element) => element.label,
@@ -918,6 +978,8 @@ export function createCompilerBridge({
     "tupleElementRest?": (element) => hasFlag(element.flag, ts.ElementFlags.Rest),
     tupleElementType: (element) => element.elementType,
     tupleElements(type) { return tupleElements(this.context, type); },
+    templateLiteralTexts: (type) => [...type.texts],
+    templateLiteralTypes: (type) => [...type.types],
     typeArguments(type) {
       const referenceArguments = this.context.checker.getTypeArguments?.(type) ?? [];
       return referenceArguments.length > 0
@@ -925,6 +987,20 @@ export function createCompilerBridge({
         : type.aliasTypeArguments ?? type.typeArguments ?? [];
     },
     typeDisplay(type) { return this.context.checker.typeToString(type, undefined, ts.TypeFormatFlags.NoTruncation); },
+    typeIdentity(type) {
+      const symbol = type.aliasSymbol ?? type.symbol;
+      if (!symbol) return null;
+      const source = declaration(symbol)?.getSourceFile();
+      if (!source || !source.fileName) return null;
+      let snapshot;
+      try {
+        snapshot = this.context.reads.record(source.fileName, "Type declaration identity");
+      } catch {
+        return null;
+      }
+      const input = compilerInputDigest(this.context, snapshot);
+      return `${input.path}#${symbol.getName()}@sha256:${input.sha256}`;
+    },
     foreignTypeKind(type) { return runtimePrimitiveKind(type) ?? typeKind(this.context, type); },
     typeImportSpecifier(context, type) {
       const symbol = type.aliasSymbol ?? type.symbol;

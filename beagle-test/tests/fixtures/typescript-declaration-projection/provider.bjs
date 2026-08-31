@@ -49,6 +49,8 @@
 (js/declare-record (ProviderCatalogFileCache T)
   [load (Fn [String (Fn [String] T)] T)])
 
+(js/declare-type WireEvent declarations.events/WireEvent)
+(js/declare-type WireEventWriter declarations.writer/WireEventWriter)
 (js/declare-record WireQuery [])
 (js/declare-record AbortController [])
 (js/declare-record AbortSignal [])
@@ -58,11 +60,11 @@
 
 (js/declare-record BridgeProviderSession
   [presentation (js/optional BridgeSessionPresentation)
-   submitInput (Fn [String] (Promise Nil))
-   interruptTurn (Fn [] (Promise Nil))
-   terminateSession (Fn [] (Promise Nil))
-   forceTerminateSession (js/optional (Fn [] Nil))
-   events (Fn [] JsObject)])
+   submitInput (Fn [String] (Promise (js/void)))
+   interruptTurn (Fn [] (Promise (js/void)))
+   terminateSession (Fn [] (Promise (js/void)))
+   forceTerminateSession (js/optional (Fn [] (js/void)))
+   events (Fn [] (AsyncIterable WireEvent))])
 
 (js/declare-record BridgeProviderTeardownTimeoutError
   [name String

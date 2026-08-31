@@ -37,10 +37,11 @@
                                                (type-prim 'F32))))))
 
 (define PARAMETRIC-CTORS
-  '(Vec TransientVec List Set Map Promise NixType Arr Ptr Atom HVec Regex Dyn Buffer JsMap))   ; G2: Atom (INVARIANT arm); G3: HVec (heterogeneous tuple)
+  '(Vec TransientVec List Set Map Promise AsyncIterable NixType Arr Ptr Atom HVec Regex Dyn Buffer JsMap))   ; G2: Atom (INVARIANT arm); G3: HVec (heterogeneous tuple)
 
 (define BUILTIN-PARAMETRIC-APPLICATION-ARITIES
-  (hasheq 'Buffer 1
+  (hasheq 'AsyncIterable 1
+          'Buffer 1
           'TransientVec 1
           'Regex 1
           'JsMap 2))
@@ -359,6 +360,21 @@
          (type-prim 'String)
          `(js/literal ,value)
          'js-declaration)))]
+
+    [(and (current-js-declaration-type?)
+          (list? t)
+          (pair? t)
+          (eq? (car t) 'js/void))
+     (match t
+       [(list 'js/void)
+        (type-refinement
+         (type-prim 'Nil)
+         'js/void
+         'js-declaration)]
+       [_
+        (error 'beagle
+               "js/void takes no arguments, got: ~v"
+               t)])]
 
     [(and (current-js-declaration-type?)
           (list? t)
@@ -1328,6 +1344,8 @@
        (format "(js/optional ~a)" (recur (type-refinement-base t)))]
       [(list 'js-declaration 'js/readonly)
        (format "(js/readonly ~a)" (recur (type-refinement-base t)))]
+      [(list 'js-declaration 'js/void)
+       "(js/void)"]
       [(list 'js-declaration 'js/constructor)
        (format "(js/constructor ~a)" (recur (type-refinement-base t)))]
       [_

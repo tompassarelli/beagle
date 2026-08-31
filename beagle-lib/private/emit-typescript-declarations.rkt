@@ -69,6 +69,11 @@
        (eq? (type-refinement-predicate type) 'js/readonly)
        (type-refinement-base type)))
 
+(define (js-void? type)
+  (and (type-refinement? type)
+       (eq? (type-refinement-placement type) 'js-declaration)
+       (eq? (type-refinement-predicate type) 'js/void)))
+
 (define (js-constructor-base type)
   (and (type-refinement? type)
        (eq? (type-refinement-placement type) 'js-declaration)
@@ -127,6 +132,7 @@
        (require-typescript-identifier 'beagle-dts (type-var-name type))]
       [(type-refinement? type)
        (cond
+         [(js-void? type) "void"]
          [(js-string-literal-value type) => js-string-lit]
          [(js-optional-base type)
           => (lambda (base)
@@ -154,7 +160,7 @@
           (format "Array<~a>" (render-type (car arguments)))]
          [(HVec)
           (format "[~a]" (string-join (map render-type arguments) ", "))]
-         [(Set Promise)
+         [(Set Promise AsyncIterable)
           (unless (= (length arguments) 1)
             (error 'beagle-dts "~a expects one type argument" constructor))
           (format "~a<~a>" constructor (render-type (car arguments)))]

@@ -5999,6 +5999,29 @@
 ;; project per-node types. store-type! applies the interned-leaf exclusion and
 ;; is a no-op when no table is bound (the normal check path), so this adds
 ;; nothing to ordinary type-checking. The real cond body is infer-expr*.
+(define current-foreign-map-pair-types (make-parameter #f))
+
+(define (foreign-expression-evidence expression pair-types)
+  (cond
+    [(map-form? expression)
+     (map-form
+      (for/list ([pair (in-list (map-form-pairs expression))])
+        (define value (cdr pair))
+        (cons
+         (car pair)
+         (foreign-expression-evidence-v1
+          (foreign-expression-evidence value pair-types)
+          (hash-ref pair-types pair #f)))))]
+    [else expression]))
+
+(define (infer-foreign-arguments arguments env)
+  (for/lists (evidence types) ([argument (in-list arguments)])
+    (define pair-types (make-hasheq))
+    (define type
+      (parameterize ([current-foreign-map-pair-types pair-types])
+        (infer-expr argument env)))
+    (values (foreign-expression-evidence argument pair-types) type)))
+
 (define (infer-expr e env)
   (with-foreign-diagnostic e
     (define t (infer-expr* e env))
@@ -6145,7 +6168,12 @@
        (type-app 'Map (list ANY ANY))
        (let ()
          (define key-types (map (λ (p) (infer-expr (car p) env)) pairs))
-         (define val-types (map (λ (p) (infer-expr (cdr p) env)) pairs))
+         (define val-types
+           (for/list ([pair (in-list pairs)])
+             (define value-type (infer-expr (cdr pair) env))
+             (when (current-foreign-map-pair-types)
+               (hash-set! (current-foreign-map-pair-types) pair value-type))
+             value-type))
          (define first-k (car key-types))
          (define first-v (car val-types))
          (define kt (if (and (not (any-type? first-k))
@@ -6396,6 +6424,7 @@
         #:src (src-for e)))
      payload]
     ;; --- Typed JS target forms (js/*) -----------------------------------------
+    [(jst-import-meta? e) (type-prim 'JsImportMeta)]
     [(jst-selector? e) ANY]
     [(jst-get? e)      (infer-jst-get e env)]
     [(jst-call? e)     (infer-jst-call e env)]
@@ -6969,10 +6998,9 @@
      (cond
        [(type-foreign? fn-type)
         (define arguments (call-form-args e))
-        (define argument-types
-          (for/list ([argument (in-list arguments)])
-            (infer-expr argument env)))
-        (foreign-call-v1 fn-type arguments argument-types)]
+        (define-values (argument-evidence argument-types)
+          (infer-foreign-arguments arguments env))
+        (foreign-call-v1 fn-type argument-evidence argument-types)]
        [(type-fn? fn-type)
         (define arg-types
           (check-args call-name fn-type (call-form-args e) env e))
@@ -7137,10 +7165,9 @@
 (define (infer-jst-call-contract raw-contract selector receiver-type args env e)
   (cond
     [(type-foreign? raw-contract)
-     (define argument-types
-       (for/list ([argument (in-list args)])
-         (infer-expr argument env)))
-     (foreign-call-v1 raw-contract args argument-types)]
+     (define-values (argument-evidence argument-types)
+       (infer-foreign-arguments args env))
+     (foreign-call-v1 raw-contract argument-evidence argument-types)]
     [raw-contract
      (define contract
        (if (type-poly? raw-contract)
@@ -7284,10 +7311,9 @@
   (define raw-contract (infer-expr (jst-new-callee e) env))
   (cond
     [(type-foreign? raw-contract)
-     (define argument-types
-       (for/list ([argument (in-list args)])
-         (infer-expr argument env)))
-     (foreign-construct-v1 raw-contract args argument-types)]
+     (define-values (argument-evidence argument-types)
+       (infer-foreign-arguments args env))
+     (foreign-construct-v1 raw-contract argument-evidence argument-types)]
     [else
      (define contract
        (if (type-poly? raw-contract)

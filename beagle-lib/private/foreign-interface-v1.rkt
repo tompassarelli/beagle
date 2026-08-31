@@ -14,6 +14,9 @@
          racket/math
          racket/set
          racket/string
+         (only-in "ast.rkt"
+                  map-form? map-form-pairs
+                  vec-form? vec-form-items)
          "canonical-value-v1.rkt"
          "effect-normalization-v1.rkt"
          "module-interface.rkt"
@@ -32,6 +35,7 @@
   (semantic-id content-id frontend module-specifier exports nodes obligations
                provenance receipts stats)
   #:transparent)
+(struct foreign-expression-evidence-v1 (expression type) #:transparent)
 
 ;; Failures stay typed until check.rkt adds source locations and converts them
 ;; into the ordinary Beagle diagnostic protocol.
@@ -73,6 +77,11 @@
 (define (string! where value)
   (unless (and (string? value) (positive? (string-length value)))
     (schema-error where "expected a nonempty string, got ~v" value))
+  value)
+
+(define (text! where value)
+  (unless (string? value)
+    (schema-error where "expected a string, got ~v" value))
   value)
 
 (define (boolean! where value)
@@ -156,12 +165,13 @@
 (define NODE-FIELD-SCHEMAS
   '((primitive (name) ())
     (literal (valueType value) ())
+    (template-literal (texts types) ())
     (union (members) ())
     (intersection (members) ())
     (array (element readonly) ())
     (tuple (elements readonly) ())
     (object (typeParameters properties indexes callSignatures constructSignatures)
-            (name))
+            (name identity))
     (function (typeParameters overloads) ())
     (reference (name target typeArguments nominal) ())
     (type-parameter (name constraint default) ())
@@ -177,7 +187,7 @@
        (append (cadr schema) (caddr schema)))))))
 
 (define PRIMITIVE-NAMES
-  '(string number boolean bigint symbol null undefined void never unknown
+  '(string number boolean bigint symbol object null undefined void never unknown
            foreign-dynamic js-array-buffer))
 
 (define (node-ref! where value) (string! where value))
@@ -371,6 +381,24 @@
                  'value (literal-value! (format "~a.value" where)
                                         value-type
                                         (hash-ref value 'value)))]
+     [(template-literal)
+      (define texts
+        (for/list ([text
+                    (in-list
+                     (array! (format "~a.texts" where)
+                             (hash-ref value 'texts)))])
+          (text! (format "~a.texts[]" where) text)))
+      (define types
+        (for/list ([type
+                    (in-list
+                     (array! (format "~a.types" where)
+                             (hash-ref value 'types)))])
+          (node-ref! (format "~a.types[]" where) type)))
+      (unless (= (length texts) (add1 (length types)))
+        (schema-error
+         where
+         "template-literal requires exactly one more text segment than type placeholder"))
+      (hash-set* base 'texts texts 'types types)]
      [(union intersection)
       (define members
         (for/list ([member
@@ -447,10 +475,16 @@
                    'indexes indexes
                    'callSignatures (signatures 'callSignatures)
                    'constructSignatures (signatures 'constructSignatures)))
-      (if (hash-has-key? value 'name)
-          (hash-set normalized 'name
-                    (string! (format "~a.name" where) (hash-ref value 'name)))
-          normalized)]
+      (define with-name
+        (if (hash-has-key? value 'name)
+            (hash-set normalized 'name
+                      (string! (format "~a.name" where) (hash-ref value 'name)))
+            normalized))
+      (if (hash-has-key? value 'identity)
+          (hash-set with-name 'identity
+                    (string! (format "~a.identity" where)
+                             (hash-ref value 'identity)))
+          with-name)]
      [(function)
       (define type-parameters
         (normalize-type-parameters
@@ -694,6 +728,7 @@
   (define kind (string->symbol (hash-ref node 'kind)))
   (case kind
     [(primitive literal unsupported) '()]
+    [(template-literal) (hash-ref node 'types)]
     [(union intersection) (hash-ref node 'members)]
     [(array) (list (hash-ref node 'element))]
     [(tuple) (map (lambda (element) (hash-ref element 'type))
@@ -1154,8 +1189,29 @@
   (type-foreign (foreign-interface-v1-semantic-id interface)
                 (hash-ref export 'node)))
 
+(define (foreign-export-type-space-node-id interface export)
+  (define node-id (hash-ref export 'node))
+  (define node (node-at interface node-id))
+  (define returns
+    (if (and (string=? (hash-ref export 'space) "both")
+             (string=? (hash-ref node 'kind) "object"))
+        (remove-duplicates
+         (map (lambda (signature) (hash-ref signature 'return))
+              (hash-ref node 'constructSignatures)))
+        '()))
+  (if (and (= (length returns) 1)
+           (string=? (hash-ref (node-at interface (car returns)) 'kind)
+                     "object"))
+      (car returns)
+      node-id))
+
+(define (foreign-export-type-space-type interface export)
+  (type-foreign (foreign-interface-v1-semantic-id interface)
+                (foreign-export-type-space-node-id interface export)))
+
 (define (foreign-export-type-parameters interface export)
-  (define node (node-at interface (hash-ref export 'node)))
+  (define node
+    (node-at interface (foreign-export-type-space-node-id interface export)))
   (if (member (hash-ref node 'kind) '("object" "function"))
       (hash-ref node 'typeParameters)
       '()))
@@ -1192,7 +1248,7 @@
         name
         'foreign
         (length (foreign-export-type-parameters interface export))
-        (foreign-export-type interface export)))))
+        (foreign-export-type-space-type interface export)))))
   (define projected
     (make-module-interface
      #:namespace namespace
@@ -1363,6 +1419,7 @@
     (for/list ([node-id (in-list ids)]) (cons node-id unmasked)))
   (case (string->symbol (hash-ref node 'kind))
     [(primitive literal unsupported) '()]
+    [(template-literal) (edges (hash-ref node 'types))]
     [(type-parameter)
      (edges (filter values
                     (list (hash-ref node 'constraint)
@@ -1648,6 +1705,15 @@
                 (case (string->symbol (hash-ref node 'kind))
                   [(primitive) (hash-ref node 'name)]
                   [(literal) (format "~s" (hash-ref node 'value))]
+                  [(template-literal)
+                   (format
+                    "`~a`"
+                    (for/fold
+                        ([text (car (hash-ref node 'texts))])
+                        ([placeholder (in-list (hash-ref node 'types))]
+                         [suffix (in-list (cdr (hash-ref node 'texts)))])
+                      (string-append
+                       text "${" (render-id placeholder bindings) "}" suffix)))]
                   [(union)
                    (string-join
                     (for/list ([member (in-list (hash-ref node 'members))])
@@ -1772,8 +1838,39 @@
            (map (lambda (parameter) (hash-ref parameter 'node))
                 (hash-ref target 'typeParameters))])
      (make-foreign-view
-      target-id
-      (bindings-overlay incoming parameter-ids arguments)))))
+     target-id
+     (bindings-overlay incoming parameter-ids arguments)))))
+
+(define TYPESCRIPT-BUILTIN-PROMISE-IDENTITY-RX
+  #px"^adapter/node_modules/typescript/lib/lib\\.es2015\\.promise\\.d\\.ts#Promise@sha256:[0-9a-f]{64}$")
+
+(define (foreign-reference-native-type interface view [active (mutable-set)])
+  (define node (node-at interface (foreign-view-node-id view)))
+  (define target-id
+    (and (string=? (hash-ref node 'kind) "reference")
+         (hash-ref node 'target)))
+  (define arguments (hash-ref node 'typeArguments '()))
+  (and
+   (string=? (foreign-interface-v1-frontend interface) "typescript")
+   target-id
+   (string=? (hash-ref node 'name) "Promise")
+   (= (length arguments) 1)
+   (let ([target (node-at interface target-id)])
+     (and
+      (string=? (hash-ref target 'kind) "object")
+      (string=? (hash-ref target 'name "") "Promise")
+      (= (length (hash-ref target 'typeParameters)) 1)
+      (regexp-match?
+       TYPESCRIPT-BUILTIN-PROMISE-IDENTITY-RX
+       (hash-ref target 'identity ""))))
+   (type-app
+    'Promise
+    (list
+     (foreign-result-type
+      interface
+      (car arguments)
+      (foreign-view-bindings view)
+      active)))))
 
 (define (foreign-result-view-type interface view [active (mutable-set)])
   (define node-id (foreign-view-node-id view))
@@ -1792,10 +1889,14 @@
          [(literal)
           (or (primitive->beagle (hash-ref node 'valueType))
               (foreign-view-type interface view))]
+         [(template-literal) (type-prim 'String)]
          [(type-parameter)
           (define default (hash-ref node 'default))
           (if default
               (foreign-result-type interface default bindings active)
+              (foreign-view-type interface view))]
+         [(reference)
+          (or (foreign-reference-native-type interface view active)
               (foreign-view-type interface view))]
          ;; Structural and reference results retain graph identity.  Their
          ;; bindings are pruned to the lexical parameters the returned node
@@ -1838,6 +1939,52 @@
                 (equal? actual expected))
            (type-invariant-equal? actual expected))))
 
+;; One declaration can enter a closed Beagle module through more than one
+;; TypeScript package graph.  Its content-bound declaration identity plus the
+;; recursively keyed type arguments are the stable join key; graph-local node
+;; and parameter IDs are not.
+(define (foreign-declaration-instance-key type [active (mutable-set)])
+  (and
+   (type-foreign? type)
+   (let-values ([(interface _node) (foreign-node-ref type)])
+     (define bindings (foreign-type-bindings interface type))
+     (define normalized
+       (normalize-foreign-view
+        interface
+        (make-foreign-view (type-foreign-node-id type) bindings)
+        (mutable-set)))
+     (define normalized-node
+       (node-at interface (foreign-view-node-id normalized)))
+     (define identity (hash-ref normalized-node 'identity #f))
+     (define active-key
+       (list (type-foreign-interface-id type)
+             (type-foreign-node-id type)
+             bindings))
+     (and (string=? (hash-ref normalized-node 'kind) "object")
+          identity
+          (not (set-member? active active-key))
+          (begin
+            (set-add! active active-key)
+            (let ([argument-keys
+                   (for/list
+                       ([parameter
+                         (in-list
+                          (hash-ref normalized-node 'typeParameters))])
+                     (define parameter-id (hash-ref parameter 'node))
+                     (and
+                      (hash-has-key? (foreign-view-bindings normalized)
+                                     parameter-id)
+                      (let ([argument
+                             (hash-ref (foreign-view-bindings normalized)
+                                       parameter-id)])
+                        (if (type-foreign? argument)
+                            (foreign-declaration-instance-key argument active)
+                            (and (not (type-has-any? argument))
+                                 (list 'ordinary argument))))))])
+              (set-remove! active active-key)
+              (and (andmap values argument-keys)
+                   (cons identity argument-keys))))))))
+
 (define (literal-matches? expression literal)
   (define expected (hash-ref literal 'value))
   (or (equal? expression expected)
@@ -1845,16 +1992,132 @@
       (and (eq? expression 'true) (eq? expected #t))
       (and (eq? expression 'false) (eq? expected #f))))
 
+(define TEMPLATE-NUMBER-PATTERN
+  "[+-]?(?:(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][+-]?[0-9]+)?|0[xX][0-9A-Fa-f]+|0[bB][01]+|0[oO][0-7]+)")
+
+(define (ordinary-template-placeholder-pattern type)
+  (and
+   (type-prim? type)
+   (case (type-prim-name type)
+     [(String) ".*"]
+     [(Int) "[+-]?[0-9]+"]
+     [(Float) TEMPLATE-NUMBER-PATTERN]
+     [(Bool) "(?:true|false)"]
+     [else #f])))
+
+(define (template-placeholder-pattern interface node-id bindings
+                                      [active (set)])
+  (cond
+    [(hash-has-key? bindings node-id)
+     (ordinary-template-placeholder-pattern (hash-ref bindings node-id))]
+    [(set-member? active node-id) #f]
+    [else
+     (define node (node-at interface node-id))
+     (define next-active (set-add active node-id))
+     (case (string->symbol (hash-ref node 'kind))
+       [(primitive)
+        (case (string->symbol (hash-ref node 'name))
+          [(string) ".*"]
+          [(number) TEMPLATE-NUMBER-PATTERN]
+          [(bigint) "[+-]?[0-9]+"]
+          [(boolean) "(?:true|false)"]
+          [else #f])]
+       [(literal) (regexp-quote (format "~a" (hash-ref node 'value)))]
+       [(union)
+        (define alternatives
+          (for/list ([member (in-list (hash-ref node 'members))])
+            (template-placeholder-pattern
+             interface member bindings next-active)))
+        (and (andmap values alternatives)
+             (format "(?:~a)" (string-join alternatives "|")))]
+       [else #f])]))
+
+(define (template-literal-matches? interface node expression bindings)
+  (and
+   (string? expression)
+   (let ([patterns
+          (for/list ([placeholder (in-list (hash-ref node 'types))])
+            (template-placeholder-pattern interface placeholder bindings))])
+     (and
+      (andmap values patterns)
+      (let ([pattern
+             (for/fold
+                 ([text
+                   (string-append
+                    "^"
+                    (regexp-quote (car (hash-ref node 'texts))))])
+                 ([placeholder-pattern (in-list patterns)]
+                  [suffix (in-list (cdr (hash-ref node 'texts)))])
+               (string-append
+                text
+                "(?:" placeholder-pattern ")"
+                (regexp-quote suffix)))])
+        (regexp-match? (pregexp (string-append pattern "$")) expression))))))
+
 (define (ordinary-primitive-compatible? actual primitive-name)
   (define expected (primitive->beagle primitive-name))
   (and expected
        (not (type-foreign? actual))
        (type-compatible? actual expected)))
 
+(define (foreign-object-compatible? actual)
+  (cond
+    [(type-foreign? actual)
+     (let-values ([(interface _node) (foreign-node-ref actual)])
+       (define normalized
+         (normalize-foreign-view
+          interface
+          (make-foreign-view
+           (type-foreign-node-id actual)
+           (foreign-type-bindings interface actual))
+          (mutable-set)))
+       (member
+        (hash-ref (node-at interface (foreign-view-node-id normalized)) 'kind)
+        '("object" "function" "array" "tuple")))]
+    [(or (type-fn? actual) (type-app? actual)) #t]
+    [else #f]))
+
 (define (foreign-actual-subtype-of-ordinary? interface view expected active)
   (define node-id (foreign-view-node-id view))
   (define bindings (foreign-view-bindings view))
   (cond
+    ;; Beagle Any may intentionally hold a fully known foreign value opaquely.
+    ;; Keep TypeScript any/unknown and lazy unsupported obligations on their
+    ;; fail-closed paths rather than treating every foreign node as dynamic.
+    [(any-type? expected)
+     (cond
+       [(foreign-view-active? interface 'ordinary-any active view) #f]
+       [else
+        (with-active-view interface 'ordinary-any active view
+          (define node (node-at interface node-id))
+          (case (string->symbol (hash-ref node 'kind))
+            [(primitive)
+             (define name (hash-ref node 'name))
+             (when (member name '("unknown" "foreign-dynamic"))
+               (foreign-positive-use-error interface node "an ordinary value"))
+             #t]
+            [(union intersection)
+             (andmap
+              (lambda (member)
+                (foreign-actual-subtype-of-ordinary?
+                 interface (make-foreign-view member bindings) expected active))
+              (hash-ref node 'members))]
+            [(brand)
+             (foreign-actual-subtype-of-ordinary?
+              interface
+              (make-foreign-view (hash-ref node 'base) bindings)
+              expected active)]
+            [(reference)
+             (define native
+               (foreign-reference-native-type interface view active))
+             (define target
+               (foreign-reference-target-view interface view active))
+             (or native
+                 (and target
+                      (foreign-actual-subtype-of-ordinary?
+                       interface target expected active)))]
+            [(unsupported) (raise-node-obligation interface node)]
+            [else #t]))])]
     [(type-has-any? expected) #f]
     [(hash-has-key? bindings node-id)
      (type-compatible? (hash-ref bindings node-id) expected)]
@@ -1872,6 +2135,8 @@
          [(literal)
           (define ordinary (primitive->beagle (hash-ref node 'valueType)))
           (and ordinary (type-compatible? ordinary expected))]
+         [(template-literal)
+          (type-compatible? (type-prim 'String) expected)]
          [(union)
           (andmap
            (lambda (member)
@@ -1890,11 +2155,15 @@
            (make-foreign-view (hash-ref node 'base) bindings)
            expected active)]
          [(reference)
+          (define native
+            (foreign-reference-native-type interface view active))
           (define target
             (foreign-reference-target-view interface view active))
-          (and target
-               (foreign-actual-subtype-of-ordinary?
-                interface target expected active))]
+          (or
+           (and native (type-compatible? native expected))
+           (and target
+                (foreign-actual-subtype-of-ordinary?
+                 interface target expected active)))]
          [(unsupported) (raise-node-obligation interface node)]
          [else #f]))]))
 
@@ -1939,6 +2208,11 @@
                                       [inferable (set)])
   (define expected-bindings (or bindings (make-hash)))
   (define expected-view (make-foreign-view expected-id expected-bindings))
+  (define expected (node-at interface expected-id))
+  (define expected-kind (string->symbol (hash-ref expected 'kind)))
+  (define expected-unknown?
+    (and (eq? expected-kind 'primitive)
+         (string=? (hash-ref expected 'name) "unknown")))
   (define (recur nested-id nested-expression nested-actual [trial bindings])
     (foreign-argument-compatible?
      interface nested-id nested-expression nested-actual trial active inferable))
@@ -1963,6 +2237,372 @@
             (foreign-result-type
              interface parameter-id (foreign-view-bindings actual-target)))
           (recur argument-id #f actual-argument))))))
+  (define (match-cross-interface-reference expected)
+    (and
+     (type-foreign? actual)
+     (hash-ref expected 'target)
+     (let-values ([(actual-interface _actual-node)
+                   (foreign-node-ref actual)])
+       (define actual-bindings
+         (foreign-type-bindings actual-interface actual))
+       (define actual-target
+         (normalize-foreign-view
+          actual-interface
+          (make-foreign-view (type-foreign-node-id actual)
+                             actual-bindings)
+          (mutable-set)))
+       (define actual-target-node
+         (node-at actual-interface (foreign-view-node-id actual-target)))
+       (define expected-target
+         (foreign-reference-target-view interface expected-view active))
+       (define expected-target-node
+         (and expected-target
+              (node-at interface (foreign-view-node-id expected-target))))
+       (define actual-identity
+         (hash-ref actual-target-node 'identity #f))
+       (define expected-identity
+         (and expected-target-node
+              (hash-ref expected-target-node 'identity #f)))
+       (define expected-arguments (hash-ref expected 'typeArguments))
+       (define actual-parameters
+         (hash-ref actual-target-node 'typeParameters '()))
+       (and actual-identity
+            expected-identity
+            (string=? actual-identity expected-identity)
+            (= (length expected-arguments) (length actual-parameters))
+            (for/and
+                ([expected-argument (in-list expected-arguments)]
+                 [actual-parameter (in-list actual-parameters)])
+              (define actual-parameter-id
+                (hash-ref actual-parameter 'node))
+              (and
+               (hash-has-key? (foreign-view-bindings actual-target)
+                              actual-parameter-id)
+               (recur
+                expected-argument
+                #f
+                (hash-ref (foreign-view-bindings actual-target)
+                          actual-parameter-id))))))))
+  (define (match-reference-target)
+    (define target
+      (foreign-reference-target-view interface expected-view active))
+    (and
+     target
+     (recur
+      (foreign-view-node-id target)
+      expression
+      actual
+      (hash-copy (foreign-view-bindings target)))))
+  (define (match-structural-object expected)
+    (and
+     (type-foreign? actual)
+     (null? (hash-ref expected 'indexes))
+     (null? (hash-ref expected 'callSignatures))
+     (null? (hash-ref expected 'constructSignatures))
+     (let-values ([(actual-interface _actual-node)
+                   (foreign-node-ref actual)])
+       (define actual-bindings
+         (foreign-type-bindings actual-interface actual))
+       (define actual-view
+         (normalize-foreign-view
+          actual-interface
+          (make-foreign-view (type-foreign-node-id actual)
+                             actual-bindings)
+          (mutable-set)))
+       (define actual-node
+         (node-at actual-interface (foreign-view-node-id actual-view)))
+       (and
+        (string=? (hash-ref actual-node 'kind) "object")
+        (for/and ([expected-property
+                   (in-list (hash-ref expected 'properties))])
+          (define actual-property
+            (findf
+             (lambda (candidate)
+               (string=? (hash-ref candidate 'name)
+                         (hash-ref expected-property 'name)))
+             (hash-ref actual-node 'properties)))
+          (or
+           (and (hash-ref expected-property 'optional)
+                (not actual-property))
+           (and actual-property
+                (or (hash-ref expected-property 'optional)
+                    (not (hash-ref actual-property 'optional)))
+                (or (hash-ref expected-property 'readonly)
+                    (not (hash-ref actual-property 'readonly)))
+                (recur
+                 (hash-ref expected-property 'type)
+                 #f
+                 (foreign-result-type
+                  actual-interface
+                  (hash-ref actual-property 'type)
+                  (foreign-view-bindings actual-view))))))))))
+  (define (keyword-property-name key)
+    (and
+     (symbol? key)
+     (let ([text (symbol->string key)])
+       (and (> (string-length text) 1)
+            (char=? (string-ref text 0) #\:)
+            (substring text 1)))))
+  (define (match-map-literal-object expected)
+    (and
+     (map-form? expression)
+     (type-app? actual)
+     (eq? (type-app-ctor actual) 'Map)
+     (= (length (type-app-args actual)) 2)
+     (equal? (car (type-app-args actual)) (type-prim 'Keyword))
+     (null? (hash-ref expected 'indexes))
+     (null? (hash-ref expected 'callSignatures))
+     (null? (hash-ref expected 'constructSignatures))
+     (let* ([pairs (map-form-pairs expression)]
+            [property-names
+             (for/list ([pair (in-list pairs)])
+               (keyword-property-name (car pair)))]
+            [properties (hash-ref expected 'properties)]
+            [fallback-value-type (cadr (type-app-args actual))])
+       (and
+        (andmap string? property-names)
+        (= (length property-names)
+           (set-count (list->set property-names)))
+        (for/and ([property (in-list properties)]
+                  #:unless (hash-ref property 'optional))
+          (member (hash-ref property 'name) property-names))
+        (for/and ([pair (in-list pairs)]
+                  [property-name (in-list property-names)])
+          (define property
+            (findf
+             (lambda (candidate)
+               (string=? (hash-ref candidate 'name) property-name))
+             properties))
+          (and
+           property
+           (let* ([supplied-value (cdr pair)]
+                  [value-expression
+                   (if (foreign-expression-evidence-v1? supplied-value)
+                       (foreign-expression-evidence-v1-expression
+                        supplied-value)
+                       supplied-value)]
+                  [value-type
+                   (or (and
+                        (foreign-expression-evidence-v1? supplied-value)
+                        (foreign-expression-evidence-v1-type supplied-value))
+                       (infer-literal-type value-expression)
+                       fallback-value-type)])
+             (recur
+              (hash-ref property 'type)
+              value-expression
+              value-type))))))))
+  (define (fixed-signature? signature)
+    (for/and ([parameter (in-list (hash-ref signature 'parameters))])
+      (not (hash-ref parameter 'rest))))
+  (define (signature-phantom-parameters? owner-interface signature)
+    (define parameter-ids
+      (for/set ([parameter
+                 (in-list (signature-all-type-parameters signature))])
+        (hash-ref parameter 'node)))
+    (for/and
+        ([node-id
+          (in-list
+           (append
+            (map (lambda (parameter) (hash-ref parameter 'type))
+                 (hash-ref signature 'parameters))
+            (list (hash-ref signature 'return))))])
+      (set-empty?
+       (set-intersect
+        parameter-ids
+        (free-type-parameter-ids owner-interface node-id)))))
+  (define (same-phantom-parameter-shape? actual-interface
+                                         expected-signature
+                                         actual-signature)
+    (define expected-local (hash-ref expected-signature 'typeParameters))
+    (define actual-local (hash-ref actual-signature 'typeParameters))
+    (define expected-captured
+      (hash-ref expected-signature 'capturedTypeParameters))
+    (define actual-captured
+      (hash-ref actual-signature 'capturedTypeParameters))
+    (define expected-parameters
+      (signature-all-type-parameters expected-signature))
+    (define actual-parameters
+      (signature-all-type-parameters actual-signature))
+    (or
+     (and (null? expected-parameters) (null? actual-parameters))
+     (and
+      (string=?
+       (foreign-interface-v1-semantic-id interface)
+       (foreign-interface-v1-semantic-id actual-interface))
+      (= (length expected-local) (length actual-local))
+      (= (length expected-captured) (length actual-captured))
+      (= (length expected-parameters) (length actual-parameters))
+      (signature-phantom-parameters? interface expected-signature)
+      (signature-phantom-parameters? actual-interface actual-signature)
+      (for/and ([expected-parameter (in-list expected-parameters)]
+                [actual-parameter (in-list actual-parameters)])
+        (and
+         (string=? (hash-ref expected-parameter 'name)
+                   (hash-ref actual-parameter 'name))
+         (equal? (hash-ref expected-parameter 'constraint)
+                 (hash-ref actual-parameter 'constraint))
+         (equal? (hash-ref expected-parameter 'default)
+                 (hash-ref actual-parameter 'default)))))))
+  (define (compatible-parameter-arity? expected-parameters actual-parameters)
+    (define expected-required
+      (count
+       (lambda (parameter) (not (hash-ref parameter 'optional)))
+       expected-parameters))
+    (define actual-required
+      (count
+       (lambda (parameter) (not (hash-ref parameter 'optional)))
+       actual-parameters))
+    (and
+     (<= actual-required expected-required)
+     (>= (length actual-parameters) (length expected-parameters))))
+  (define (match-structural-function expected)
+    (and
+     (type-foreign? actual)
+     (let-values ([(actual-interface _actual-node)
+                   (foreign-node-ref actual)])
+       (define actual-bindings
+         (foreign-type-bindings actual-interface actual))
+       (define actual-view
+         (normalize-foreign-view
+          actual-interface
+          (make-foreign-view (type-foreign-node-id actual)
+                             actual-bindings)
+          (mutable-set)))
+       (define actual-node
+         (node-at actual-interface (foreign-view-node-id actual-view)))
+       (and
+        (string=? (hash-ref actual-node 'kind) "function")
+        (for/and ([expected-signature
+                   (in-list (hash-ref expected 'overloads))])
+          (ormap
+            (lambda (actual-signature)
+              (define expected-parameters
+                (hash-ref expected-signature 'parameters))
+              (define actual-parameters
+                (hash-ref actual-signature 'parameters))
+              (define actual-fixed?
+                (fixed-signature? actual-signature))
+              (define compatible-arity?
+                (compatible-parameter-arity?
+                 expected-parameters actual-parameters))
+              (define compatible-generics?
+                (same-phantom-parameter-shape?
+                 actual-interface expected-signature actual-signature))
+              (define parameters-compatible?
+               ;; Function parameters are contravariant: every value the
+               ;; expected callback may receive must be accepted by the
+               ;; supplied callback's declaration graph.
+               (for/and ([expected-parameter
+                          (in-list expected-parameters)]
+                         [actual-parameter
+                          (in-list actual-parameters)])
+                 (foreign-argument-compatible?
+                  actual-interface
+                  (hash-ref actual-parameter 'type)
+                  #f
+                  (foreign-result-type
+                   interface
+                   (hash-ref expected-parameter 'type)
+                   expected-bindings)
+                  (hash-copy (foreign-view-bindings actual-view))
+                  (mutable-set)
+                  (set))))
+              (define actual-return
+                (foreign-result-type
+                 actual-interface
+                 (hash-ref actual-signature 'return)
+                 (foreign-view-bindings actual-view)))
+              (define expected-return-node
+                (node-at interface (hash-ref expected-signature 'return)))
+              (define return-compatible?
+                ;; TypeScript's contextual void return discards any supplied
+                ;; result.  Other results remain covariant in the ordinary
+                ;; supplied-to-expected direction.
+                (or
+                 (and
+                  (string=? (hash-ref expected-return-node 'kind) "primitive")
+                  (string=? (hash-ref expected-return-node 'name) "void"))
+                 (recur
+                  (hash-ref expected-signature 'return)
+                  #f
+                  actual-return)))
+              (and
+                   (fixed-signature? expected-signature)
+                   actual-fixed?
+                   compatible-arity?
+                   compatible-generics?
+                   parameters-compatible?
+                   return-compatible?))
+            (hash-ref actual-node 'overloads)))))))
+  (define (same-terminal-node-shape? expected-node actual-node)
+    (and
+     (string=? (hash-ref expected-node 'kind)
+               (hash-ref actual-node 'kind))
+     (case (string->symbol (hash-ref expected-node 'kind))
+       [(primitive)
+        (string=? (hash-ref expected-node 'name)
+                  (hash-ref actual-node 'name))]
+       [(literal)
+        (and
+         (string=? (hash-ref expected-node 'valueType)
+                   (hash-ref actual-node 'valueType))
+         (equal? (hash-ref expected-node 'value)
+                 (hash-ref actual-node 'value)))]
+       [else #f])))
+  (define (match-cross-interface-union expected-members)
+    (and
+     (type-foreign? actual)
+     (let-values ([(actual-interface _actual-node)
+                   (foreign-node-ref actual)])
+       (define actual-bindings
+         (foreign-type-bindings actual-interface actual))
+       (define actual-view
+         (normalize-foreign-view
+          actual-interface
+          (make-foreign-view (type-foreign-node-id actual)
+                             actual-bindings)
+          (mutable-set)))
+       (define actual-node
+         (node-at actual-interface (foreign-view-node-id actual-view)))
+       (and
+        (string=? (hash-ref actual-node 'kind) "union")
+        (for/and ([actual-member
+                   (in-list (hash-ref actual-node 'members))])
+          (define actual-member-node
+            (node-at actual-interface actual-member))
+          (ormap
+           (lambda (expected-member)
+             (try-foreign-branch
+              bindings
+              (lambda (trial)
+                (define expected-member-node
+                  (node-at interface expected-member))
+                (or
+                 (same-terminal-node-shape?
+                  expected-member-node actual-member-node)
+                 (recur
+                  expected-member
+                  #f
+                  (foreign-view-type
+                   actual-interface
+                   (make-foreign-view
+                    actual-member
+                    (foreign-view-bindings actual-view)))
+                  trial)))))
+           expected-members))))))
+  (define (union-covers-ordinary-boolean? expected-members)
+    (and
+     (type-prim? actual)
+     (eq? (type-prim-name actual) 'Bool)
+     (for/and ([boolean-value (in-list '(#f #t))])
+       (ormap
+        (lambda (member)
+          (define node (node-at interface member))
+          (and
+           (string=? (hash-ref node 'kind) "literal")
+           (string=? (hash-ref node 'valueType) "boolean")
+           (equal? (hash-ref node 'value) boolean-value)))
+        expected-members))))
   (define (match-actual-union expected-members actual-union-view)
     (try-foreign-branch
      bindings
@@ -1992,55 +2632,126 @@
                 (equal? actual-member-type expected-member-type)
                 (recur expected-member #f actual-member-type member-trial)))))
           expected-members)))))
+  (define (contextual-void-function-node? node-id [seen (set)])
+    (and
+     (not (set-member? seen node-id))
+     (let* ([next-seen (set-add seen node-id)]
+            [node (node-at interface node-id)]
+            [kind (string->symbol (hash-ref node 'kind))])
+       (case kind
+         [(function)
+          (and
+           (pair? (hash-ref node 'overloads))
+           (for/and ([signature (in-list (hash-ref node 'overloads))])
+             (define result (node-at interface (hash-ref signature 'return)))
+             (and (string=? (hash-ref result 'kind) "primitive")
+                  (string=? (hash-ref result 'name) "void"))))]
+         [(union)
+          (ormap
+           (lambda (member)
+             (contextual-void-function-node? member next-seen))
+           (hash-ref node 'members))]
+         [else #f]))))
+  (define (contextual-void-callback-evidence?)
+    (and
+     (type-fn? actual)
+     (any-type? (type-fn-ret actual))
+     (for/and ([parameter (in-list (type-fn-params actual))])
+       (not (type-has-any? parameter)))
+     (or (not (type-fn-rest-type actual))
+         (not (type-has-any? (type-fn-rest-type actual))))
+     (contextual-void-function-node? expected-id)))
+  (define (map-literal-object-node? node-id [seen (set)])
+    (and
+     (not (set-member? seen node-id))
+     (let* ([next-seen (set-add seen node-id)]
+            [node (node-at interface node-id)])
+       (case (string->symbol (hash-ref node 'kind))
+         [(object) #t]
+         [(reference)
+          (define target (hash-ref node 'target))
+          (and target (map-literal-object-node? target next-seen))]
+         [(union)
+          (ormap
+           (lambda (member)
+             (map-literal-object-node? member next-seen))
+           (hash-ref node 'members))]
+         [else #f]))))
+  (define argument-operation (list 'argument actual))
   (cond
     ;; Any is useful inside Beagle, but it is not evidence for a foreign
     ;; declaration parameter.  Reject it at the boundary before either direct
-    ;; T results or nested Box<T> instantiations can take divergent paths.
-    [(type-has-any? actual) #f]
-    [(foreign-view-active? interface 'argument active expected-view) #f]
+    ;; T results or nested Box<T> instantiations can take divergent paths.  An
+    ;; exact map literal can carry stronger per-entry evidence than its
+    ;; aggregate Map type, but only the structural-object branch may use it.
+    [(and (type-has-any? actual)
+          (not expected-unknown?)
+          (not (and (map-literal-object-node? expected-id)
+                    (map-form? expression)))
+          (not (contextual-void-callback-evidence?)))
+     #f]
+    ;; Recursive structural types are checked coinductively.  Revisiting the
+    ;; same expected view with the same supplied type closes only that pair;
+    ;; every property outside the cycle still has to match.
+    [(foreign-view-active?
+      interface argument-operation active expected-view)
+     #t]
     [else
-     (with-active-view interface 'argument active expected-view
-       (define expected (node-at interface expected-id))
-       (define kind (string->symbol (hash-ref expected 'kind)))
+     (with-active-view interface argument-operation active expected-view
        (define actual-view (type->foreign-view interface actual))
+       (define expected-type (foreign-view-type interface expected-view))
        (define exact?
-         (and actual-view
-              (equal? actual (foreign-view-type interface expected-view))))
-       (case kind
+         (or (and actual-view (equal? actual expected-type))
+             (and (type-foreign? actual)
+                  (let ([actual-identity
+                         (foreign-declaration-instance-key actual)]
+                        [expected-identity
+                         (foreign-declaration-instance-key
+                          expected-type)])
+                    (and actual-identity expected-identity
+                         (equal? actual-identity expected-identity))))))
+       (case expected-kind
          [(primitive)
           (define name (string->symbol (hash-ref expected 'name)))
-          (case name
+         (case name
             [(foreign-dynamic)
              (foreign-positive-use-error interface expected "an argument")]
             [(unknown) #t]
+            [(object) (foreign-object-compatible? actual)]
             [(undefined void never) #f]
             [else
              (or exact?
                  (ordinary-primitive-compatible?
                   actual (hash-ref expected 'name)))])]
          [(literal) (and expression (literal-matches? expression expected))]
+         [(template-literal)
+          (template-literal-matches?
+           interface expected expression expected-bindings)]
          [(union)
           (define expected-members (hash-ref expected 'members))
           (define normalized-actual
             (and actual-view
                  (normalize-foreign-view
                   interface actual-view (mutable-set))))
-          (if
-           (and normalized-actual
-                (string=?
-                 (hash-ref
-                  (node-at interface (foreign-view-node-id normalized-actual))
-                  'kind)
-                 "union"))
-           (match-actual-union expected-members normalized-actual)
-           (ormap (lambda (member)
-                    (try-foreign-branch
-                     bindings
-                     (lambda (trial)
-                       (foreign-argument-compatible?
-                        interface member expression actual
-                        trial active inferable))))
-                  expected-members))]
+          (cond
+            [(union-covers-ordinary-boolean? expected-members) #t]
+            [(and normalized-actual
+                  (string=?
+                   (hash-ref
+                    (node-at interface (foreign-view-node-id normalized-actual))
+                    'kind)
+                   "union"))
+             (match-actual-union expected-members normalized-actual)]
+            [(match-cross-interface-union expected-members) #t]
+            [else
+             (ormap (lambda (member)
+                      (try-foreign-branch
+                       bindings
+                       (lambda (trial)
+                         (foreign-argument-compatible?
+                          interface member expression actual
+                          trial active inferable))))
+                    expected-members)])]
          [(intersection)
           ;; A branded or nominal intersection cannot be manufactured by a
           ;; structurally compatible Beagle scalar.  Values returned by the
@@ -2070,10 +2781,25 @@
                    fixed))
           (or
            exact?
-           (and
-            (type-app? actual)
-            (eq? (type-app-ctor actual) 'HVec)
-            (let ([actual-elements (type-app-args actual)])
+           (let ([actual-elements
+                  (cond
+                    [(and (type-app? actual)
+                          (eq? (type-app-ctor actual) 'HVec))
+                     (type-app-args actual)]
+                    ;; A homogeneous Vec normally has no statically known
+                    ;; length. A vector literal does: preserve that syntactic
+                    ;; arity while reusing its proved common element type, so
+                    ;; exact TypeScript tuple parameters accept only the
+                    ;; corresponding literal shape.
+                    [(and (vec-form? expression)
+                          (type-app? actual)
+                          (eq? (type-app-ctor actual) 'Vec)
+                          (= (length (type-app-args actual)) 1))
+                     (make-list
+                      (length (vec-form-items expression))
+                      (car (type-app-args actual)))]
+                    [else #f])])
+             (and actual-elements
               (and
                (>= (length actual-elements) required)
                (or rest-position
@@ -2082,7 +2808,7 @@
                          [index (in-naturals)])
                  (define expected-element
                    (tuple-element-at-arity
-                    elements (length actual-elements) index))
+                   elements (length actual-elements) index))
                  (recur (hash-ref expected-element 'type)
                         #f actual-element))))))]
          [(type-parameter)
@@ -2102,10 +2828,17 @@
                     interface default-id expected-bindings)))])]
          [(reference)
           (or exact?
-              (and actual-view (match-reference expected actual-view)))]
+              (let ([native
+                     (foreign-reference-native-type
+                      interface expected-view active)])
+                (and native (type-compatible? actual native)))
+              (and actual-view (match-reference expected actual-view))
+              (match-cross-interface-reference expected)
+              (match-reference-target))]
          [(function)
           (or
            exact?
+           (match-structural-function expected)
            (and
             (type-fn? actual)
             (for/and ([signature (in-list (hash-ref expected 'overloads))])
@@ -2158,7 +2891,9 @@
                    (foreign-view-bindings normalized) parameter-id)
                   (foreign-binding-value-compatible?
                    (hash-ref (foreign-view-bindings normalized) parameter-id)
-                   (hash-ref expected-bindings parameter-id))))))))]
+                   (hash-ref expected-bindings parameter-id)))))))
+           (match-structural-object expected)
+           (match-map-literal-object expected))]
          [(brand) exact?]
          [(unsupported) (raise-node-obligation interface expected)]))]))
 
@@ -2166,6 +2901,14 @@
   (cond
     [(and (type-foreign? actual) (type-foreign? expected)
           (equal? actual expected))
+     #t]
+    [(and (type-foreign? actual) (type-foreign? expected)
+          (let ([actual-identity
+                 (foreign-declaration-instance-key actual)]
+                [expected-identity
+                 (foreign-declaration-instance-key expected)])
+            (and actual-identity expected-identity
+                 (equal? actual-identity expected-identity))))
      #t]
     [(type-foreign? expected)
      (define-values (interface node) (foreign-node-ref expected))
@@ -2641,7 +3384,31 @@
                   (combine-access-types
                    interface current 'read (list declared (type-prim 'Nil)))
                   declared)))]
-          [(array tuple)
+          [(array)
+           (cond
+             [(and (not write?) (string=? selector "forEach"))
+              ;; TypeScript arrays carry their element declaration directly in
+              ;; the foreign graph. Preserve that evidence through the
+              ;; standard callback member instead of degrading the callback
+              ;; parameter to Any. The callback result is intentionally Any:
+              ;; JavaScript forEach discards it, while the member itself
+              ;; deterministically returns undefined/Nil.
+              (define element-type
+                (foreign-result-type
+                 interface (hash-ref current 'element) bindings))
+              (type-fn
+               (list (type-fn (list element-type) #f (type-prim 'Any)))
+               #f
+               (type-prim 'Nil))]
+             [else
+              (define index (canonical-index-value selector))
+              (and index
+                   (foreign-index-type-v1
+                    (foreign-view-type interface view)
+                    (type-prim 'String)
+                    #:key-expression selector
+                    #:write? write?))])]
+          [(tuple)
            (define index (canonical-index-value selector))
            (and index
                 (foreign-index-type-v1
@@ -2704,4 +3471,5 @@
  (struct-out foreign-type-obligation-v1)
  (struct-out foreign-export-receipt-v1)
  (struct-out foreign-interface-v1)
+ (struct-out foreign-expression-evidence-v1)
  (struct-out exn:fail:foreign-interface))

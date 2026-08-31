@@ -77,6 +77,10 @@
     [id String
      valueType String
      value ForeignLiteralValueV1])
+  (TemplateLiteralNode
+    [id String
+     texts (Vec String)
+     types (Vec String)])
   (UnionNode
     [id String
      members (Vec String)])
@@ -94,6 +98,7 @@
   (ObjectNode
     [id String
      name (U String Nil)
+     identity (U String Nil)
      typeParameters (Vec TypeParameterV1)
      properties (Vec PropertyV1)
      indexes (Vec IndexV1)
@@ -223,7 +228,7 @@
   (->ParameterV1
     (.symbolName bridge parameter)
     (node-for! bridge state (.parameterType bridge signature parameter))
-    (.optionalSymbol? bridge parameter)
+    (.optionalParameter? bridge signature parameter)
     (.restParameter? bridge parameter)))
 
 (defn signature-node!
@@ -305,6 +310,7 @@
     (->ObjectNode
       id
       (.typeName bridge type)
+      (.typeIdentity bridge type)
       (mapv
         (fn [parameter OpaqueCompilerValueV1] TypeParameterV1
           (type-parameter! bridge state parameter))
@@ -353,6 +359,7 @@
       (.equal bridge kind "boolean") (primitive-node id "boolean")
       (.equal bridge kind "bigint") (primitive-node id "bigint")
       (.equal bridge kind "symbol") (primitive-node id "symbol")
+      (.equal bridge kind "non-primitive-object") (primitive-node id "object")
       (.equal bridge kind "null") (primitive-node id "null")
       (.equal bridge kind "undefined") (primitive-node id "undefined")
       (.equal bridge kind "void") (primitive-node id "void")
@@ -365,6 +372,15 @@
         id
         (.literalKind bridge type)
         (.literalValue bridge type))
+
+      (.equal bridge kind "template-literal")
+      (->TemplateLiteralNode
+        id
+        (.templateLiteralTexts bridge type)
+        (mapv
+          (fn [placeholder OpaqueCompilerValueV1] String
+            (node-for! bridge state placeholder))
+          (.templateLiteralTypes bridge type)))
 
       (.equal bridge kind "union")
       (->UnionNode id (commutative-member-ids! bridge state type))
@@ -560,6 +576,12 @@
               ["valueType" value-type]
               ["value" value]])]
 
+    [(TemplateLiteralNode id texts types)
+     (object [["id" id]
+              ["kind" "template-literal"]
+              ["texts" texts]
+              ["types" types]])]
+
     [(UnionNode id members)
      (object [["id" id]
               ["kind" "union"]
@@ -585,21 +607,36 @@
         ["readonly" readonly]])]
 
     [(ObjectNode
-       id name type-parameters properties indexes call-signatures
+       id name identity type-parameters properties indexes call-signatures
        construct-signatures)
      (object-with-optional
-       [["id" id]
-        ["kind" "object"]
-        ["typeParameters"
-         (mapv type-parameter->wire type-parameters)]
-        ["properties"
-         (mapv property->wire properties)]
-        ["indexes"
-         (mapv index->wire indexes)]
-        ["callSignatures"
-         (mapv signature->wire call-signatures)]
-        ["constructSignatures"
-         (mapv signature->wire construct-signatures)]]
+       (if identity
+         (conj
+          [["id" id]
+           ["kind" "object"]
+           ["typeParameters"
+            (mapv type-parameter->wire type-parameters)]
+           ["properties"
+            (mapv property->wire properties)]
+           ["indexes"
+            (mapv index->wire indexes)]
+           ["callSignatures"
+            (mapv signature->wire call-signatures)]
+           ["constructSignatures"
+            (mapv signature->wire construct-signatures)]]
+          ["identity" identity])
+         [["id" id]
+          ["kind" "object"]
+          ["typeParameters"
+           (mapv type-parameter->wire type-parameters)]
+          ["properties"
+           (mapv property->wire properties)]
+          ["indexes"
+           (mapv index->wire indexes)]
+          ["callSignatures"
+           (mapv signature->wire call-signatures)]
+          ["constructSignatures"
+           (mapv signature->wire construct-signatures)]])
        "name"
        name)]
 

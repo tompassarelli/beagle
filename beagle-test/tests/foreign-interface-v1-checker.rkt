@@ -147,6 +147,7 @@
 (define STRING-NODE (wire-primitive "n:string" "string"))
 (define NUMBER-NODE (wire-primitive "n:number" "number"))
 (define DYNAMIC-NODE (wire-primitive "n:dynamic" "foreign-dynamic"))
+(define UNKNOWN-NODE (wire-primitive "n:unknown" "unknown"))
 
 (define CONSTRAINED-T
   (wire-type-parameter "n:t-constrained" "T" #:constraint "n:string"))
@@ -167,6 +168,11 @@
    "n:overloaded"
    (wire-signature (list (wire-parameter "value" "n:string")) "n:string")
    (wire-signature (list (wire-parameter "value" "n:number")) "n:number")))
+
+(define ACCEPT-UNKNOWN-NODE
+  (wire-function
+   "n:accept-unknown"
+   (wire-signature (list (wire-parameter "value" "n:unknown")) "n:string")))
 
 (define REPEATED-NODE
   (wire-function
@@ -243,6 +249,7 @@
 (define INTERFACE
   (make-interface
    (list
+    (wire-export "acceptUnknown" "n:accept-unknown")
     (wire-export "constrained" "n:constrained")
     (wire-export "construct" "n:constructor")
     (wire-export "defaulted" "n:defaulted")
@@ -254,8 +261,10 @@
     (wire-export "repeated" "n:repeated")
     (wire-export "SharedText" "n:string" "shared-text" #:space "both")
     (wire-export "TextOnly" "n:string" #:space "type")
+    (wire-export "Widget" "n:constructor" #:space "both")
     (wire-export "unsupported" "n:unsupported"))
    (list
+    ACCEPT-UNKNOWN-NODE
     BRAND-NODE
     CONSTRAINED-NODE
     CONSTRAINED-T
@@ -274,6 +283,7 @@
     REPEATED-NODE
     REPEATED-T
     STRING-NODE
+    UNKNOWN-NODE
     UNSUPPORTED-NODE)
    (list OPEN-CONDITIONAL-OBLIGATION)))
 
@@ -573,6 +583,15 @@
   (void))
 
 (test-foreign-query INTERFACE
+ "TypeScript unknown accepts an opaque Beagle Any argument"
+  (check-equal?
+   (foreign-call-v1
+    (foreign-type "n:accept-unknown")
+    (list 'opaque)
+    (list (type-prim 'Any)))
+   STRING))
+
+(test-foreign-query INTERFACE
  "generic constraints and defaults determine exact results"
   (check-equal?
    (foreign-call-v1
@@ -605,6 +624,143 @@
      (foreign-call-v1
       dependent (list "left" 1) (list STRING INT))))
   (void))
+
+(test-case "keyword map literals satisfy closed foreign object parameters"
+  (define map-literal-interface
+    (make-interface
+     (list (wire-export "configure" "m:configure"))
+     (list
+      (wire-primitive "m:boolean" "boolean")
+      (wire-object
+       "m:config"
+       #:properties
+       (list
+        (wire-property "clearOnShutdown" "m:boolean" #:optional #t)
+        (wire-property "onReady" "m:optional-on-ready" #:optional #t)
+        (wire-property "title" "m:string")
+        (wire-property "width" "m:percent" #:optional #t)))
+      (wire-function
+       "m:configure"
+       (wire-signature
+        (list (wire-parameter "config" "m:config-ref"))
+        "m:boolean"))
+      (wire-reference "m:config-ref" "Config" "m:config" '())
+      (wire-function "m:on-ready" (wire-signature '() "m:void"))
+      (wire-primitive "m:number" "number")
+      (hash 'id "m:optional-on-ready" 'kind "union"
+            'members (list "m:on-ready" "m:undefined"))
+      (hash 'id "m:percent" 'kind "template-literal"
+            'texts (list "" "%")
+            'types (list "m:number"))
+      (wire-primitive "m:string" "string")
+      (wire-primitive "m:undefined" "undefined")
+      (wire-primitive "m:void" "void"))))
+  (define interface-id
+    (foreign-interface-v1-semantic-id map-literal-interface))
+  (define configure (type-foreign interface-id "m:configure"))
+  (define keyword-map-with-any-values
+    (type-app 'Map (list (type-prim 'Keyword) (type-prim 'Any))))
+  (define (map-literal . pairs) (map-form pairs))
+  (define (rejected expression)
+    (check-foreign-error/in
+     interface-id
+     'overload-mismatch
+     "m:configure"
+     (lambda ()
+       (foreign-call-v1
+        configure
+        (list expression)
+        (list keyword-map-with-any-values)))))
+  (define (accepted expression)
+    (foreign-call-v1
+     configure
+     (list expression)
+     (list keyword-map-with-any-values)))
+  (parameterize
+      ([current-foreign-interfaces (hash interface-id map-literal-interface)])
+    (check-equal? (accepted (map-literal (cons ':title "North"))) BOOL)
+    (check-equal?
+     (accepted
+      (map-literal (cons ':title "North") (cons ':width "100%")))
+     BOOL)
+    (check-equal?
+     (accepted
+      (map-literal
+       (cons
+        ':onReady
+        (foreign-expression-evidence-v1
+         'callback
+         (type-fn '() #f (type-prim 'Any))))
+       (cons ':title "North")))
+     BOOL)
+    (check-equal?
+     (accepted
+       (map-literal
+        (cons ':clearOnShutdown 'false)
+        (cons
+         ':onReady
+         (foreign-expression-evidence-v1
+          'callback
+          (type-fn '() #f (type-prim 'Any))))
+        (cons ':title "North")
+        (cons ':width "100%")))
+     BOOL)
+    (rejected
+     (map-literal (cons ':title "North") (cons ':unknown 'false)))
+    (rejected (map-literal (cons ':clearOnShutdown 'false)))
+    (rejected (map-literal (cons ':title 'false)))
+    (rejected (map-literal (cons ':title "North") (cons ':width "wide")))
+    (rejected (map-literal (cons ':title 'untyped-title)))
+    (void)))
+
+(test-case "TypeScript built-in Promise references project to native Promise"
+  (define promise-t (wire-type-parameter "p:t" "T"))
+  (define promise-target
+    (hash-set
+     (wire-object
+      "p:promise"
+      #:name "Promise"
+      #:type-parameters (list promise-t))
+     'identity
+     (format
+      "adapter/node_modules/typescript/lib/lib.es2015.promise.d.ts#Promise@sha256:~a"
+      ZERO-SHA)))
+  (define promise-interface
+    (make-interface
+     (list
+      (wire-export "consume" "p:consume")
+      (wire-export "produce" "p:produce"))
+     (list
+      (wire-function
+       "p:consume"
+       (wire-signature
+        (list (wire-parameter "value" "p:promise-string"))
+        "p:string"))
+      promise-target
+      (wire-reference
+       "p:promise-string" "Promise" "p:promise" (list "p:string"))
+      (wire-function
+       "p:produce"
+       (wire-signature '() "p:promise-string"))
+      (wire-primitive "p:string" "string")
+      promise-t)))
+  (define interface-id
+    (foreign-interface-v1-semantic-id promise-interface))
+  (define native-promise (type-app 'Promise (list STRING)))
+  (parameterize
+      ([current-foreign-interfaces (hash interface-id promise-interface)])
+    (check-equal?
+     (foreign-call-v1
+      (type-foreign interface-id "p:produce")
+      '()
+      '())
+     native-promise)
+    (check-equal?
+     (foreign-call-v1
+      (type-foreign interface-id "p:consume")
+      (list #f)
+      (list native-promise))
+     STRING)))
 
 (define GENERIC-MEMBER-CASES
   (list
@@ -641,6 +797,20 @@
    (foreign-index-type-v1 mutable INT #:key-expression 0 #:write? #t)
    STRING)
   (check-equal? (foreign-index-type-v1 mutable INT #:write? #t) STRING))
+
+(test-foreign-query COLLECTION-INTERFACE
+ "array forEach preserves its element callback contract"
+  (define mutable (collection-type "c:array:mutable"))
+  (define readonly (collection-type "c:array:readonly"))
+  (define contract
+    (type-fn
+     (list (type-fn (list STRING) #f (type-prim 'Any)))
+     #f
+     NIL))
+  (check-equal? (foreign-member-type-v1 mutable "forEach") contract)
+  (check-equal? (foreign-member-type-v1 readonly "forEach") contract)
+  (check-false
+   (foreign-member-type-v1 mutable "forEach" #:write? #t)))
 
 (test-foreign-query COLLECTION-INTERFACE
  "readonly arrays reject exact and dynamic writes"
@@ -827,6 +997,155 @@
     (foreign-type "n:constructor") (list "Ada") (list STRING))
    (foreign-type "n:instance")))
 
+(test-case "class exports keep constructor values and project instance types"
+  (define widget-value
+    (module-interface-binding-ref PROJECTED-INTERFACE 'Widget))
+  (define widget-type
+    (module-interface-type-export-ref PROJECTED-INTERFACE 'Widget))
+  (check-equal? (interface-binding-type widget-value)
+                (foreign-type "n:constructor"))
+  (check-equal? (interface-type-export-expansion widget-type)
+                (foreign-type "n:instance")))
+
+(test-case "cross-interface structural methods compare fixed signatures"
+  (define expected-interface
+    (make-interface
+     (list (wire-export "ExpectedEvent" "expected:event" #:space "type"))
+     (list
+      (hash 'id "expected:false" 'kind "literal"
+            'valueType "boolean" 'value #f)
+      (hash 'id "expected:true" 'kind "literal"
+            'valueType "boolean" 'value #t)
+      (hash 'id "expected:undefined" 'kind "primitive" 'name "undefined")
+      (hash 'id "expected:optional-boolean" 'kind "union"
+            'members
+            (list "expected:false" "expected:true" "expected:undefined"))
+      (wire-primitive "expected:void" "void")
+      (wire-function
+       "expected:prevent-default"
+       (wire-signature '() "expected:void"))
+      (wire-object
+       "expected:event"
+       #:properties
+       (list
+        (wire-property "preventDefault" "expected:prevent-default")
+        (wire-property "super" "expected:optional-boolean" #:optional #t))))))
+  (define actual-interface
+    (make-interface
+     (list (wire-export "ActualEvent" "actual:event" #:space "type"))
+     (list
+      (hash 'id "actual:false" 'kind "literal"
+            'valueType "boolean" 'value #f)
+      (hash 'id "actual:true" 'kind "literal"
+            'valueType "boolean" 'value #t)
+      (hash 'id "actual:undefined" 'kind "primitive" 'name "undefined")
+      (hash 'id "actual:optional-boolean" 'kind "union"
+            'members (list "actual:false" "actual:true" "actual:undefined"))
+      (wire-primitive "actual:void" "void")
+      (wire-function
+       "actual:prevent-default"
+       (wire-signature '() "actual:void"))
+      (wire-object
+       "actual:event"
+       #:properties
+       (list
+        (wire-property "preventDefault" "actual:prevent-default")
+        (wire-property "super" "actual:optional-boolean" #:optional #t))))))
+  (define interfaces
+    (hash
+     (foreign-interface-v1-semantic-id expected-interface)
+     expected-interface
+     (foreign-interface-v1-semantic-id actual-interface)
+     actual-interface))
+  (parameterize ([current-foreign-interfaces interfaces])
+    (check-true
+     (foreign-type-compatible-v1
+      (type-foreign
+       (foreign-interface-v1-semantic-id actual-interface)
+       "actual:prevent-default")
+      (type-foreign
+       (foreign-interface-v1-semantic-id expected-interface)
+       "expected:prevent-default")))
+    (check-true
+     (foreign-type-compatible-v1
+      (type-foreign
+       (foreign-interface-v1-semantic-id actual-interface)
+       "actual:event")
+      (type-foreign
+       (foreign-interface-v1-semantic-id expected-interface)
+       "expected:event")))))
+
+(test-case "recursive structural methods preserve subtype function variance"
+  (define expected-e
+    (wire-type-parameter "s:expected:e" "E" #:constraint "s:string"))
+  (define actual-e
+    (wire-type-parameter "s:actual:e" "E" #:constraint "s:string"))
+  (define interface
+    (make-interface
+     (list
+      (wire-export "Base" "s:base" #:space "type")
+      (wire-export "Derived" "s:derived" #:space "type"))
+     (list
+      actual-e
+      (wire-function
+       "s:actual:cursor"
+       (wire-signature
+        (list
+         (wire-parameter "x" "s:number")
+         (wire-parameter "y" "s:number")
+         (wire-parameter "visible" "s:optional-boolean" #:optional #t))
+        "s:void"))
+      (wire-function
+       "s:actual:generic"
+       (wire-signature
+        (list (wire-parameter "event" "s:string"))
+        "s:derived"
+        #:type-parameters (list actual-e)))
+      (wire-object
+       "s:base"
+       #:properties
+       (list
+        (wire-property "generic" "s:expected:generic")
+        (wire-property "setCursor" "s:expected:cursor")))
+      (wire-primitive "s:boolean" "boolean")
+      (wire-object
+       "s:derived"
+       #:properties
+       (list
+        (wire-property "generic" "s:actual:generic")
+        (wire-property "setCursor" "s:actual:cursor")))
+      expected-e
+      (wire-function
+       "s:expected:cursor"
+       (wire-signature
+        (list
+         (wire-parameter "x" "s:number")
+         (wire-parameter "y" "s:number")
+         (wire-parameter "visible" "s:boolean"))
+        "s:void"))
+      (wire-function
+       "s:expected:generic"
+       (wire-signature
+        (list (wire-parameter "event" "s:string"))
+        "s:base"
+        #:type-parameters (list expected-e)))
+      (hash 'id "s:false" 'kind "literal"
+            'valueType "boolean" 'value #f)
+      (wire-primitive "s:number" "number")
+      (hash 'id "s:optional-boolean" 'kind "union"
+            'members (list "s:false" "s:true" "s:undefined"))
+      (wire-primitive "s:string" "string")
+      (hash 'id "s:true" 'kind "literal"
+            'valueType "boolean" 'value #t)
+      (wire-primitive "s:undefined" "undefined")
+      (wire-primitive "s:void" "void"))))
+  (define interface-id (foreign-interface-v1-semantic-id interface))
+  (parameterize ([current-foreign-interfaces (hash interface-id interface)])
+    (check-true
+     (foreign-type-compatible-v1
+      (type-foreign interface-id "s:derived")
+      (type-foreign interface-id "s:base")))))
+
 (test-foreign-query INTERFACE
  "brands survive results and cannot be forged from their base"
   (define result
@@ -834,6 +1153,13 @@
   (check-equal? result (foreign-type "n:brand"))
   (check-true (foreign-type-compatible-v1 result STRING))
   (check-false (foreign-type-compatible-v1 STRING result)))
+
+(test-foreign-query INTERFACE
+ "known foreign objects can be held opaquely as Beagle Any"
+  (check-true
+   (foreign-type-compatible-v1
+    (foreign-type "n:instance")
+    (type-prim 'Any))))
 
 (test-case "unsupported obligations are lazy and fail exactly on positive use"
   (check-not-exn
@@ -896,8 +1222,8 @@
 (test-case "projection contains zero Beagle Any bindings"
   (check-equal?
    (foreign-interface-v1-stats INTERFACE)
-   (hash 'nodeCount 19
-         'exportCount 12
+   (hash 'nodeCount 21
+         'exportCount 14
          'obligationCount 1
          'anyCount 0
          'generatedSourceCount 0))

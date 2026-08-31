@@ -91,11 +91,11 @@
                  (module-interface-foreign-dependencies
                   (module-import-interface import)))])
       (define prior (hash-ref merged identity #f))
-      (when (and prior (not (eq? prior graph)) (not (equal? prior graph)))
-        (error 'program->module-interface
-               "foreign dependency identity collision for ~a"
-               identity))
-      (hash-set merged identity graph))))
+      ;; Identity is the canonical semantic graph digest. The same declaration
+      ;; may arrive through multiple package paths with distinct provenance and
+      ;; therefore distinct graph objects; retain the first exact semantic
+      ;; identity instead of comparing non-semantic attachment data.
+      (if prior merged (hash-set merged identity graph)))))
 
 ;; A resolver returns a module-source. INTERFACE is #f during the bootstrap
 ;; parse and a module-interface during authoritative parsing.

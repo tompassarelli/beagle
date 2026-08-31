@@ -1504,6 +1504,15 @@ BEAGLE
   '(defn wrong-index [(values (Vec Int))] Int
      (.indexOf values "wrong")))
 
+(check-js-ok "js members type Vec concat element and result contracts"
+  '(defn concat-strings [(left (Vec String)) (right (Vec String))] (Vec String)
+     (.concat left right)))
+
+(check-js-err/rx "Vec concat rejects a different element vector"
+  #rx"arg 1 expected .*Vec String.*, got .*Vec Int.*"
+  '(defn wrong-vec-concat [(left (Vec String)) (right (Vec Int))] (Vec String)
+     (.concat left right)))
+
 (check-js-ok "js member types String indexOf"
   '(defn string-position [(value String) (needle String)] Int
      (+ (.indexOf value needle) 1)))
@@ -1518,6 +1527,12 @@ BEAGLE
   #rx"arg 1 expected String, got Int"
   '(defn wrong-string-index [(value String)] Int
      (.indexOf value 1)))
+
+(check-js-ok "js/import-meta exposes typed Bun path members"
+  '(defn module-directory [] String
+     (.-dir (js/import-meta)))
+  '(defn resolve-from-module [(suffix String)] String
+     (.resolve (js/import-meta) suffix)))
 
 (check-js-ok "js member types bounded Math numeric results"
   '(defn float-math [(x Number) (y Number)] Float
