@@ -16,7 +16,8 @@
          "macros.rkt"
          "types.rkt")
 
-(define INTERFACE-SCHEMA-VERSION 14)
+(define INTERFACE-SCHEMA-VERSION 15)
+;; V15 adds parametric JavaScript declaration records and construct signatures.
 ;; V14 keeps a checked JavaScript declaration view beside each runtime binding
 ;; instead of replacing the runtime type imported by downstream Beagle modules.
 ;; V13 added declaration-only JavaScript wire types.
@@ -41,6 +42,7 @@
 (struct interface-type-declaration (name kind details) #:transparent)
 (struct interface-type-export (name kind arity expansion) #:transparent)
 (struct interface-js-declaration-field (name type optional?) #:transparent)
+(struct interface-js-declaration-record (type-params fields) #:transparent)
 (struct interface-record-contract (name kind fields validator-symbol)
   #:transparent)
 (struct interface-protocol-method-contract
@@ -398,7 +400,7 @@
        (for ([member (in-list members)])
          (add! member 'throwable-member
                (hash-ref member-fields member '())))]
-      [(jst-declare-record name fields)
+      [(jst-declare-record name _type-params fields)
        (for ([field (in-list fields)])
          (when (type-has-any? (jst-declaration-field-type field))
            (error 'program->module-interface
@@ -828,6 +830,13 @@
          (eq? (type-refinement-placement type) 'js-declaration)
          (eq? (type-refinement-predicate type) 'js/optional)
          (type-refinement-base type)))
+  (define (js-constructor-base type)
+    (and (type-refinement? type)
+         (eq? (type-refinement-placement type) 'js-declaration)
+         (eq? (type-refinement-predicate type) 'js/constructor)
+         (type-refinement-base type)))
+  (define (polymorphic-body type)
+    (if (type-poly? type) (type-poly-body type) type))
   (define (nullable-base type)
     (and
      (type-union? type)
@@ -872,6 +881,14 @@
             ;; round resolves its kind and every checked publication repeats
             ;; this compatibility proof without the provisional escape hatch.
             [else (provisional-imported-wire-name? name)])))]
+      [(type-app? type)
+       (define name (type-app-ctor type))
+       (define declaration (hash-ref wire-declarations name #f))
+       (cond
+         [declaration
+          (eq? (interface-type-declaration-kind declaration)
+               'js-wire-record)]
+         [else (provisional-imported-wire-name? name)])]
       [else #f]))
   (define (js-string-literal? type)
     (and
@@ -936,9 +953,18 @@
         [optional-seen? #f]
         [else (loop (cdr remaining) #f)])))
   (define (compatible-declaration? runtime declaration)
+    (define constructor-base (js-constructor-base declaration))
     (define runtime-functions (function-alternatives runtime))
-    (define declaration-functions (function-alternatives declaration))
+    (define declaration-functions
+      (function-alternatives
+       (if constructor-base
+           (polymorphic-body constructor-base)
+           declaration)))
     (cond
+      [(and constructor-base (type-poly? runtime))
+       (compatible-declaration?
+        (type-poly-body runtime)
+        declaration)]
       [(and runtime-functions declaration-functions)
        (and
         (= (length runtime-functions) (length declaration-functions))
@@ -975,7 +1001,7 @@
     (unless (compatible-declaration? (interface-binding-type runtime)
                                      declaration)
       (error 'program->module-interface
-             "js/declare-export ~a must preserve callable arity and may narrow only JsObject positions to checked JavaScript wire declarations, Vec String to a checked JavaScript string enum, or nullable positions to js/optional; runtime type ~a, declaration type ~a"
+             "js/declare-export ~a must preserve callable arity; js/constructor may project a runtime callable as a construct signature, and positions may narrow only JsObject to checked JavaScript wire declarations, Vec String to a checked JavaScript string enum, or nullable values to js/optional; runtime type ~a, declaration type ~a"
              name
              (type->string (interface-binding-type runtime))
              (type->string declaration)))
@@ -1114,15 +1140,17 @@
                (list
                 (scalar-predicate-op predicate)
                 (scalar-predicate-value predicate)))))]
-        [(jst-declare-record name fields)
+        [(jst-declare-record name type-params fields)
          (interface-type-declaration
           name
           'js-wire-record
-          (for/list ([field (in-list fields)])
-            (interface-js-declaration-field
-             (jst-declaration-field-name field)
-             (jst-declaration-field-type field)
-             (jst-declaration-field-optional? field))))]
+          (interface-js-declaration-record
+           type-params
+           (for/list ([field (in-list fields)])
+             (interface-js-declaration-field
+              (jst-declaration-field-name field)
+              (jst-declaration-field-type field)
+              (jst-declaration-field-optional? field)))))]
         [(jst-declare-type name type)
          (when (type-has-any? type)
            (error 'program->module-interface
@@ -1169,8 +1197,8 @@
          (add! member 'throwable-member))]
       [(defscalar-form name _ _)
        (add! name 'scalar)]
-      [(jst-declare-record name _)
-       (add! name 'js-wire-record)]
+      [(jst-declare-record name type-params _)
+       (add! name 'js-wire-record (length type-params))]
       [(jst-declare-type name type)
        (add! name 'js-wire-alias 0 type)]
       [_ (void)]))
@@ -1315,21 +1343,27 @@
       [details
        (qualify-interface-protocol-contract
         details namespace local-type-names)])]
-    [(and (list? details)
-          (andmap interface-js-declaration-field? details))
+    [(interface-js-declaration-record? details)
      (struct-copy
       interface-type-declaration
       declaration
       [details
-       (for/list ([field (in-list details)])
-         (struct-copy
-          interface-js-declaration-field
-          field
-          [type
-           (qualify-provider-local-type-references
-            (interface-js-declaration-field-type field)
-            namespace
-            local-type-names)]))])]
+       (struct-copy
+        interface-js-declaration-record
+        details
+        [fields
+         (for/list
+             ([field
+               (in-list
+                (interface-js-declaration-record-fields details))])
+           (struct-copy
+            interface-js-declaration-field
+            field
+            [type
+             (qualify-provider-local-type-references
+              (interface-js-declaration-field-type field)
+              namespace
+              local-type-names)]))])])]
     [else declaration]))
 
 (define (qualify-interface-type-export export namespace local-type-names)
@@ -1510,15 +1544,20 @@
              (hash-ref
               (interface-protocol-contract-methods details)
              name)))))]
-    [(and (list? details)
-          (andmap interface-js-declaration-field? details))
-     `(js-wire-fields
-       ,@(for/list ([field (in-list details)])
+    [(interface-js-declaration-record? details)
+     `(js-wire-record
+       (type-params
+        ,@(interface-js-declaration-record-type-params details))
+       (fields
+        ,@(for/list
+              ([field
+                (in-list
+                 (interface-js-declaration-record-fields details))])
            (list
             (interface-js-declaration-field-name field)
             (type->canonical-datum
              (interface-js-declaration-field-type field))
-            (interface-js-declaration-field-optional? field))))]
+            (interface-js-declaration-field-optional? field)))))]
     [else details]))
 
 (define (require-entry->canonical-datum entry)
@@ -2288,6 +2327,7 @@
  (struct-out interface-type-declaration)
  (struct-out interface-type-export)
  (struct-out interface-js-declaration-field)
+ (struct-out interface-js-declaration-record)
  (struct-out interface-record-contract)
  (struct-out interface-protocol-method-contract)
  (struct-out interface-protocol-contract)

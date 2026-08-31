@@ -60,7 +60,7 @@
          "(defn identity [value] Int value)\n")))
      (define interface
        (program->module-interface prog #:provisional? #t))
-     (check-equal? (module-interface-schema-version interface) 14)
+     (check-equal? (module-interface-schema-version interface) 15)
      (check-equal? (type->string (binding-type interface 'identity))
                    "(Fn [Any] Int)"))
 

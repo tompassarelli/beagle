@@ -92,11 +92,47 @@
                                 "export declare function choose(arg0: PublicDraft, arg1: boolean): PublicResult;"))
   (check-true (string-contains? provider-declarations
                                 "export declare function maybeLabel(arg0?: string): string | undefined;"))
+  (check-true
+   (string-contains?
+    provider-declarations
+    "export interface ProviderCatalogFileCache<T> {\n  load: (arg0: string, arg1: (arg0: string) => T) => T;\n}"))
+  (check-true
+   (string-contains?
+    provider-declarations
+    "export declare const ProviderCatalogFileCache: {\n  new<T>(arg0?: ProviderCatalogFileReader, arg1?: number): ProviderCatalogFileCache<T>;\n};"))
+  (check-true
+   (string-contains?
+    provider-declarations
+    "export declare const BridgeWireSession: {\n  new(arg0: WireQuery, arg1: AbortController, arg2: AbortSignal, arg3?: BridgeSessionPresentation): BridgeProviderSession;\n};"))
+  (check-true
+   (string-contains?
+    provider-declarations
+    "export declare const BridgeProviderTeardownTimeoutError: {\n  new(arg0: number): BridgeProviderTeardownTimeoutError;\n};"))
   (for ([name (in-list '(PublicAccepted PublicRejected PublicDraft
                          PublicLabel PublicResult))])
     (check-false
      (string-contains? provider-javascript (symbol->string name))))
   (check-false (regexp-match? #px"\\bany\\b" provider-declarations)))
+
+(test-case "constructor declarations preserve generic instance coupling"
+  (define cache
+    (module-interface-binding-ref provider-interface 'ProviderCatalogFileCache))
+  (define declaration
+    (interface-binding-js-declaration-type cache))
+  (check-true (type-refinement? declaration))
+  (check-eq? (type-refinement-placement declaration) 'js-declaration)
+  (check-eq? (type-refinement-predicate declaration) 'js/constructor)
+  (define constructor (type-refinement-base declaration))
+  (check-true (type-poly? constructor))
+  (check-equal? (type-poly-vars constructor) '(T))
+  (define signature (type-poly-body constructor))
+  (check-equal?
+   (type-fn-ret signature)
+   (type-app 'declarations.provider/ProviderCatalogFileCache
+             (list (type-var 'T))))
+  (check-false (string-contains? provider-javascript "js/constructor"))
+  (check-false (string-contains? provider-javascript "declare-record"))
+  (check-false (string-contains? provider-javascript "declare-export")))
 
 (test-case "declaration-only wire refinement preserves provider runtime semantics"
   (define labels
@@ -137,7 +173,7 @@
 
 (test-case "JsObject declaration refinement rejects non-wire scalar aliases"
   (check-exn
-   #rx"may narrow only JsObject positions to checked JavaScript wire declarations"
+   #rx"may narrow only JsObject"
    (lambda ()
      (check-module-source-closure
       (resolve-module-source-closure

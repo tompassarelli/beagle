@@ -239,6 +239,16 @@
 ;; parser to elaborate them at any declaration position.
 (define current-js-declaration-type? (make-parameter #f))
 
+(define (js-constructor-callable-type? type)
+  (cond
+    [(type-fn? type) #t]
+    [(type-poly? type)
+     (js-constructor-callable-type? (type-poly-body type))]
+    [(type-union? type)
+     (and (pair? (type-union-alts type))
+          (andmap type-fn? (type-union-alts type)))]
+    [else #f]))
+
 ;; foreign-interface-v1.rkt installs the graph-aware relation while checking a
 ;; program that imports foreign interfaces.  The default is deliberately exact
 ;; and closed: a detached foreign type never becomes Any by accident.
@@ -363,6 +373,23 @@
        [_
         (error 'beagle
                "js/optional requires exactly one declaration type, got: ~v"
+               t)])]
+
+    [(and (current-js-declaration-type?)
+          (list? t)
+          (pair? t)
+          (eq? (car t) 'js/constructor))
+     (match t
+       [(list 'js/constructor nested)
+        (define callable (parse-type nested))
+        (unless (js-constructor-callable-type? callable)
+          (error 'beagle
+                 "js/constructor requires a function, function union, or forall function declaration type, got: ~v"
+                 nested))
+        (type-refinement callable 'js/constructor 'js-declaration)]
+       [_
+        (error 'beagle
+               "js/constructor requires exactly one declaration function type, got: ~v"
                t)])]
 
     ;; Syntax is reserved before semantics: the checker rejects this node with
@@ -1280,6 +1307,8 @@
        (format "(js/literal ~s)" value)]
       [(list 'js-declaration 'js/optional)
        (format "(js/optional ~a)" (recur (type-refinement-base t)))]
+      [(list 'js-declaration 'js/constructor)
+       (format "(js/constructor ~a)" (recur (type-refinement-base t)))]
       [_
        (format "(~a where ~s)"
                (recur (type-refinement-base t))

@@ -1540,6 +1540,7 @@
      (unless (positive? arity)
        (raise-invalid-interface-type-export
         interface name "parametric union arity must be positive, got ~v" arity))]
+    [(js-wire-record) (void)]
     [(foreign) (void)]
     [else
      (unless (zero? arity)
@@ -1594,10 +1595,36 @@
   (cond
     [(or (not head) (not bindings)) #f]
     [(and (current-js-declaration-type?)
-          (symbol? datum)
           local-js-declarations
-          (hash-ref local-js-declarations datum #f))
-     (type-prim datum)]
+          (hash-has-key? local-js-declarations head))
+     (define arity (hash-ref local-js-declarations head))
+     (cond
+       [(symbol? datum)
+        (when (positive? arity)
+          (raise-parse-error
+           'type-application
+           "type ~a expects ~a argument~a, got 0"
+           head
+           arity
+           (if (= arity 1) "" "s")))
+       (type-prim head)]
+       [(pair? datum)
+        (when (zero? arity)
+          (raise-parse-error
+           'type-application
+           "type ~a is not parametric and cannot be applied"
+           head))
+        (define args (cdr datum))
+        (unless (= (length args) arity)
+          (raise-parse-error
+           'type-application
+           "type ~a expects ~a argument~a, got ~a"
+           head
+           arity
+           (if (= arity 1) "" "s")
+           (length args)))
+        (type-app head (map parse-type args))]
+       [else #f])]
     [(hash-ref bindings head #f)
      =>
      (lambda (entry)
@@ -1640,7 +1667,9 @@
               (or expansion (type-prim canonical-name)))]
          [(pair? datum)
           (define args (cdr datum))
-          (unless (memq kind '(parametric-union foreign))
+          (unless (or (memq kind '(parametric-union foreign))
+                      (and (eq? kind 'js-wire-record)
+                           (positive? arity)))
             (raise-parse-error
              'type-application
              "type ~a exported by ~a is not parametric and cannot be applied"
@@ -1657,6 +1686,8 @@
              (length args)))
           (define parsed-arguments (map parse-type args))
           (case kind
+            [(js-wire-record)
+             (type-app canonical-name parsed-arguments)]
             [(parametric-union)
              (type-app canonical-name parsed-arguments)]
             [(foreign)
@@ -1873,8 +1904,14 @@
   (validate-reserved-type-declarations! datums)
   (for ([datum (in-list datums)])
     (match datum
+      [(list 'js/declare-record
+             (list (? symbol? name) (? symbol? type-vars) ...)
+             _)
+       (hash-set! (current-local-js-declaration-types)
+                  name
+                  (length type-vars))]
       [(list (or 'js/declare-record 'js/declare-type) (? symbol? name) _)
-       (hash-set! (current-local-js-declaration-types) name #t)]
+       (hash-set! (current-local-js-declaration-types) name 0)]
       [_ (void)]))
 
   ;; Pass 1: pull meta forms out and register macros / externs / requires.
@@ -2985,6 +3022,11 @@
          [(? symbol? inner) inner]
          [_ #f]))
      (when name (validate-identifier! name "top-level declaration"))]
+    [(list* 'js/declare-record
+            (list (? symbol? name) (? symbol? type-vars) ...) _)
+     (validate-identifier! name "JavaScript declaration projection")
+     (for ([type-var (in-list type-vars)])
+       (validate-identifier! type-var "JavaScript declaration type parameter"))]
     [(list* (or 'js/declare-record 'js/declare-type 'js/declare-export)
             (? symbol? name) _)
      (validate-identifier! name "JavaScript declaration projection")]
@@ -5095,52 +5137,89 @@
        (jst-export-default (parse-expr (or (stx-ref subs 1) inner-form)))]
       [_ (parse-list-form* d subs)])))
 
-(define (parse-js-declaration-fields fields-form)
+(define (parse-js-declaration-fields fields-form [type-params '()])
   (define items (bracket-items fields-form "js/declare-record fields"))
   (unless (even? (length items))
     (raise-parse-error
      'bad-js-declare-record
      "js/declare-record fields require flat name/type pairs, got: ~v"
      items))
-  (for/list ([index (in-range 0 (length items) 2)])
-    (define name (list-ref items index))
-    (define type-form (list-ref items (add1 index)))
-    (unless (symbol? name)
-      (raise-parse-error
-       'bad-js-declare-record
-       "js/declare-record field name must be a symbol, got: ~v"
-       name))
-    (validate-identifier! name "JavaScript declaration field")
-    (match type-form
-      [(list 'js/optional type-expression)
-       (jst-declaration-field
-        name
-        (parse-js-declaration-type type-expression)
-        #t)]
-      [(list* 'js/optional _)
+  (parameterize ([current-type-vars
+                  (append type-params (current-type-vars))])
+    (for/list ([index (in-range 0 (length items) 2)])
+      (define name (list-ref items index))
+      (define type-form (list-ref items (add1 index)))
+      (unless (symbol? name)
+        (raise-parse-error
+         'bad-js-declare-record
+         "js/declare-record field name must be a symbol, got: ~v"
+         name))
+      (validate-identifier! name "JavaScript declaration field")
+      (match type-form
+        [(list 'js/optional type-expression)
+         (jst-declaration-field
+          name
+          (parse-js-declaration-type type-expression)
+          #t)]
+        [(list* 'js/optional _)
+         (raise-parse-error
+          'bad-js-declare-record
+          "js/optional requires exactly one field type, got: ~v"
+          type-form)]
+        [_
+         (jst-declaration-field
+          name
+          (parse-js-declaration-type type-form)
+          #f)]))))
+
+(define (parse-js-declaration-record-name name-form)
+  (match name-form
+    [(? symbol? name)
+     (values name '())]
+    [(list (? symbol? name) (? symbol? type-params) ...)
+     (when (null? type-params)
        (raise-parse-error
         'bad-js-declare-record
-        "js/optional requires exactly one field type, got: ~v"
-        type-form)]
-      [_
-       (jst-declaration-field
+        "parametric js/declare-record ~a requires at least one type parameter"
+        name))
+     (when (check-duplicates type-params)
+       (raise-parse-error
+        'bad-js-declare-record
+        "js/declare-record ~a type parameters must be unique, got: ~v"
         name
-        (parse-js-declaration-type type-form)
-        #f)])))
+        type-params))
+     (validate-identifier! name "JavaScript declaration projection")
+     (reject-reserved-type-name! name "js/declare-record")
+     (for ([type-param (in-list type-params)])
+       (validate-identifier! type-param "JavaScript declaration type parameter")
+       (reject-reserved-type-name!
+        type-param
+        "js/declare-record type parameter"))
+     (values name type-params)]
+    [_
+     (raise-parse-error
+      'bad-js-declare-record
+      "js/declare-record name must be Name or (Name T ...), got: ~v"
+      name-form)]))
 
 ;; Declaration-only JavaScript wire records carry a checked structural type to
 ;; host projections without creating a tagged/frozen Beagle record value.
 (register-combiner! 'js/declare-record
   (lambda (d subs)
     (match d
-      [(list 'js/declare-record (? symbol? name) fields-form)
+      [(list 'js/declare-record name-form fields-form)
+       (define-values (name type-params)
+         (parse-js-declaration-record-name name-form))
        (jst-declare-record
         name
-        (parse-js-declaration-fields (or (stx-ref subs 2) fields-form)))]
+        type-params
+        (parse-js-declaration-fields
+         (or (stx-ref subs 2) fields-form)
+         type-params))]
       [_
        (raise-parse-error
         'bad-js-declare-record
-        "js/declare-record requires (js/declare-record Name [field Type ...]), got: ~v"
+        "js/declare-record requires (js/declare-record Name [field Type ...]) or (js/declare-record (Name T ...) [field Type ...]), got: ~v"
         d)])))
 
 ;; Declaration-only aliases model untagged JavaScript wire unions and other

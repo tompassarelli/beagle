@@ -16,6 +16,15 @@
   (U (Fn [JsObject] JsObject)
      (Fn [JsObject Bool] JsObject)))
 
+(declare-extern ProviderCatalogFileCacheImpl
+  (Fn [(U JsObject Nil) (U Int Nil)] JsObject))
+
+(declare-extern BridgeWireSessionImpl
+  (Fn [JsObject JsObject JsObject (U JsObject Nil)] JsObject))
+
+(declare-extern BridgeProviderTeardownTimeoutErrorImpl
+  (Fn [Int] JsObject))
+
 (js/declare-record PublicAccepted
   [status (js/literal "accepted")
    note (js/optional String)])
@@ -32,6 +41,32 @@
 
 (js/declare-type PublicResult
   (U PublicAccepted PublicRejected))
+
+(js/declare-record ProviderCatalogFileReader
+  [identity (Fn [String] JsObject)
+   read (Fn [String] String)])
+
+(js/declare-record (ProviderCatalogFileCache T)
+  [load (Fn [String (Fn [String] T)] T)])
+
+(js/declare-record WireQuery [])
+(js/declare-record AbortController [])
+(js/declare-record AbortSignal [])
+
+(js/declare-record BridgeSessionPresentation
+  [cwd String])
+
+(js/declare-record BridgeProviderSession
+  [presentation (js/optional BridgeSessionPresentation)
+   submitInput (Fn [String] (Promise Nil))
+   interruptTurn (Fn [] (Promise Nil))
+   terminateSession (Fn [] (Promise Nil))
+   forceTerminateSession (js/optional (Fn [] Nil))
+   events (Fn [] JsObject)])
+
+(js/declare-record BridgeProviderTeardownTimeoutError
+  [name String
+   message String])
 
 (js/export (def LABELS (Vec String) ["one" "two"]))
 (js/declare-export LABELS (Vec PublicLabel))
@@ -50,3 +85,35 @@
 
 (js/declare-export maybeLabel
   (Fn [(js/optional String)] (js/optional String)))
+
+(js/export
+  (def ProviderCatalogFileCache
+    (Fn [(U JsObject Nil) (U Int Nil)] JsObject)
+    ProviderCatalogFileCacheImpl))
+
+(js/declare-export ProviderCatalogFileCache
+  (js/constructor
+    (forall [T]
+      (Fn [(js/optional ProviderCatalogFileReader)
+           (js/optional Int)]
+        (ProviderCatalogFileCache T)))))
+
+(js/export
+  (def BridgeWireSession
+    (Fn [JsObject JsObject JsObject (U JsObject Nil)] JsObject)
+    BridgeWireSessionImpl))
+
+(js/declare-export BridgeWireSession
+  (js/constructor
+    (Fn [WireQuery AbortController AbortSignal
+         (js/optional BridgeSessionPresentation)]
+      BridgeProviderSession)))
+
+(js/export
+  (def BridgeProviderTeardownTimeoutError
+    (Fn [Int] JsObject)
+    BridgeProviderTeardownTimeoutErrorImpl))
+
+(js/declare-export BridgeProviderTeardownTimeoutError
+  (js/constructor
+    (Fn [Int] BridgeProviderTeardownTimeoutError)))

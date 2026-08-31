@@ -63,6 +63,12 @@
        (eq? (type-refinement-predicate type) 'js/optional)
        (type-refinement-base type)))
 
+(define (js-constructor-base type)
+  (and (type-refinement? type)
+       (eq? (type-refinement-placement type) 'js-declaration)
+       (eq? (type-refinement-predicate type) 'js/constructor)
+       (type-refinement-base type)))
+
 (define (make-type-renderer interface)
   (define current-namespace
     (symbol->string (module-interface-namespace interface)))
@@ -119,6 +125,9 @@
          [(js-optional-base type)
           => (lambda (base)
                (format "~a | undefined" (render-type base)))]
+         [(js-constructor-base type)
+          (error 'beagle-dts
+                 "js/constructor is supported only as the direct type of js/declare-export")]
          [else (render-type (type-refinement-base type))])]
       [(type-fn? type) (render-function type)]
       [(type-app? type)
@@ -197,9 +206,22 @@
    (if (null? fields) "" (string-append "\n" (string-join fields "\n")))
    (if (null? fields) "}" "\n}")))
 
-(define (emit-wire-record-declaration render-type name fields)
+(define (render-type-parameters names)
+  (if (null? names)
+      ""
+      (format "<~a>"
+              (string-join
+               (for/list ([name (in-list names)])
+                 (require-typescript-identifier 'beagle-dts name))
+               ", "))))
+
+(define (emit-wire-record-declaration render-type name details)
   (define rendered-name
     (require-typescript-identifier 'beagle-dts name))
+  (define type-params
+    (interface-js-declaration-record-type-params details))
+  (define fields
+    (interface-js-declaration-record-fields details))
   (define rendered-fields
     (for/list ([field (in-list fields)])
       (define field-name
@@ -212,7 +234,10 @@
               (render-type
                (interface-js-declaration-field-type field)))))
   (string-append
-   "export interface " rendered-name " {"
+   "export interface "
+   rendered-name
+   (render-type-parameters type-params)
+   " {"
    (if (null? rendered-fields)
        ""
        (string-append "\n" (string-join rendered-fields "\n")))
@@ -279,8 +304,48 @@
   (define type
     (or (interface-binding-js-declaration-type binding)
         (interface-binding-type binding)))
+  (define constructor-base (js-constructor-base type))
   (define functions (function-alternatives type))
-  (if functions
+  (cond
+    [constructor-base
+     (define type-params
+       (if (type-poly? constructor-base)
+           (type-poly-vars constructor-base)
+           '()))
+     (when (and (type-poly? constructor-base)
+                (type-poly-bounds constructor-base))
+       (error 'beagle-dts
+              "bounded forall constructor projection is not yet supported: ~a"
+              name))
+     (define callable
+       (if (type-poly? constructor-base)
+           (type-poly-body constructor-base)
+           constructor-base))
+     (define constructors (function-alternatives callable))
+     (unless constructors
+       (error 'beagle-dts
+              "js/constructor declaration for ~a is not callable"
+              name))
+     (string-append
+      "export declare const " name ": {\n"
+      (string-join
+       (for/list ([constructor (in-list constructors)])
+         (format
+          "  new~a(~a): ~a;"
+          (render-type-parameters type-params)
+          (string-join
+           (for/list ([parameter (in-list (type-fn-params constructor))]
+                      [index (in-naturals)])
+             (define optional-base (js-optional-base parameter))
+             (format "arg~a~a: ~a"
+                     index
+                     (if optional-base "?" "")
+                     (render-type (or optional-base parameter))))
+           ", ")
+          (render-type (type-fn-ret constructor))))
+       "\n")
+      "\n};")]
+    [functions
       (string-join
        (for/list ([function (in-list functions)])
          (format
@@ -296,8 +361,9 @@
                      (render-type (or optional-base parameter))))
            ", ")
           (render-type (type-fn-ret function))))
-       "\n")
-      (format "export declare const ~a: ~a;" name (render-type type))))
+       "\n")]
+    [else
+     (format "export declare const ~a: ~a;" name (render-type type))]))
 
 (define (emit-typescript-declarations/interface interface)
   (unless (eq? (module-interface-target interface) 'js)

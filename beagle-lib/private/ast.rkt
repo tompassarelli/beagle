@@ -1386,7 +1386,7 @@
 (struct jst-export   (form)                                       #:transparent)
 (struct jst-export-default (form)                                 #:transparent)
 (struct jst-declaration-field (name type optional?)                #:transparent)
-(struct jst-declare-record (name fields)                           #:transparent)
+(struct jst-declare-record (name type-params fields)               #:transparent)
 (struct jst-declare-type (name type)                               #:transparent)
 (struct jst-declare-export (name type)                             #:transparent)
 (struct jst-import-meta ()                                        #:transparent)
