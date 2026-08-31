@@ -1191,6 +1191,21 @@ f(3).then(r => console.log(r));
 "
      "70")
 
+   (check-js-output "await-containing try in if branch yields its value"
+     (list `(declare-extern get-val ,(fn-ty '(Int) '(Promise Int)))
+           '(defn (#%meta :async f) [(enabled Bool)] (Promise Int)
+              (let [value (if enabled
+                            (try
+                              (await (get-val 41))
+                              (catch Error error 0))
+                            0)]
+                (+ value 1))))
+     "
+globalThis.get_val = async (n) => n;
+f(true).then(r => console.log(r));
+"
+     "42")
+
    (check-js-behavior "sync letfn declarations do not wrap a sync body"
      (list '(defn outer [] Int
               (letfn [(later [(value Int)] Int (+ value 1))]

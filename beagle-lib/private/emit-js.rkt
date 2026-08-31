@@ -2747,14 +2747,14 @@
     [(if-form? e)
      (cond
        [(if-form-else-expr e)
-        (format "(~a ? ~a : ~a)"
+       (format "(~a ? ~a : ~a)"
                 (emit-truthy-expr (if-form-cond-expr e))
-                (emit-expr (if-form-then-expr e))
-                (emit-expr (if-form-else-expr e)))]
+                (await-async-iife (emit-expr (if-form-then-expr e)))
+                (await-async-iife (emit-expr (if-form-else-expr e))))]
        [else
         (format "(~a ? ~a : null)"
                 (emit-truthy-expr (if-form-cond-expr e))
-                (emit-expr (if-form-then-expr e)))])]
+                (await-async-iife (emit-expr (if-form-then-expr e))))])]
 
     [(when-form? e)
      (define async? (or (expr-has-await? (when-form-cond-expr e))
