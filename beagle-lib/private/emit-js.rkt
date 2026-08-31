@@ -2832,7 +2832,11 @@
        (for/list ([c (in-list clauses)])
          (define test (cond-clause-test c))
          (define body (cond-clause-body c))
-         (define body-str (if (= (length body) 1) (emit-expr (car body)) (emit-body-return body "")))
+         (define body-str
+           (await-async-iife
+            (if (= (length body) 1)
+                (emit-expr (car body))
+                (emit-body-return body ""))))
          (if (else-clause? c)
            (format "~a" body-str)
            (format "(~a) ? ~a" (emit-truthy-expr test) body-str))))
