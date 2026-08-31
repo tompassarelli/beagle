@@ -163,6 +163,66 @@
      1))))
 
 (test-case
+ "foreign graph reuse validates local declaration and importer dependencies"
+ (with-isolated-adapter-cache
+  (lambda (project-root _adapter-cache)
+    (write-source!
+     (build-path project-root "package.json")
+     (string-append
+      "{\"name\":\"resolver-cache-test\",\"private\":true,\"type\":\"module\","
+      "\"imports\":{\"#fixture-cache\":\"./fixture.d.ts\"}}\n"))
+    (write-source!
+     (build-path project-root "fixture.d.ts")
+     "export declare const value: string;\n")
+    (define source-path (build-path project-root "cached.bjs"))
+    (define source-text
+      (string-append
+       "#lang beagle/js\n"
+       "(ns resolver-test.cached\n"
+       "  (:require [\"#fixture-cache\" :refer [value]]))\n"
+       "(def answer String value)\n"))
+    (write-source! source-path source-text)
+    (define input
+      (module-source-input "resolver-test/cached.bjs" source-path))
+    (define (resolve)
+      (resolve-production-module-source-closure (list input) '()))
+    (define first (resolve))
+    (check-equal?
+     (hash-count
+      (module-source-closure-foreign-module-resolutions first))
+     1)
+
+    (define no-bun-directory (build-path project-root "no-bun"))
+    (make-directory no-bun-directory)
+    (define no-bun-environment
+      (environment-variables-copy (current-environment-variables)))
+    (environment-variables-set!
+     no-bun-environment
+     #"PATH"
+     (string->bytes/utf-8 (path->string no-bun-directory)))
+    (parameterize ([current-environment-variables no-bun-environment])
+      (check-equal?
+       (hash-count
+        (module-source-closure-foreign-module-resolutions (resolve)))
+       1
+       "an unchanged graph is reusable without starting Bun")
+      (write-source! source-path (string-append source-text "\n"))
+      (check-exn
+       (lambda (failure)
+         (and (exn:fail? failure)
+              (regexp-match? #rx"Bun is unavailable" (exn-message failure))))
+       resolve)
+      (write-source! source-path source-text)
+      (write-source!
+       (build-path project-root "fixture.d.ts")
+       "export declare const value: number;\n")
+      (check-exn
+       (lambda (failure)
+         (and (exn:fail? failure)
+              (regexp-match? #rx"Bun is unavailable" (exn-message failure))))
+       resolve)))))
+
+(test-case
  "production resolution checks and emits exact native ESM interfaces"
  (with-isolated-adapter-cache
   (lambda (project-root adapter-cache)

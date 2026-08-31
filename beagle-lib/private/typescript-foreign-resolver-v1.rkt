@@ -8,6 +8,8 @@
 (require json
          openssl/sha1
          racket/file
+         racket/list
+         racket/match
          racket/path
          racket/port
          racket/promise
@@ -135,15 +137,282 @@
    (lambda ()
      (when (file-exists? temporary) (delete-file temporary)))))
 
-(define (adapter-toolchain-identity racket-bytes build-entrypoint-bytes)
-  ;; Checkout compilation is deliberately one-shot rather than keyed by a
-  ;; whole-repository revision.  These snapshotted boundary bytes plus the
-  ;; generated artifact bind every decision observable in the retained output.
+(define (repository-local-racket-source? path)
+  (define text (path->string path))
+  (define root (path->string repository-root))
+  (and (string-prefix? text (string-append root "/"))
+       (string-suffix? text ".rkt")
+       (file-exists? path)))
+
+(define (compiled-dependency-path source)
+  (build-path
+   (or (path-only source) repository-root)
+   "compiled"
+   (path-replace-extension (file-name-from-path source) #"_rkt.dep")))
+
+(define (dependency-datum-paths value)
+  (cond
+    [(bytes? value)
+     (with-handlers ([exn:fail? (lambda (_) '())])
+       (list (bytes->path value)))]
+    [(pair? value)
+     (append (dependency-datum-paths (car value))
+             (dependency-datum-paths (cdr value)))]
+    [(vector? value)
+     (append-map dependency-datum-paths (vector->list value))]
+    [else '()]))
+
+;; The adapter is compiled by one small Racket entrypoint.  Its transitive
+;; `.dep` graph names the exact local compiler modules that can affect those
+;; bytes; hashing that graph avoids both a whole-repository compiler hash and
+;; invalidation from unrelated Beagle subsystems.
+(define (adapter-compiler-closure-identity entrypoint)
+  (define seen (make-hash))
+  (define rows '())
+  (let visit ([source (canonical-file
+                       'typescript-foreign-resolver-v1
+                       "Beagle adapter compiler dependency"
+                       entrypoint)])
+    (when (and (repository-local-racket-source? source)
+               (not (hash-ref seen source #f)))
+      (hash-set! seen source #t)
+      (define dependency-path (compiled-dependency-path source))
+      (unless (file-exists? dependency-path)
+        (error
+         'typescript-foreign-resolver-v1
+         "compiled dependency graph is unavailable for ~a; run through Beagle's bytecode freshness gate"
+         source))
+      (define source-relative (find-relative-path repository-root source))
+      (set!
+       rows
+       (cons
+        (vector
+         (path->string source-relative)
+         (sha256-hex (file->bytes source)))
+        rows))
+      (define dependency-datum
+        (call-with-input-file dependency-path read))
+      (for ([dependency
+             (in-list (dependency-datum-paths dependency-datum))])
+        (define canonical
+          (simplify-path (path->complete-path dependency) #t))
+        (when (repository-local-racket-source? canonical)
+          (visit canonical)))))
+  (canonical-value-v1-id
+   (hash
+    'kind "TypeScriptAdapterCompilerClosureV1"
+    'modules
+    (sort rows string<? #:key (lambda (row) (vector-ref row 0))))))
+
+(define (adapter-toolchain-identity racket-bytes build-entrypoint-bytes
+                                    compiler-closure-identity)
+  ;; The local transitive compiler closure replaces both per-invocation
+  ;; recompilation and a coarse whole-repository revision key.
   (canonical-value-v1-id
    (hash
     'kind "TypeScriptAdapterToolchainV1"
     'racketExecutableSha256 (sha256-hex racket-bytes)
-    'buildEntrypointSha256 (sha256-hex build-entrypoint-bytes))))
+    'buildEntrypointSha256 (sha256-hex build-entrypoint-bytes)
+    'compilerClosure compiler-closure-identity)))
+
+(define (adapter-reuse-key source-sha256 toolchain-identity)
+  (canonical-value-v1-id
+   (hash
+    'kind "TypeScriptAdapterReuseV1"
+    'sourceSha256 source-sha256
+    'toolchain toolchain-identity)))
+
+(define (artifact-cache-path identity)
+  (build-path
+   (current-typescript-foreign-adapter-cache-directory)
+   (string-append (substring identity 7) ".mjs")))
+
+(define (reuse-manifest-path reuse-key)
+  (build-path
+   (current-typescript-foreign-adapter-cache-directory)
+   "reuse"
+   (string-append (substring reuse-key 7) ".rktd")))
+
+(define (foreign-resolution-cache-path project-root importer identity)
+  (define key
+    (canonical-value-v1-id
+     (hash
+      'kind "TypeScriptForeignResolutionQueryV1"
+      'projectRoot (path->string project-root)
+      'importer (path->string importer)
+      'moduleSpecifier (module-identity-value identity)
+      'conditions PRODUCTION-CONDITIONS)))
+  (build-path
+   (current-typescript-foreign-adapter-cache-directory)
+   "foreign"
+   (string-append (substring key 7) ".json")))
+
+(define (foreign-resolution-cacheable? identity)
+  (define specifier (module-identity-value identity))
+  ;; Package-import maps are owned by the nearest project package.json, while
+  ;; bun:test is an adapter-owned builtin.  Ordinary node_modules lookup also
+  ;; depends on negative directory probes that ForeignInterfaceV1 does not yet
+  ;; retain, so it deliberately remains process-local.
+  (or (string-prefix? specifier "#")
+      (string=? specifier "bun:test")))
+
+(define (logical-input-path logical project-root)
+  (define mappings
+    (list
+     (cons "project/" project-root)
+     (cons "adapter/" adapter-root)
+     (cons "runtime/" beagle-js-runtime-root)))
+  (or
+   (and (string=? logical "bun.lock") adapter-lock)
+   (for/or ([mapping (in-list mappings)])
+     (and
+      (string-prefix? logical (car mapping))
+      (build-path
+       (cdr mapping)
+       (substring logical (string-length (car mapping))))))))
+
+(define (digest-file-current? digest-file project-root)
+  (define logical (hash-ref digest-file 'path))
+  (define physical (logical-input-path logical project-root))
+  (or
+   ;; Builtin declarations are byte literals owned by the snapshotted
+   ;; TypeScript bridge.  Its physical source is another consulted input, so
+   ;; changing the literal invalidates through that dependency.
+   (string-prefix? logical "adapter/builtins/")
+   (and
+    physical
+    (file-exists? physical)
+    (string=? (hash-ref digest-file 'sha256)
+              (sha256-hex (file->bytes physical))))))
+
+(define (cached-foreign-interface cache-path artifact producer project-root)
+  (and
+   (file-exists? cache-path)
+   (let* ([graph-bytes (file->bytes cache-path)]
+          [graph (read-one-json 'typescript-foreign-resolver-v1 graph-bytes)]
+          [provenance (hash-ref graph 'provenance #f)]
+          [adapter (and (hash? provenance)
+                        (hash-ref provenance 'adapter #f))])
+     ;; A compiler change that emits different adapter bytes is an ordinary
+     ;; local invalidation, not a corrupt-cache diagnosis.
+     (and
+      (hash? adapter)
+      (equal? (hash-ref adapter 'sourceSha256 #f)
+              (compiled-typescript-adapter-v1-source-sha256 artifact))
+      (equal? (hash-ref adapter 'compiledSha256 #f)
+              (compiled-typescript-adapter-v1-generated-sha256 artifact))
+      (let* ([interface
+              (validate-foreign-interface-v1 graph #:producer producer)]
+             [normalized-provenance
+              (foreign-interface-v1-provenance interface)]
+             [inputs
+              (append
+               (hash-ref normalized-provenance 'consultedFiles)
+               (list (hash-ref normalized-provenance 'package)
+                     (hash-ref normalized-provenance 'lockfile)))])
+        (and
+         (andmap
+          (lambda (input) (digest-file-current? input project-root))
+          inputs)
+         interface))))))
+
+(define (publish-foreign-resolution! cache-path graph-bytes)
+  (make-directory* (or (path-only cache-path) cache-path))
+  (define temporary
+    (make-temporary-file "foreign-resolution-~a.json" #f
+                         (path-only cache-path)))
+  (dynamic-wind
+   void
+   (lambda ()
+     (call-with-output-file
+      temporary
+      #:exists 'truncate/replace
+      (lambda (out) (write-bytes graph-bytes out)))
+     (unless (bytes=? graph-bytes (file->bytes temporary))
+       (error
+        'typescript-foreign-resolver-v1
+        "TypeScript foreign resolution changed while caching ~a"
+        cache-path))
+     (rename-file-or-directory temporary cache-path #t))
+   (lambda ()
+     (when (file-exists? temporary) (delete-file temporary)))))
+
+(define (read-reused-adapter source-sha256 toolchain-identity)
+  (define reuse-key (adapter-reuse-key source-sha256 toolchain-identity))
+  (define manifest-path (reuse-manifest-path reuse-key))
+  (and
+   (file-exists? manifest-path)
+   (match
+       (call-with-input-file manifest-path read)
+     [(list 'typescript-adapter-reuse-v1
+            (and generated-sha256 (? string?))
+            (and identity (? string?)))
+      (define expected-identity
+        (compiled-typescript-adapter-v1-id
+         source-sha256 generated-sha256 toolchain-identity))
+      (unless (string=? identity expected-identity)
+        (error
+         'typescript-foreign-resolver-v1
+         "compiled adapter reuse manifest does not match its local semantic inputs: ~a"
+         manifest-path))
+      (define artifact-path (artifact-cache-path identity))
+      (and
+       (file-exists? artifact-path)
+       (let ([artifact-bytes (file->bytes artifact-path)])
+         (unless (string=? generated-sha256 (sha256-hex artifact-bytes))
+           (error
+            'typescript-foreign-resolver-v1
+            "compiled adapter reuse artifact is corrupt: ~a"
+            artifact-path))
+         (compiled-typescript-adapter-v1
+          artifact-path identity source-sha256 generated-sha256
+          toolchain-identity)))]
+     [_
+      (error
+       'typescript-foreign-resolver-v1
+       "invalid compiled adapter reuse manifest: ~a"
+       manifest-path)])))
+
+(define (publish-adapter-reuse! artifact)
+  (define reuse-key
+    (adapter-reuse-key
+     (compiled-typescript-adapter-v1-source-sha256 artifact)
+     (compiled-typescript-adapter-v1-toolchain-identity artifact)))
+  (define destination (reuse-manifest-path reuse-key))
+  (define manifest
+    (list
+     'typescript-adapter-reuse-v1
+     (compiled-typescript-adapter-v1-generated-sha256 artifact)
+     (compiled-typescript-adapter-v1-identity artifact)))
+  (make-directory* (or (path-only destination) destination))
+  (cond
+    [(file-exists? destination)
+     (unless (equal? manifest (call-with-input-file destination read))
+       (error
+        'typescript-foreign-resolver-v1
+        "compiled adapter reuse manifest collision at ~a"
+        destination))]
+    [else
+     (define temporary
+       (make-temporary-file "adapter-reuse-~a.rktd" #f (path-only destination)))
+     (dynamic-wind
+      void
+      (lambda ()
+        (call-with-output-file
+         temporary
+         #:exists 'truncate/replace
+         (lambda (out) (write manifest out) (newline out)))
+        (with-handlers
+            ([exn:fail:filesystem?
+              (lambda (failure)
+                (unless (and (file-exists? destination)
+                             (equal? manifest
+                                     (call-with-input-file destination read)))
+                  (raise failure)))])
+          (rename-file-or-directory temporary destination #f)))
+      (lambda ()
+        (when (file-exists? temporary) (delete-file temporary))))])
+  artifact)
 
 (define (write-content-addressed-adapter! source-bytes generated-bytes
                                           toolchain-identity)
@@ -264,6 +533,7 @@
            (loop parent))])))
 
 (define (compile-checkout-adapter source-bytes)
+  (let/ec return
   (unless (checkout-tree?)
     (error
      'typescript-foreign-resolver-v1
@@ -286,8 +556,22 @@
      build-one-cli))
   (define racket-bytes (file->bytes racket-executable))
   (define build-entrypoint-bytes (file->bytes build-entrypoint))
+  (define compiler-closure-identity
+    (adapter-compiler-closure-identity build-entrypoint))
   (define toolchain-identity
-    (adapter-toolchain-identity racket-bytes build-entrypoint-bytes))
+    (adapter-toolchain-identity
+     racket-bytes build-entrypoint-bytes compiler-closure-identity))
+  (define source-sha256 (sha256-hex source-bytes))
+  (define reused
+    (read-reused-adapter source-sha256 toolchain-identity))
+  (when reused
+    (unless
+        (string=? compiler-closure-identity
+                  (adapter-compiler-closure-identity build-entrypoint))
+      (error
+       'typescript-foreign-resolver-v1
+       "TypeScript adapter compiler dependencies changed during cache lookup"))
+    (return reused))
   (define-values (generated-bytes _diagnostics)
     (call-with-byte-snapshot-file
      (find-system-path 'temp-dir)
@@ -296,8 +580,16 @@
      (lambda (snapshotted-source)
        (define adapter-environment
          (environment-variables-copy (current-environment-variables)))
-       (environment-variables-set!
-        adapter-environment #"BEAGLE_JS_RUNTIME_PREFIX" #f)
+       (for ([entry
+              (in-list
+               (list
+                (cons #"BEAGLE_CHECK_PROFILE" #"2")
+                (cons #"BEAGLE_PURITY" #f)
+                (cons #"BEAGLE_NO_LINT" #f)
+                (cons #"BEAGLE_REP_METRIC" #f)
+                (cons #"BEAGLE_JS_RUNTIME_PREFIX" #f)))])
+         (environment-variables-set!
+          adapter-environment (car entry) (cdr entry)))
        (parameterize ([current-environment-variables adapter-environment])
          (run/capture
           'typescript-foreign-resolver-v1
@@ -322,8 +614,15 @@
     (error
      'typescript-foreign-resolver-v1
      "TypeScript adapter compiler toolchain changed during compilation"))
-  (write-content-addressed-adapter!
-   source-bytes generated-bytes toolchain-identity))
+  (unless
+      (string=? compiler-closure-identity
+                (adapter-compiler-closure-identity build-entrypoint))
+    (error
+     'typescript-foreign-resolver-v1
+     "TypeScript adapter compiler dependencies changed during compilation"))
+  (publish-adapter-reuse!
+   (write-content-addressed-adapter!
+    source-bytes generated-bytes toolchain-identity))))
 
 (define (load-compiled-adapter)
   (for ([entry
@@ -375,7 +674,8 @@
    'artifactId expected-identity
    'toolchain (compiled-typescript-adapter-v1-toolchain-identity artifact)))
 
-(define (resolve-with-adapter artifact bun identity importer)
+(define (resolve-with-adapter force-artifact force-bun identity importer)
+  (let/ec return
   (unless (and (module-identity? identity)
                (eq? (module-identity-kind identity) 'native-esm)
                (string? (module-identity-value identity)))
@@ -383,7 +683,6 @@
      'typescript-foreign-resolver-v1
      "expected exact native-ESM module identity, got ~v"
      identity))
-  (define producer (compiled-adapter-producer artifact))
   (define importer-path
     (canonical-file
      'typescript-foreign-resolver-v1
@@ -391,6 +690,25 @@
      importer))
   (define project-root (project-root-for-importer importer-path))
   (define module-specifier (module-identity-value identity))
+  (define cache-path
+    (and
+     (foreign-resolution-cacheable? identity)
+     (foreign-resolution-cache-path project-root importer-path identity)))
+  (define artifact
+    (and cache-path (file-exists? cache-path) (force-artifact)))
+  (define producer
+    (and artifact (compiled-adapter-producer artifact)))
+  (define cached
+    (and artifact
+         (cached-foreign-interface
+          cache-path artifact producer project-root)))
+  (when cached
+    (return (foreign-interface-v1->module-source cached)))
+  ;; Preserve the no-Bun boundary: on a true miss, establish the required
+  ;; runtime before compiling or caching the adapter.
+  (define bun (force-bun))
+  (unless artifact (set! artifact (force-artifact)))
+  (unless producer (set! producer (compiled-adapter-producer artifact)))
   (define-values (graph-bytes _diagnostics)
     (run/capture
      'typescript-foreign-resolver-v1
@@ -405,10 +723,28 @@
        (path->string importer-path)
        module-specifier)
       PRODUCTION-CONDITIONS)))
-  (foreign-interface-v1->module-source
-   (validate-foreign-interface-v1
-    (read-one-json 'typescript-foreign-resolver-v1 graph-bytes)
-    #:producer producer)))
+  (define interface
+    (validate-foreign-interface-v1
+     (read-one-json 'typescript-foreign-resolver-v1 graph-bytes)
+     #:producer producer))
+  ;; Recheck the graph's complete local dependency ledger before publication;
+  ;; the adapter already proved the same snapshot stable during generation.
+  (define provenance (foreign-interface-v1-provenance interface))
+  (define inputs
+    (append
+     (hash-ref provenance 'consultedFiles)
+     (list (hash-ref provenance 'package)
+           (hash-ref provenance 'lockfile))))
+  (unless (andmap
+           (lambda (input) (digest-file-current? input project-root))
+           inputs)
+    (error
+     'typescript-foreign-resolver-v1
+     "TypeScript foreign inputs changed before cache publication for ~a"
+     module-specifier))
+  (when cache-path
+    (publish-foreign-resolution! cache-path graph-bytes))
+  (foreign-interface-v1->module-source interface)))
 
 (define (make-typescript-foreign-module-resolver-v1)
   (define bun
@@ -433,9 +769,10 @@
        ;; Establish the irreducible runtime edge before compiling or caching
        ;; anything.  A machine without Bun gets the actionable boundary error
        ;; and remains byte-for-byte untouched by adapter materialization.
-       (define bun-executable (force bun))
        (resolve-with-adapter
-        (force artifact) bun-executable identity importer-path)))))
+        (lambda () (force artifact))
+        (lambda () (force bun))
+        identity importer-path)))))
 
 ;; One admitted production constructor replaces repeated caller-local policy:
 ;; all public file-backed build/check paths use the exact same resolver, while
