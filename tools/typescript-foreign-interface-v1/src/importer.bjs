@@ -36,6 +36,7 @@
    synthetic-values (Atom (Map String String))
    literal-enums (Atom (Map String String))
    anonymous-records (Atom (Map String String))
+   structural-records (Atom (Map String String))
    extra-imports (Atom (Map String (Vec String)))
    needs-process (Atom Bool)
    needs-pad-end (Atom Bool)
@@ -313,6 +314,105 @@
                  (conj forms (str "(defrecord " name " [])"))))
         name))))
 
+(defn structural-record-key
+  [state ImportStateV1
+   type OpaqueTypeScriptTypeV1] String
+  (.typeDisplay (importstatev1-bridge state) type))
+
+(defn structural-record-shape?
+  [state ImportStateV1
+   type OpaqueTypeScriptTypeV1] Bool
+  (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)]
+    (and (empty? (: (.indexInfos bridge type) (Vec OpaqueCompilerValueV1)))
+         (empty? (: (.callSignatures bridge type) (Vec OpaqueCompilerValueV1)))
+         (empty? (: (.constructSignatures bridge type) (Vec OpaqueCompilerValueV1)))
+         (if (identical? (.typeKind bridge type) "intersection")
+           (every?
+             (fn [member OpaqueTypeScriptTypeV1] Bool
+               (let [kind String (.typeKind bridge member)]
+                 (or (identical? kind "object")
+                     (identical? kind "reference")
+                     (identical? kind "non-primitive-object"))))
+             (type-members state type))
+           true))))
+
+(defn structural-record-fields!
+  [state ImportStateV1
+   type OpaqueTypeScriptTypeV1] (Vec String)
+  (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
+        properties (Vec OpaqueCompilerValueV1)
+        (: (.sort bridge (.typeProperties bridge type))
+           (Vec OpaqueCompilerValueV1))]
+    (reduce
+      (fn
+        [fields (Vec String)
+         property OpaqueCompilerValueV1] (Vec String)
+        (into fields
+          [(.symbolName bridge property)
+           (optional-property-type->beagle! state type property)]))
+      []
+      properties)))
+
+(defn remember-structural-record!
+  [state ImportStateV1
+   type OpaqueTypeScriptTypeV1
+  record-name String] Nil
+  (do
+    (swap! (importstatev1-structural-records state)
+           (fn [records (Map String String)] (Map String String)
+             (assoc records (structural-record-key state type) record-name)))
+    (swap! (importstatev1-local-types state)
+           (fn [types (Map String Bool)] (Map String Bool)
+             (assoc types record-name true)))
+    nil))
+
+(defn fresh-structural-record-name
+  [state ImportStateV1] String
+  (loop [ordinal Int 1]
+    (let [candidate String (str "TypeScriptStructuralObjectV" ordinal)]
+      (if (contains? (deref (importstatev1-local-types state)) candidate)
+        (recur (+ ordinal 1))
+        candidate))))
+
+(defn ensure-structural-record!
+  [state ImportStateV1
+   type OpaqueTypeScriptTypeV1] String
+  (let [key String (structural-record-key state type)
+        existing (U String Nil)
+        (get (deref (importstatev1-structural-records state)) key)]
+    (if existing
+      existing
+      (if (structural-record-shape? state type)
+        (let [record-name String (fresh-structural-record-name state)]
+          (do
+            ;; Bind the name before descending so recursive structural fields
+            ;; converge on this same deterministic record.
+            (remember-structural-record! state type record-name)
+            (register-synthetic-record! state record-name
+              (structural-record-fields! state type))))
+        (diagnostic! state
+          (.sourceFile (importstatev1-bridge state) (importstatev1-context state))
+          "TSI_STRUCTURAL_OBJECT_TYPE"
+          (str "structural object type "
+               (.typeDisplay (importstatev1-bridge state) type)
+               " requires finite record fields"))))))
+
+(defn named-structural-record-form!
+  [state ImportStateV1
+   name String
+   type OpaqueTypeScriptTypeV1] String
+  (if (structural-record-shape? state type)
+    (do
+      (remember-structural-record! state type name)
+      (str "(defrecord " name " ["
+           (join-with " " (structural-record-fields! state type)) "])"))
+    (diagnostic! state
+      (.sourceFile (importstatev1-bridge state) (importstatev1-context state))
+      "TSI_STRUCTURAL_OBJECT_TYPE"
+      (str "structural object type "
+           (.typeDisplay (importstatev1-bridge state) type)
+           " requires finite record fields"))))
+
 (defn partial-record-type-arguments
   [state ImportStateV1
    type OpaqueTypeScriptTypeV1] (Vec OpaqueTypeScriptTypeV1)
@@ -384,9 +484,13 @@
         type-name String (.typeName bridge type)
         local-name? Bool (and use-local-name
              (.typeLocal? bridge type)
-             (contains? (deref (importstatev1-local-types state)) type-name))]
+             (contains? (deref (importstatev1-local-types state)) type-name))
+        structural-name (U String Nil)
+        (get (deref (importstatev1-structural-records state))
+             (structural-record-key state type))]
     (cond
       local-name? type-name
+      structural-name structural-name
       (identical? kind "string") "String"
       (identical? kind "number") "Number"
       (identical? kind "boolean") "Bool"
@@ -455,6 +559,8 @@
             (if (identical? (count members) 1)
               (first members)
               (parenthesize "U" members)))))
+      (identical? kind "intersection")
+      (ensure-structural-record! state type)
       (identical? kind "function")
       (let [signatures (Vec OpaqueCompilerValueV1) (: (.callSignatures bridge type) (Vec OpaqueCompilerValueV1))]
         (if (identical? (count signatures) 1)
@@ -745,12 +851,26 @@
         record-name (U String Nil) (if forced-record
           forced-record
           (if (present? contextual)
-            (let [local (U String Nil) (local-record-name state contextual)]
-              (if local
-                local
-                (let [matched (U String Nil) (.contextualRecordName bridge
-                        (importstatev1-context state) node)]
-                  (if matched matched (imported-record-name! state contextual)))))
+            (let [known (U String Nil)
+                  (get (deref (importstatev1-structural-records state))
+                       (structural-record-key state contextual))
+                  local (U String Nil) (local-record-name state contextual)]
+              (if known
+                known
+                (if local
+                  local
+                  (let [matched (U String Nil) (.contextualRecordName bridge
+                          (importstatev1-context state) node)]
+                    (if matched
+                      matched
+                      (let [imported (U String Nil) (imported-record-name! state contextual)]
+                        (if imported
+                          imported
+                          (if (or (identical? (.typeKind bridge contextual) "intersection")
+                                  (and (identical? (.typeKind bridge contextual) "object")
+                                       (structural-record-shape? state contextual)))
+                            (ensure-structural-record! state contextual)
+                            nil))))))))
             nil))
         record-type OpaqueTypeScriptTypeV1 (if (and record-name
                  (present? (.localTypeByName bridge
@@ -759,7 +879,15 @@
           contextual)]
     (if record-name
       (let [type OpaqueTypeScriptTypeV1 (if (present? record-type) record-type (.typeAt bridge node))
-            fields (Vec OpaqueCompilerValueV1) (: (.typeProperties bridge type) (Vec OpaqueCompilerValueV1))
+            structural-name (U String Nil)
+            (get (deref (importstatev1-structural-records state))
+                 (structural-record-key state type))
+            raw-fields (Vec OpaqueCompilerValueV1)
+            (: (.typeProperties bridge type) (Vec OpaqueCompilerValueV1))
+            fields (Vec OpaqueCompilerValueV1) (if (and structural-name
+                                                         (identical? structural-name record-name))
+              (: (.sort bridge raw-fields) (Vec OpaqueCompilerValueV1))
+              raw-fields)
             arguments (Vec String) (mapv
               (fn [field OpaqueCompilerValueV1] String
                 (object-property-source! state properties (.symbolName bridge field)))
@@ -1809,9 +1937,14 @@
       (let [record-arguments (Vec OpaqueTypeScriptTypeV1) (partial-record-type-arguments state type)]
         (if (identical? (count record-arguments) 2)
           (str "(defalias " name " " (partial-type->beagle! state type) ")")
-          (partial-record-form! state name type)))
+          (do
+            (remember-structural-record! state type name)
+            (partial-record-form! state name type))))
       (literal-string-union? state type)
       (string-literal-scalar-form name)
+      (or (identical? (node-kind state type-node) "TypeLiteral")
+          (identical? (node-kind state type-node) "IntersectionType"))
+      (named-structural-record-form! state name type)
       :else (str "(defalias " name " " (type->beagle! state type false) ")"))))
 
 (defn parameter-default?
@@ -2140,7 +2273,7 @@
           (: (.nodeList bridge source-file "statements") (Vec OpaqueTypeScriptNodeV1))
           state ImportStateV1
           (->ImportStateV1 bridge context namespace module-mappings
-            (atom []) (atom {}) (atom []) (atom {}) (atom {}) (atom {}) (atom {})
+            (atom []) (atom {}) (atom []) (atom {}) (atom {}) (atom {}) (atom {}) (atom {})
             (atom false) (atom false) (atom 0) (atom 0))
           _ Nil (collect-local-types! state statements)
           forms (Vec String) (emit-top-level! state statements)
