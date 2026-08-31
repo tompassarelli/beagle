@@ -1148,6 +1148,9 @@ export function createCompilerBridge({
       || node?.questionDotToken
       || (node?.flags & ts.NodeFlags.OptionalChain),
     ),
+    "nodeParameterProperty?": (node) => Boolean(
+      node?.parent && ts.isParameterPropertyDeclaration(node, node.parent)
+    ),
     "nodeRest?": (node) => Boolean(node?.dotDotDotToken),
     "nodeMutable?": (node) => Boolean(node?.parent?.flags & ts.NodeFlags.Let),
     literalJson: (node) => JSON.stringify(node.text),

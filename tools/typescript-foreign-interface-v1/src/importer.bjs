@@ -322,8 +322,7 @@
 (defn partial-type->beagle!
   [state ImportStateV1
    type OpaqueTypeScriptTypeV1] String
-  (let [arguments (Vec OpaqueTypeScriptTypeV1)
-        (partial-record-type-arguments state type)]
+  (let [arguments (Vec OpaqueTypeScriptTypeV1) (partial-record-type-arguments state type)]
     (if (identical? (count arguments) 2)
       (parenthesize "Map"
         [(type->beagle! state (first arguments) true)
@@ -358,8 +357,7 @@
    name String
    type OpaqueTypeScriptTypeV1] String
   (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
-        properties (Vec OpaqueCompilerValueV1)
-        (: (.sort bridge (.typeProperties bridge type))
+        properties (Vec OpaqueCompilerValueV1) (: (.sort bridge (.typeProperties bridge type))
            (Vec OpaqueCompilerValueV1))
         fields (Vec String) (reduce
           (fn
@@ -478,6 +476,8 @@
           (identical? type-name "Partial") (partial-type->beagle! state type)
           (identical? type-name "Record")
           (parenthesize "Map" arguments)
+          (identical? type-name "Map")
+          (parenthesize "JsMap" arguments)
           :else (parenthesize type-name arguments)))
       (identical? kind "object")
       (let [indexes (Vec OpaqueCompilerValueV1)
@@ -487,6 +487,7 @@
             construct-signatures (Vec OpaqueCompilerValueV1)
             (: (.constructSignatures bridge type) (Vec OpaqueCompilerValueV1))]
         (cond
+          (identical? type-name "Date") "JsDate"
           (not (empty? indexes))
           (let [index OpaqueCompilerValueV1 (first indexes)]
             (parenthesize "Map"
@@ -1132,13 +1133,44 @@
 (defn emit-new!
   [state ImportStateV1
    node OpaqueTypeScriptNodeV1] String
-  (let [callee OpaqueTypeScriptNodeV1 (bridge-node state node "expression")
+  (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
+        callee OpaqueTypeScriptNodeV1 (bridge-node state node "expression")
         arguments (Vec OpaqueTypeScriptNodeV1) (bridge-nodes state node "arguments")
         name String (node-name state callee)]
-    (if (and (identical? (node-kind state callee) "Identifier")
-             (identical? name "Set")
-             (identical? (count arguments) 1))
+    (cond
+      (and (identical? (node-kind state callee) "Identifier")
+           (identical? name "Set")
+           (identical? (count arguments) 1))
       (str "(set " (emit-expression! state (first arguments)) ")")
+      (and (identical? (node-kind state callee) "Identifier")
+           (identical? name "Map"))
+      (let [map-type OpaqueTypeScriptTypeV1 (.typeAt bridge node)
+            map-arguments (Vec OpaqueTypeScriptTypeV1) (type-arguments state map-type)]
+        (if (identical? (count map-arguments) 2)
+          (let [key-type String (type->beagle! state (first map-arguments) true)
+                value-type String (type->beagle! state (nth map-arguments 1) true)
+                map-type-source String (parenthesize "JsMap" [key-type value-type])]
+            (cond
+              (empty? arguments) (str "(: (new Map) " map-type-source ")")
+              (identical? (count arguments) 1)
+              (let [map-name String (next-temporary! state "typescript-map-")
+                    entry-name String (next-temporary! state "typescript-map-entry-")
+                    entry-type String (parenthesize "HVec" [key-type value-type])]
+                (str "(reduce (fn [" map-name " " map-type-source " "
+                     entry-name " " entry-type "] " map-type-source " "
+                     "(.set " map-name " (first " entry-name ") (nth " entry-name " 1))) "
+                     "(: (new Map) " map-type-source ") "
+                     (emit-expression! state (first arguments)) ")"))
+              :else
+              (diagnostic! state node "TSI_MAP_CONSTRUCTOR_ARITY"
+                "Map construction supports zero arguments or one entry collection")))
+          (diagnostic! state node "TSI_MAP_CONSTRUCTOR_TYPE"
+            (str "cannot resolve Map key and value types from " (.typeDisplay bridge map-type)))))
+      (and (identical? (node-kind state callee) "Identifier")
+           (identical? name "Date")
+           (empty? arguments))
+      "(: (new Date) JsDate)"
+      :else
       (diagnostic! state node "TSI_NEW_EXPRESSION"
         (str "unsupported TypeScript constructor " name)))))
 
@@ -1709,6 +1741,52 @@
       (str "(js/export " form ")")
       form)))
 
+(defn class-field-sources!
+  [state ImportStateV1
+   members (Vec OpaqueTypeScriptNodeV1)] (Vec String)
+  (reduce
+    (fn
+      [fields (Vec String)
+       member OpaqueTypeScriptNodeV1] (Vec String)
+      (let [kind String (node-kind state member)]
+        (cond
+          (identical? kind "PropertyDeclaration")
+          (into fields
+            [(node-name state (bridge-node state member "name"))
+             (type->beagle! state
+               (.typeAt (importstatev1-bridge state) member)
+               true)])
+          (identical? kind "Constructor")
+          (reduce
+            (fn
+              [constructor-fields (Vec String)
+               parameter OpaqueTypeScriptNodeV1] (Vec String)
+              (if (.nodeParameterProperty? (importstatev1-bridge state) parameter)
+                (into constructor-fields
+                  [(node-name state (bridge-node state parameter "name"))
+                   (type->beagle! state
+                     (.typeAt (importstatev1-bridge state) parameter)
+                     true)])
+                constructor-fields))
+            fields
+            (bridge-nodes state member "parameters"))
+          :else
+          (do (diagnostic! state member "TSI_CLASS_MEMBER"
+                (str "unsupported class member " kind))
+              fields))))
+    []
+    members))
+
+(defn emit-class!
+  [state ImportStateV1
+   node OpaqueTypeScriptNodeV1] String
+  (let [name String (node-name state node)
+        fields (Vec String) (class-field-sources! state (bridge-nodes state node "members"))
+        form String (str "(defrecord " name " [" (join-with " " fields) "])")]
+    (if (.nodeExported? (importstatev1-bridge state) node)
+      (str "(js/export " form ")")
+      form)))
+
 (defn literal-string-union?
   [state ImportStateV1
    type OpaqueTypeScriptTypeV1] Bool
@@ -1728,8 +1806,7 @@
         type OpaqueTypeScriptTypeV1 (.typeAt bridge (bridge-node state node "name"))]
     (cond
       (present? (.partialBaseType bridge type))
-      (let [record-arguments (Vec OpaqueTypeScriptTypeV1)
-            (partial-record-type-arguments state type)]
+      (let [record-arguments (Vec OpaqueTypeScriptTypeV1) (partial-record-type-arguments state type)]
         (if (identical? (count record-arguments) 2)
           (str "(defalias " name " " (partial-type->beagle! state type) ")")
           (partial-record-form! state name type)))
@@ -2020,7 +2097,8 @@
   (do
     (doseq [statement OpaqueTypeScriptNodeV1 statements]
       (when (or (identical? (node-kind state statement) "InterfaceDeclaration")
-                (identical? (node-kind state statement) "TypeAliasDeclaration"))
+                (identical? (node-kind state statement) "TypeAliasDeclaration")
+                (identical? (node-kind state statement) "ClassDeclaration"))
         (swap! (importstatev1-local-types state)
                (fn [types (Map String Bool)] (Map String Bool)
                  (assoc types (node-name state statement) true)))))
@@ -2038,6 +2116,7 @@
           (identical? kind "ImportDeclaration") forms
           (identical? kind "InterfaceDeclaration") (conj forms (emit-interface! state statement))
           (identical? kind "TypeAliasDeclaration") (conj forms (emit-type-alias! state statement))
+          (identical? kind "ClassDeclaration") (conj forms (emit-class! state statement))
           (identical? kind "FunctionDeclaration") (conj forms (emit-function! state statement))
           (identical? kind "VariableStatement") (into forms (emit-variable! state statement))
           (identical? kind "ExpressionStatement")
