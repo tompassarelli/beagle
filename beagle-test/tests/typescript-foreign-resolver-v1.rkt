@@ -137,6 +137,7 @@
       "export declare const value: string;\n"
       "export declare function acceptFlag(flag: boolean): void;\n"
       "export declare function notify(): void;\n"
+      "export declare function pipeline(...streams: [string, ...number[], boolean]): void;\n"
       "export declare function schedule(body: () => void): void;\n"))
     ;; If the production "beagle" condition is lost, this conflicting default
     ;; declaration makes the coherent String check fail instead of passing by
@@ -152,9 +153,10 @@
      (string-append
       "#lang beagle/js\n"
       "(ns resolver-test.native-success\n"
-      "  (:require [\"@fixture/native\" :refer [acceptFlag notify schedule value]]))\n"
+      "  (:require [\"@fixture/native\" :refer [acceptFlag notify pipeline schedule value]]))\n"
       "(js/export (def answer String value))\n"
       "(js/export (defn relay [flag Bool] Nil (acceptFlag flag)))\n"
+      "(js/export (defn runPipeline [] Nil (pipeline \"source\" 1 2 true)))\n"
       "(js/export (defn run [] Nil (schedule (fn [] Nil (notify)))))\n"))
 
     (define closure
@@ -180,6 +182,20 @@
     (check-equal?
      (hash-ref (foreign-interface-v1-stats foreign-interface) 'anyCount)
      0)
+    (check-true
+     (for/or ([node
+               (in-list
+                (hash-ref
+                 (foreign-interface-v1->jsexpr foreign-interface)
+                 'nodes))])
+       (and
+        (string=? (hash-ref node 'kind) "tuple")
+        (let ([elements (hash-ref node 'elements)])
+          (for/or ([element (in-list elements)]
+                   [index (in-naturals)])
+            (and (hash-ref element 'rest)
+                 (< index (sub1 (length elements))))))))
+     "the exact TypeScript graph must retain its middle rest tuple")
     (check-equal?
      (hash-ref
       (foreign-interface-v1-stats foreign-interface)

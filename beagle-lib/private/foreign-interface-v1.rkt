@@ -239,20 +239,37 @@
                             (hash-ref value 'optional))
         'rest (boolean! (format "~a.rest" where) (hash-ref value 'rest))))
 
-(define (validate-ordered-elements! where elements noun)
+(define (validate-ordered-elements! where elements noun
+                                    #:middle-rest? [middle-rest? #f])
   (define final-index (sub1 (length elements)))
-  (for/fold ([optional-seen? #f])
-            ([element (in-list elements)]
-             [index (in-naturals)])
-    (define optional? (hash-ref element 'optional))
-    (define rest? (hash-ref element 'rest))
-    (when (and rest? (or optional? (not (= index final-index))))
-      (schema-error (format "~a[~a]" where index)
-                    "a rest ~a must be final and cannot be optional" noun))
-    (when (and optional-seen? (not optional?) (not rest?))
-      (schema-error (format "~a[~a]" where index)
-                    "a required ~a cannot follow an optional one" noun))
-    (or optional-seen? optional?)))
+  (let loop ([remaining elements]
+             [index 0]
+             [optional-seen? #f]
+             [rest-seen? #f])
+    (unless (null? remaining)
+      (define element (car remaining))
+      (define optional? (hash-ref element 'optional))
+      (define rest? (hash-ref element 'rest))
+      (when (and rest?
+                 (or optional?
+                     (and (not middle-rest?)
+                          (not (= index final-index)))))
+        (schema-error (format "~a[~a]" where index)
+                      "a rest ~a must be final and cannot be optional" noun))
+      (when (and rest? rest-seen?)
+        (schema-error (format "~a[~a]" where index)
+                      "the ordered ~a list may contain at most one rest entry"
+                      noun))
+      (when (and rest-seen? optional?)
+        (schema-error (format "~a[~a]" where index)
+                      "an optional ~a cannot follow a rest one" noun))
+      (when (and optional-seen? (not optional?) (not rest?))
+        (schema-error (format "~a[~a]" where index)
+                      "a required ~a cannot follow an optional one" noun))
+      (loop (cdr remaining)
+            (add1 index)
+            (or optional-seen? optional?)
+            (or rest-seen? rest?)))))
 
 (define (normalize-signature where value)
   (object! where value '(typeParameters parameters return) '())
@@ -369,7 +386,8 @@
            (format "~a.elements[~a]" where index) element)))
       (validate-ordered-elements! (format "~a.elements" where)
                                   elements
-                                  "tuple element")
+                                  "tuple element"
+                                  #:middle-rest? #t)
       (hash-set* base 'elements elements
                  'readonly (boolean! (format "~a.readonly" where)
                                      (hash-ref value 'readonly)))]
@@ -1782,6 +1800,28 @@
      (and (attempt trial)
           (begin (copy-bindings! bindings trial) #t))]))
 
+(define (tuple-rest-position elements)
+  (for/first ([element (in-list elements)]
+              [index (in-naturals)]
+              #:when (hash-ref element 'rest))
+    index))
+
+;; Resolve one concrete tuple position when the actual arity is known.  A
+;; TypeScript middle rest consumes the positions between a fixed prefix and a
+;; fixed suffix; suffix positions are therefore selected from the right.
+(define (tuple-element-at-arity elements arity index)
+  (define rest-position (tuple-rest-position elements))
+  (cond
+    [(not rest-position)
+     (and (< index (length elements)) (list-ref elements index))]
+    [(< index rest-position) (list-ref elements index)]
+    [else
+     (define suffix (drop elements (add1 rest-position)))
+     (define suffix-start (- arity (length suffix)))
+     (cond
+       [(< index suffix-start) (list-ref elements rest-position)]
+       [else (list-ref suffix (- index suffix-start))])]))
+
 (define (foreign-argument-compatible? interface expected-id expression actual
                                       [bindings #f]
                                       [active (mutable-set)]
@@ -1868,9 +1908,10 @@
                        (car (type-app-args actual)))))]
          [(tuple)
           (define elements (hash-ref expected 'elements))
-          (define rest?
-            (and (pair? elements) (hash-ref (last elements) 'rest)))
-          (define fixed (if rest? (drop-right elements 1) elements))
+          (define rest-position (tuple-rest-position elements))
+          (define fixed
+            (filter (lambda (element) (not (hash-ref element 'rest)))
+                    elements))
           (define required
             (count (lambda (element) (not (hash-ref element 'optional)))
                    fixed))
@@ -1882,13 +1923,13 @@
             (let ([actual-elements (type-app-args actual)])
               (and
                (>= (length actual-elements) required)
-               (or rest? (<= (length actual-elements) (length fixed)))
+               (or rest-position
+                   (<= (length actual-elements) (length fixed)))
                (for/and ([actual-element (in-list actual-elements)]
                          [index (in-naturals)])
                  (define expected-element
-                   (if (< index (length fixed))
-                       (list-ref fixed index)
-                       (last elements)))
+                   (tuple-element-at-arity
+                    elements (length actual-elements) index))
                  (recur (hash-ref expected-element 'type)
                         #f actual-element))))))]
          [(type-parameter)
@@ -1997,30 +2038,28 @@
   (case (string->symbol (hash-ref node 'kind))
     [(array)
      (values 0 #f
-             (lambda (_offset) (hash-ref node 'element)))]
+             (lambda (_offset _arity) (hash-ref node 'element)))]
     [(tuple)
      (define elements (hash-ref node 'elements))
-     (define trailing-rest?
-       (and (pair? elements) (hash-ref (last elements) 'rest)))
+     (define rest-position (tuple-rest-position elements))
      (define fixed-elements
-       (if trailing-rest? (drop-right elements 1) elements))
+       (filter (lambda (element) (not (hash-ref element 'rest)))
+               elements))
      (define required
        (count (lambda (element) (not (hash-ref element 'optional)))
               fixed-elements))
      (values
       required
-      (and (not trailing-rest?) (length fixed-elements))
-      (lambda (offset)
-        (cond
-          [(< offset (length fixed-elements))
-           (hash-ref (list-ref fixed-elements offset) 'type)]
-          [trailing-rest? (hash-ref (last elements) 'type)]
-          [else #f])))]
+      (and (not rest-position) (length fixed-elements))
+      (lambda (offset arity)
+        (define element (tuple-element-at-arity elements arity offset))
+        (and element (hash-ref element 'type))))]
     [else
      ;; The validator accepts only the language-neutral graph shape; an
      ;; unfamiliar frontend rest encoding remains a repeated declared type
      ;; instead of becoming Any.
-     (values 0 #f (lambda (_offset) (hash-ref parameter 'type)))]))
+     (values 0 #f
+             (lambda (_offset _arity) (hash-ref parameter 'type)))]))
 
 (define (signature-accepts-arity? interface signature arity)
   (define parameters (hash-ref signature 'parameters))
@@ -2052,6 +2091,7 @@
           [rest? (and (pair? parameters) (hash-ref (last parameters) 'rest))]
           [fixed (if rest? (drop-right parameters 1) parameters)]
           [rest-parameter (and rest? (last parameters))]
+          [rest-arity (and rest? (- (length actuals) (length fixed)))]
           [rest-argument-id
            (and rest?
                 (let-values
@@ -2070,7 +2110,7 @@
         (define expected-id
           (if (< index (length fixed))
               (hash-ref (list-ref fixed index) 'type)
-              (rest-argument-id (- index (length fixed)))))
+              (rest-argument-id (- index (length fixed)) rest-arity)))
         (foreign-argument-compatible?
          interface expected-id expression actual
          bindings (mutable-set) inferable))
@@ -2308,27 +2348,44 @@
                  (foreign-readonly-error
                   interface current "tuple index" (cdr key-class)))
                (define elements (hash-ref current 'elements))
-               (define rest?
-                 (and (pair? elements) (hash-ref (last elements) 'rest)))
-               (define fixed-count (if rest? (sub1 (length elements))
-                                       (length elements)))
                (define index (cdr key-class))
-               (define element
+               (define rest-position (tuple-rest-position elements))
+               (define candidates
                  (cond
-                   [(< index fixed-count) (list-ref elements index)]
-                   [rest? (last elements)]
-                   [write? (tuple-index-error interface current index)]
-                   [else #f]))
-               (if element
-                   (let ([declared
-                          (foreign-result-type
-                           interface (hash-ref element 'type) bindings)])
-                     (if (and (hash-ref element 'optional) (not write?))
-                         (combine-access-types
-                          interface current 'read
-                          (list declared (type-prim 'Nil)))
-                         declared))
-                   (type-prim 'Nil))]
+                   [(not rest-position)
+                    (if (< index (length elements))
+                        (list (list-ref elements index))
+                        '())]
+                   [(< index rest-position)
+                    (list (list-ref elements index))]
+                   [(= rest-position (sub1 (length elements)))
+                    (list (list-ref elements rest-position))]
+                   [else
+                    (define suffix (drop elements (add1 rest-position)))
+                    (cons
+                     (list-ref elements rest-position)
+                     (for/list ([element (in-list suffix)]
+                                [suffix-index (in-naturals)]
+                                #:when (>= index (+ rest-position suffix-index)))
+                       element))]))
+               (cond
+                 [(null? candidates)
+                  (if write?
+                      (tuple-index-error interface current index)
+                      (type-prim 'Nil))]
+                 [else
+                  (define declared
+                    (for/list ([element (in-list candidates)])
+                      (foreign-result-type
+                       interface (hash-ref element 'type) bindings)))
+                  (combine-access-types
+                   interface current access-mode
+                   (if (and (not write?)
+                            (ormap (lambda (element)
+                                     (hash-ref element 'optional))
+                                   candidates))
+                       (append declared (list (type-prim 'Nil)))
+                       declared))])]
               [(dynamic)
                (when (and write? (hash-ref current 'readonly))
                  (foreign-readonly-error

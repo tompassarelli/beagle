@@ -361,6 +361,12 @@
    (list (wire-tuple-element "n:string")
          (wire-tuple-element "n:number" #:optional #t)
          (wire-tuple-element "n:boolean" #:rest #t))))
+(define MIDDLE-REST-TUPLE-NODE
+  (wire-tuple
+   "c:tuple:middle-rest"
+   (list (wire-tuple-element "n:string")
+         (wire-tuple-element "n:number" #:rest #t)
+         (wire-tuple-element "n:boolean"))))
 (define HOMOGENEOUS-TUPLE-NODE
   (wire-tuple
    "c:tuple:homogeneous"
@@ -390,6 +396,14 @@
      (wire-parameter
       "arguments" "c:tuple:optional-rest" #:rest #t))
     "n:string")))
+(define MIDDLE-REST-CALL-NODE
+  (wire-function
+   "c:tuple-middle-rest-call"
+   (wire-signature
+    (list
+     (wire-parameter
+      "arguments" "c:tuple:middle-rest" #:rest #t))
+    "n:string")))
 (define TARGETLESS-REFERENCE-NODE
   (wire-reference "c:opaque" "Opaque" 'null '() #:nominal #t))
 
@@ -398,6 +412,8 @@
    (list
     (wire-export "finiteTuple" "c:tuple:finite")
     (wire-export "homogeneousTuple" "c:tuple:homogeneous")
+    (wire-export "middleRestCall" "c:tuple-middle-rest-call")
+    (wire-export "middleRestTuple" "c:tuple:middle-rest")
     (wire-export "mutableArray" "c:array:mutable")
     (wire-export "optionalProperty" "c:object:optional")
     (wire-export "optionalRestTuple" "c:tuple:optional-rest")
@@ -409,6 +425,8 @@
     BOOLEAN-NODE
     FINITE-TUPLE-NODE
     HOMOGENEOUS-TUPLE-NODE
+    MIDDLE-REST-CALL-NODE
+    MIDDLE-REST-TUPLE-NODE
     MUTABLE-ARRAY-NODE
     NUMBER-NODE
     OPTIONAL-PROPERTY-NODE
@@ -698,6 +716,30 @@
      COLLECTION-INTERFACE-ID
      'overload-mismatch
      "c:tuple-rest-call"
+     (lambda ()
+       (foreign-call-v1 callable (make-list (length actuals) #f) actuals))))
+  (void))
+
+(test-foreign-query COLLECTION-INTERFACE
+ "tuple-typed rest parameters preserve a fixed suffix after a middle rest"
+  (define callable (collection-type "c:tuple-middle-rest-call"))
+  (for ([actuals
+         (in-list
+          (list (list STRING BOOL)
+                (list STRING FLOAT BOOL)
+                (list STRING FLOAT FLOAT BOOL)))])
+    (check-equal?
+     (foreign-call-v1 callable (make-list (length actuals) #f) actuals)
+     STRING))
+  (for ([actuals
+         (in-list
+          (list (list STRING)
+                (list STRING BOOL BOOL)
+                (list STRING FLOAT)))])
+    (check-foreign-error/in
+     COLLECTION-INTERFACE-ID
+     'overload-mismatch
+     "c:tuple-middle-rest-call"
      (lambda ()
        (foreign-call-v1 callable (make-list (length actuals) #f) actuals))))
   (void))

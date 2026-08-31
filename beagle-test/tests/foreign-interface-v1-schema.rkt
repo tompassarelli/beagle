@@ -817,20 +817,35 @@
             (type-parameter-node "n:t2" "U"))))))])
   (reject (car spec) (cadr spec) (caddr spec)))
 
+(test-case "tuple schemas admit one middle rest before required suffix elements"
+  (check-pred
+   foreign-interface-v1?
+   (validate-foreign-interface-v1
+    (tuple-fi
+     (list (hash 'type "n:string" 'optional #f 'rest #f)
+           (hash 'type "n:string" 'optional #f 'rest #t)
+           (hash 'type "n:string" 'optional #f 'rest #f))))))
+
 (for ([spec
        (in-list
         (list
          (list
-          "rest tuple elements must be final"
-          #rx"rest tuple element must be final"
+          "tuple schemas reject more than one rest element"
+          #rx"may contain at most one rest entry"
           (tuple-fi
            (list (hash 'type "n:string" 'optional #f 'rest #t)
-                 (hash 'type "n:string" 'optional #f 'rest #f))))
+                 (hash 'type "n:string" 'optional #f 'rest #t))))
          (list
           "rest tuple elements cannot be optional"
           #rx"rest tuple element must be final and cannot be optional"
           (tuple-fi
            (list (hash 'type "n:string" 'optional #t 'rest #t))))
+         (list
+          "optional tuple elements cannot follow a rest element"
+          #rx"optional tuple element cannot follow a rest one"
+          (tuple-fi
+           (list (hash 'type "n:string" 'optional #f 'rest #t)
+                 (hash 'type "n:string" 'optional #t 'rest #f))))
          (list
           "required tuple elements cannot follow optional elements"
           #rx"required tuple element cannot follow an optional one"
