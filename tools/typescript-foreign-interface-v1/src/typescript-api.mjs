@@ -13,6 +13,9 @@ const BRIDGE_ROOT = realpathSync(resolve(dirname(BRIDGE_SOURCE_PATH), ".."));
 const TYPESCRIPT_SOURCE_PATH = realpathSync(resolve(BRIDGE_ROOT, "node_modules/typescript/lib/typescript.js"));
 const PROJECT_LOCKFILES = ["bun.lock", "bun.lockb", "package-lock.json", "pnpm-lock.yaml", "yarn.lock"];
 const BEAGLE_RUNTIME_MODULE = /^beagle\/([A-Za-z0-9._-]+\.js)$/;
+const TYPESCRIPT_RUNTIME_PRIMITIVES = new Map([
+  ["ArrayBuffer", "js-array-buffer"],
+]);
 const BUILTIN_AMBIENT_MODULES = new Map([
   ["bun:test", Object.freeze({
     logicalPath: "builtins/bun-test.d.ts",
@@ -677,6 +680,19 @@ export function createCompilerBridge({
     if (hasFlag(type.flags, ts.TypeFlags.UniqueESSymbol)) return "TS_UNIQUE_SYMBOL";
     return UNSUPPORTED_CODES.get(type.flags) ?? `TS_UNSUPPORTED_TYPE_FLAGS_${type.flags}`;
   };
+  const runtimePrimitiveKind = (type) => {
+    const symbol = type.aliasSymbol ?? type.symbol;
+    const kind = TYPESCRIPT_RUNTIME_PRIMITIVES.get(symbol?.getName());
+    const declarations = symbol?.declarations ?? [];
+    if (!kind || declarations.length === 0) return null;
+    const standardLibraryDeclaration = (item) => {
+      const source = item.getSourceFile?.();
+      if (!source) return false;
+      const logical = maybeLogicalCanonical(typescriptRoot, canonicalPath(source.fileName));
+      return Boolean(logical && /^lib\/lib\..+\.d\.ts$/.test(logical));
+    };
+    return declarations.every(standardLibraryDeclaration) ? kind : null;
+  };
   const typeKind = (context, type) => {
     if (forcedCodes.has(type)) return "unsupported";
     if (brand(context, type)) return "brand";
@@ -832,6 +848,7 @@ export function createCompilerBridge({
         : type.aliasTypeArguments ?? type.typeArguments ?? [];
     },
     typeDisplay(type) { return this.context.checker.typeToString(type, undefined, ts.TypeFormatFlags.NoTruncation); },
+    foreignTypeKind(type) { return runtimePrimitiveKind(type) ?? typeKind(this.context, type); },
     typeImportSpecifier(context, type) {
       const symbol = type.aliasSymbol ?? type.symbol;
       if (!symbol) return null;

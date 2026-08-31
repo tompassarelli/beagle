@@ -339,7 +339,7 @@
    state BuildStateV1
    id String
    type OpaqueCompilerValueV1] ForeignNodeV1
-  (let [kind String (.typeKind bridge type)]
+  (let [kind String (.foreignTypeKind bridge type)]
     (cond
       (.equal bridge kind "any") (primitive-node id "foreign-dynamic")
       (.equal bridge kind "unknown") (primitive-node id "unknown")
@@ -352,6 +352,8 @@
       (.equal bridge kind "undefined") (primitive-node id "undefined")
       (.equal bridge kind "void") (primitive-node id "void")
       (.equal bridge kind "never") (primitive-node id "never")
+      (.equal bridge kind "js-array-buffer")
+      (primitive-node id "js-array-buffer")
 
       (.equal bridge kind "literal")
       (->LiteralNode

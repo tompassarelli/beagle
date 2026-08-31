@@ -179,6 +179,7 @@
       "(js/export (defn transform [value String] String (stringTransformer value)))\n"
       "(js/export (defn runPipeline [] Nil (pipeline \"source\" 1 2 true)))\n"
       "(js/export (defn initialize [module SyncInitInput] Number (initSync module)))\n"
+      "(js/export (defn initializeArrayBuffer [module ArrayBuffer] Number (initSync module)))\n"
       "(js/export (defn run [] Nil (schedule (fn [] Nil (notify)))))\n"))
 
     (define closure
@@ -251,6 +252,18 @@
     (check-not-equal?
      (interface-binding-type projected-value)
      (type-prim 'Any))
+    (define wasm-interface
+      (module-interface-foreign-interface-v1
+       (module-source-interface wasm-source)))
+    (check-true
+     (for/or ([node
+               (in-list
+                (hash-ref
+                 (foreign-interface-v1->jsexpr wasm-interface)
+                 'nodes))])
+       (and (string=? (hash-ref node 'kind) "primitive")
+            (string=? (hash-ref node 'name) "js-array-buffer")))
+     "the pinned TypeScript runtime ArrayBuffer must carry an explicit ordinary facet")
 
     (define provenance
       (foreign-interface-v1-provenance foreign-interface))

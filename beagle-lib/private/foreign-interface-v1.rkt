@@ -178,7 +178,7 @@
 
 (define PRIMITIVE-NAMES
   '(string number boolean bigint symbol null undefined void never unknown
-           foreign-dynamic))
+           foreign-dynamic js-array-buffer))
 
 (define (node-ref! where value) (string! where value))
 
@@ -1650,6 +1650,7 @@
     [(string) (type-prim 'String)]
     [(number) (type-prim 'Float)]
     [(boolean) (type-prim 'Bool)]
+    [(js-array-buffer) (type-prim 'ArrayBuffer)]
     [(null undefined void) (type-prim 'Nil)]
     [else #f]))
 

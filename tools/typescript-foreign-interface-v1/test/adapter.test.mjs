@@ -159,6 +159,11 @@ describe("ForeignInterfaceV1 graph semantics", () => {
     const transformerSignature = stringTransformer.overloads[0];
     expect(nodes.get(transformerSignature.parameters[0].type).name).toBe("string");
     expect(nodes.get(transformerSignature.return).name).toBe("string");
+
+    expect(exportedNode(first, "ArrayBuffer")).toMatchObject({
+      kind: "object",
+      name: "ArrayBuffer",
+    });
   });
 
   test("preserves mapped, inherited, and index readonly semantics", async () => {
