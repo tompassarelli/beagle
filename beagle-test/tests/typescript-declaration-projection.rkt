@@ -15,6 +15,8 @@
 
 (define provider-path (build-path fixtures-dir "provider.bjs"))
 (define consumer-path (build-path fixtures-dir "consumer.bjs"))
+(define readonly-vector-path
+  (build-path fixtures-dir "readonly-vector.bjs"))
 (define invalid-scalar-path
   (build-path fixtures-dir "invalid-scalar-narrowing.bjs"))
 
@@ -22,7 +24,10 @@
   (resolve-module-source-closure
    (list
     (module-source-input "declarations/provider.bjs" provider-path)
-    (module-source-input "declarations/consumer.bjs" consumer-path))
+    (module-source-input "declarations/consumer.bjs" consumer-path)
+    (module-source-input
+     "declarations/readonly-vector.bjs"
+     readonly-vector-path))
    '()))
 
 (define checked
@@ -63,6 +68,20 @@
   (emit-typescript-declarations
    (module-program 'declarations.consumer)
    #:source-id "declarations/consumer.bjs"))
+
+(define readonly-vector-declarations
+  (emit-typescript-declarations
+   (module-program 'declarations.readonly-vector)
+   #:source-id "declarations/readonly-vector.bjs"))
+
+(test-case "declaration-only readonly vectors preserve mutable vector emission"
+  (check-equal?
+   readonly-vector-declarations
+   (string-append
+    "export interface BridgeSource {\n"
+    "  mutableTags: Array<string>;\n"
+    "  readonlyTags: ReadonlyArray<string>;\n"
+    "}\n")))
 
 (test-case "checked JS interface projects deterministic declarations"
   (check-equal?

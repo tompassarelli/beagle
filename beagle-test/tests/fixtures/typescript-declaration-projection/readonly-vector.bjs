@@ -1,0 +1,7 @@
+#lang beagle/js
+
+(ns declarations.readonly-vector)
+
+(js/declare-record BridgeSource
+  [mutableTags (Vec String)
+   readonlyTags (js/readonly (Vec String))])

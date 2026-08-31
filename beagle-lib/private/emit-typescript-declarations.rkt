@@ -63,6 +63,12 @@
        (eq? (type-refinement-predicate type) 'js/optional)
        (type-refinement-base type)))
 
+(define (js-readonly-base type)
+  (and (type-refinement? type)
+       (eq? (type-refinement-placement type) 'js-declaration)
+       (eq? (type-refinement-predicate type) 'js/readonly)
+       (type-refinement-base type)))
+
 (define (js-constructor-base type)
   (and (type-refinement? type)
        (eq? (type-refinement-placement type) 'js-declaration)
@@ -125,6 +131,14 @@
          [(js-optional-base type)
           => (lambda (base)
                (format "~a | undefined" (render-type base)))]
+         [(js-readonly-base type)
+          => (lambda (base)
+               (match base
+                 [(type-app 'Vec (list element))
+                  (format "ReadonlyArray<~a>" (render-type element))]
+                 [_
+                  (error 'beagle-dts
+                         "js/readonly requires a Vec declaration type")]))]
          [(js-constructor-base type)
           (error 'beagle-dts
                  "js/constructor is supported only as the direct type of js/declare-export")]

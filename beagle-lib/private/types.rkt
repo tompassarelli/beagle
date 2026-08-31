@@ -378,6 +378,25 @@
     [(and (current-js-declaration-type?)
           (list? t)
           (pair? t)
+          (eq? (car t) 'js/readonly))
+     (match t
+       [(list 'js/readonly nested)
+        (define collection (parse-type nested))
+        (unless (and (type-app? collection)
+                     (eq? (type-app-ctor collection) 'Vec)
+                     (= (length (type-app-args collection)) 1))
+          (error 'beagle
+                 "js/readonly requires a Vec declaration type, got: ~v"
+                 nested))
+        (type-refinement collection 'js/readonly 'js-declaration)]
+       [_
+        (error 'beagle
+               "js/readonly requires exactly one Vec declaration type, got: ~v"
+               t)])]
+
+    [(and (current-js-declaration-type?)
+          (list? t)
+          (pair? t)
           (eq? (car t) 'js/constructor))
      (match t
        [(list 'js/constructor nested)
@@ -1307,6 +1326,8 @@
        (format "(js/literal ~s)" value)]
       [(list 'js-declaration 'js/optional)
        (format "(js/optional ~a)" (recur (type-refinement-base t)))]
+      [(list 'js-declaration 'js/readonly)
+       (format "(js/readonly ~a)" (recur (type-refinement-base t)))]
       [(list 'js-declaration 'js/constructor)
        (format "(js/constructor ~a)" (recur (type-refinement-base t)))]
       [_
