@@ -887,11 +887,41 @@
          source-id
          digest)))
 
-    ;; Prior checked interfaces are parse hints only. The current run remints a
-    ;; provisional interface from every current source before any key is
-    ;; accepted, so a stale prior entry cannot become authority.
+    ;; An exact current source may reuse its prior checked Program while the
+    ;; candidate dependency graph is reconstructed.  That Program is only a
+    ;; parse result: imported interface digests still participate in the
+    ;; accepted check key below, so a changed provider forces a dependent
+    ;; reparse and recheck before publication.
     (define prior-by-source
       (incremental-module-check-cache-latest-by-source cache))
+    (define prior-key-by-source
+      (for/fold ([result (hash)])
+                ([(key checked)
+                  (in-hash
+                   (incremental-module-check-cache-by-key cache))])
+        (define source-id (module-check-reuse-key-source-id key))
+        (define prior (hash-ref prior-by-source source-id #f))
+        (define current-digest (hash-ref source-digests source-id #f))
+        (cond
+          [(and prior
+                current-digest
+                (eq? checked prior)
+                (equal?
+                 current-digest
+                 (module-check-reuse-key-source-digest key))
+                (equal?
+                 checker-identity
+                 (module-check-reuse-key-checker-identity key))
+                (equal?
+                 (vector
+                  (semantic-profile-for-target
+                   (program-target
+                    (checked-overlay-module-program prior)))
+                  check-profile
+                  capture-types?)
+                 (module-check-reuse-key-profile key)))
+           (hash-set result source-id key)]
+          [else result])))
     (define seeded-sources
       (for/list ([source (in-list sources)])
         (define prior
@@ -902,18 +932,26 @@
              source
              [interface (checked-overlay-module-interface prior)])
             source)))
+    (define seeded-source-by-id
+      (for/hash ([source (in-list seeded-sources)])
+        (values (module-source-id-string source) source)))
     (define seeded-overlay
       (guard #f 'index (lambda () (source-overlay seeded-sources))))
     (define seeded-resolver
       (overlay-resolver seeded-overlay #:closed? closed?))
     (define bootstrap-programs
       (for/list ([source (in-list seeded-sources)])
+        (define source-id (module-source-id-string source))
+        (define prior-key (hash-ref prior-key-by-source source-id #f))
         (cons
          source
-         (guard
-          (module-source-source-id source)
-          'parse
-          (lambda () (parse-current source seeded-resolver))))))
+         (if prior-key
+             (checked-overlay-module-program
+              (hash-ref prior-by-source source-id))
+             (guard
+              (module-source-source-id source)
+              'parse
+              (lambda () (parse-current source seeded-resolver)))))))
     (guard
      #f
      'interface
@@ -922,65 +960,34 @@
     (define bootstrap-sources
       (for/list ([entry (in-list bootstrap-programs)])
         (define source (car entry))
+        (define source-id (module-source-id-string source))
         (define prog (cdr entry))
         (struct-copy
          module-source
          source
          [interface
-          (guard
-           (module-source-source-id source)
-           'interface
-           (lambda ()
-             (program->module-interface
-              prog
-              #:source-id (module-source-source-id source)
-              #:provisional? #t
-              #:capture-types? capture-types?)))])))
-    (define max-rounds (add1 (length sources)))
-    (define-values (provisional-sources provisional-programs)
-      (let stabilize-provisional ([current-sources bootstrap-sources]
-                                  [round 1])
-        (when (> round max-rounds)
-          (fail
-           #f
-           'interface
-           (make-exn:fail
-            (format
-             "check-module-overlay/incremental: provisional interfaces did not converge after ~a rounds"
-             max-rounds)
-            (current-continuation-marks))))
-        (define current-overlay
-          (guard #f 'index (lambda () (source-overlay current-sources))))
-        (define current-resolver
-          (overlay-resolver current-overlay #:closed? closed?))
-        (define round-programs
-          (for/list ([source (in-list current-sources)])
-            (cons
-             source
+          (cond
+            [(hash-ref prior-key-by-source source-id #f)
+             (checked-overlay-module-interface
+              (hash-ref prior-by-source source-id))]
+            [else
              (guard
               (module-source-source-id source)
-              'parse
-              (lambda () (parse-current source current-resolver))))))
-        (define next-sources
-          (for/list ([entry (in-list round-programs)])
-            (define source (car entry))
-            (define prog (cdr entry))
-            (struct-copy
-             module-source
-             source
-             [interface
-              (guard
-               (module-source-source-id source)
-               'interface
-               (lambda ()
-                 (program->module-interface
-                  prog
-                  #:source-id (module-source-source-id source)
-                  #:provisional? #t
-                  #:capture-types? capture-types?)))])))
-        (if (interfaces-stable? current-sources next-sources)
-            (values next-sources round-programs)
-            (stabilize-provisional next-sources (add1 round)))))
+              'interface
+              (lambda ()
+                (program->module-interface
+                 prog
+                 #:source-id (module-source-source-id source)
+                 #:provisional? #t
+                 #:capture-types? capture-types?)))])])))
+    ;; The bootstrap Programs are source-exact and therefore own the current
+    ;; dependency graph.  The acyclic checker below rebuilds authoritative
+    ;; interfaces in provider order; it reparses a module whenever the exact
+    ;; provider-interface context used for this bootstrap Program differs from
+    ;; that authoritative context.  A whole-overlay provisional fixed point is
+    ;; therefore redundant on this path.
+    (define provisional-sources bootstrap-sources)
+    (define provisional-programs bootstrap-programs)
     (define provisional-overlay
       (guard #f 'index (lambda () (source-overlay provisional-sources))))
     (define-values (components edges provisional-program-by-source)
@@ -1078,12 +1085,33 @@
           (checked-overlay-module-interface reusable))]
         [else
          (set! misses (add1 misses))
+         (define prior-key
+           (hash-ref prior-key-by-source source-id #f))
+         (define seeded-provider-interfaces
+           (for/list ([provider-id (in-list provider-ids)])
+             (module-source-interface
+              (hash-ref seeded-source-by-id provider-id))))
+         (define parsed-against-interface-digests
+           (cond
+             [prior-key
+              (module-check-reuse-key-imported-interface-digests prior-key)]
+             [(andmap (lambda (interface) interface)
+                      seeded-provider-interfaces)
+              (for/list ([provider-id (in-list provider-ids)]
+                         [interface (in-list seeded-provider-interfaces)])
+                (list provider-id (module-interface-digest interface)))]
+             [else #f]))
          (define prog
-           (guard
-            source-id
-            'parse
-            (lambda ()
-              (parse-current source (current-overlay-resolver)))))
+           (if (and parsed-against-interface-digests
+                    (equal?
+                     parsed-against-interface-digests
+                     imported-interface-digests))
+               provisional-program
+               (guard
+                source-id
+                'parse
+                (lambda ()
+                  (parse-current source (current-overlay-resolver))))))
          (recheck-source source)
          (define diagnostics '())
          (set! rechecks (add1 rechecks))

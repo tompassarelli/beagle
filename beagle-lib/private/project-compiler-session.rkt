@@ -42,8 +42,14 @@
 (struct project-compile-result
   (ok? snapshot-digest modules artifacts diagnostics observation)
   #:transparent)
+(struct project-emission-context-v1
+  (source-id js-export-names nix-module-omit-attrs)
+  #:transparent)
+(struct project-emission-v1 (emitted artifacts) #:transparent)
+(struct project-source-state-v1 (digest module-source) #:transparent)
 (struct project-compiler-session
-  (lock cache accepted-request-bytes accepted-result last-observation emitter)
+  (lock cache source-cache emission-cache accepted-request-bytes accepted-result
+        last-observation emitter)
   #:mutable)
 
 (define (make-project-compiler-session #:emitter [emitter emit-project-module])
@@ -53,6 +59,8 @@
   (project-compiler-session
    (make-semaphore 1)
    (make-incremental-module-check-cache)
+   (hash)
+   (hasheq)
    #f
    #f
    #f
@@ -305,44 +313,39 @@
   (newline out)
   (get-output-bytes out))
 
+(define (module-js-export-names prog export-plan)
+  (and
+   (eq? (program-target prog) 'js)
+   (hash-ref
+    export-plan
+    (module-identity 'beagle-namespace (program-namespace prog))
+    (set))))
+
 (define (emit-project-module module source export-plan omit-attrs)
   (define source-id (project-source-v1-source-id source))
   (define prog (checked-overlay-module-program module))
   (define target (program-target prog))
   (define relative-path
     (namespace-relative-path (program-namespace prog) target))
-  (define emitted
-    (parameterize
-        ([current-js-export-names
-          (and
-           (eq? target 'js)
-           (hash-ref
-            export-plan
-            (module-identity 'beagle-namespace (program-namespace prog))
-            (set)))]
-         [current-nix-module-omit-attrs omit-attrs])
-      (emit-program prog)))
   (cond
     [(eq? target 'js)
      (define js-name
        (path->string (file-name-from-path (string->path relative-path))))
      (define-values (mapped-source document)
-       (js-emit-program-with-source-map
-        prog
-        (source-map-source-id source-id)
-        (bytes->string/utf-8 (project-source-v1-bytes source) #f)
-        js-name))
-     (unless (string=? emitted mapped-source)
-       (error
-        'project-compiler-session-compile!
-        "source-map annotation changed JavaScript bytes for ~a"
-        source-id))
+       (parameterize
+           ([current-js-export-names
+             (module-js-export-names prog export-plan)])
+         (js-emit-program-with-source-map
+          prog
+          (source-map-source-id source-id)
+          (bytes->string/utf-8 (project-source-v1-bytes source) #f)
+          js-name)))
      (define map-relative-path (string-append relative-path ".map"))
      (define map-name
        (path->string
         (file-name-from-path (string->path map-relative-path))))
      (values
-      emitted
+      mapped-source
       (list
        (project-artifact-v1
         source-id
@@ -350,12 +353,15 @@
         relative-path
         (string->bytes/utf-8
          (string-append
-          emitted
-          (if (string-suffix? emitted "\n") "" "\n")
+          mapped-source
+          (if (string-suffix? mapped-source "\n") "" "\n")
           "//# sourceMappingURL=" map-name "\n")))
        (project-artifact-v1
         source-id target map-relative-path (json-bytes document))))]
     [else
+     (define emitted
+       (parameterize ([current-nix-module-omit-attrs omit-attrs])
+         (emit-program prog)))
      (values
       emitted
       (list
@@ -461,14 +467,36 @@
     (define source-index
       (for/hash ([source (in-list sources)])
         (values (project-source-v1-source-id source) source)))
+    (define source-digest-by-id
+      (for/hash ([source (in-list sources)])
+        (values
+         (project-source-v1-source-id source)
+         (project-source-digest source))))
+    (define candidate-source-cache
+      (project-compiler-session-source-cache session))
     (define module-sources
       (for/list ([source (in-list sources)])
-        (set! source-reads (add1 source-reads))
-        (with-handlers
-            ([(lambda (_value) #t)
-              (lambda (value)
-                (fail (project-source-v1-source-id source) 'read value))])
-          (source->module-source source))))
+        (define source-id (project-source-v1-source-id source))
+        (define digest (hash-ref source-digest-by-id source-id))
+        (define prior (hash-ref candidate-source-cache source-id #f))
+        (cond
+          [(and prior
+                (equal? digest (project-source-state-v1-digest prior)))
+           (project-source-state-v1-module-source prior)]
+          [else
+           (set! source-reads (add1 source-reads))
+           (let ([module-source
+                  (with-handlers
+                      ([(lambda (_value) #t)
+                        (lambda (value) (fail source-id 'read value))])
+                    (source->module-source source))])
+             (set!
+              candidate-source-cache
+              (hash-set
+               candidate-source-cache
+               source-id
+               (project-source-state-v1 digest module-source)))
+             module-source)])))
     (define (parse-exact source resolver)
       (set! parses (add1 parses))
       (define source-id
@@ -504,10 +532,9 @@
            #:closed? #t
            #:source-digest
            (lambda (source)
-             (project-source-digest
-              (hash-ref
-               source-index
-               (source-id-string (module-source-source-id source)))))
+             (hash-ref
+              source-digest-by-id
+              (source-id-string (module-source-source-id source))))
            #:diagnostic-sink diagnostic-sink
            #:parse-source parse-exact
            #:recheck-source
@@ -551,6 +578,8 @@
     (define export-plan
       (programs->export-plan
        (map checked-overlay-module-program modules)))
+    (define candidate-emission-cache
+      (project-compiler-session-emission-cache session))
     (define emit-source-set
       (list->set
        (project-compile-request-v1-emit-source-ids normalized)))
@@ -562,32 +591,64 @@
            (source-id-string (checked-overlay-module-source module)))
          (cond
            [(set-member? emit-source-set source-id)
-            (set! emits (add1 emits))
-            (define-values (emitted module-artifacts)
-              (with-handlers
-                  ([(lambda (_value) #t)
-                    (lambda (value) (fail source-id 'emit value))])
-                ((project-compiler-session-emitter session)
-                 module
-                 (hash-ref source-index source-id)
-                 export-plan
-                 (project-compile-profile-v1-nix-module-omit-attrs profile))))
-            (unless (string? emitted)
-              (fail source-id 'emit "emitter returned a non-string module"))
-            (unless
-                (and (list? module-artifacts)
-                     (andmap project-artifact-v1? module-artifacts)
-                     (andmap
-                      (lambda (artifact)
-                        (and
-                         (string? (project-artifact-v1-source-id artifact))
-                         (string? (project-artifact-v1-relative-path artifact))
-                         (bytes? (project-artifact-v1-bytes artifact))))
-                      module-artifacts))
-              (fail source-id 'emit "emitter returned malformed artifacts"))
+            (define prog (checked-overlay-module-program module))
+            (define context
+              (project-emission-context-v1
+               source-id
+               (let ([names (module-js-export-names prog export-plan)])
+                 (and names (sort (set->list names) symbol<?)))
+               (project-compile-profile-v1-nix-module-omit-attrs profile)))
+            (define by-context
+              (hash-ref candidate-emission-cache prog (hash)))
+            (define prior-emission (hash-ref by-context context #f))
+            (define emission
+              (or
+               prior-emission
+               (let-values
+                   ([(emitted module-artifacts)
+                     (begin
+                       (set! emits (add1 emits))
+                       (with-handlers
+                           ([(lambda (_value) #t)
+                             (lambda (value) (fail source-id 'emit value))])
+                         ((project-compiler-session-emitter session)
+                          module
+                          (hash-ref source-index source-id)
+                          export-plan
+                          (project-compile-profile-v1-nix-module-omit-attrs
+                           profile))))])
+                 (unless (string? emitted)
+                   (fail source-id 'emit "emitter returned a non-string module"))
+                 (unless
+                     (and (list? module-artifacts)
+                          (andmap project-artifact-v1? module-artifacts)
+                          (andmap
+                           (lambda (artifact)
+                             (and
+                              (string?
+                               (project-artifact-v1-source-id artifact))
+                              (string?
+                               (project-artifact-v1-relative-path artifact))
+                              (bytes? (project-artifact-v1-bytes artifact))))
+                           module-artifacts))
+                   (fail
+                    source-id 'emit "emitter returned malformed artifacts"))
+                 (let ([frozen
+                        (project-emission-v1
+                         (string->immutable-string emitted)
+                         (map freeze-artifact module-artifacts))])
+                   (set!
+                    candidate-emission-cache
+                    (hash-set
+                     candidate-emission-cache
+                     prog
+                     (hash-set by-context context frozen)))
+                   frozen))))
             (hash-set!
-             emitted-by-source source-id (string->immutable-string emitted))
-            (map freeze-artifact module-artifacts)]
+             emitted-by-source
+             source-id
+             (project-emission-v1-emitted emission))
+            (project-emission-v1-artifacts emission)]
            [else '()]))
        modules))
     (define duplicate-artifact
@@ -622,6 +683,10 @@
     (set-project-compiler-session-cache!
      session
      (incremental-overlay-check-result-cache incremental))
+    (set-project-compiler-session-source-cache!
+     session candidate-source-cache)
+    (set-project-compiler-session-emission-cache!
+     session candidate-emission-cache)
     (set-project-compiler-session-accepted-request-bytes!
      session exact-request-bytes)
     (set-project-compiler-session-accepted-result! session result)

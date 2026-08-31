@@ -157,6 +157,8 @@
   'incremental)
  (check-equal? (project-compile-counters-v1-cache-hits (counters initial)) 0)
  (check-equal? (project-compile-counters-v1-cache-misses (counters initial)) 2)
+ (check-equal? (project-compile-counters-v1-source-reads (counters initial)) 2)
+ (check-equal? (project-compile-counters-v1-parses (counters initial)) 3)
  (check-equal? (project-compile-counters-v1-rechecks (counters initial)) 2)
  (check-rechecked-source-ids
   initial
@@ -203,7 +205,12 @@
  (check-true (project-compile-result-ok? private))
  (check-equal? (project-compile-counters-v1-cache-hits (counters private)) 1)
  (check-equal? (project-compile-counters-v1-cache-misses (counters private)) 1)
+ (check-equal? (project-compile-counters-v1-source-reads (counters private)) 1)
+ (check-equal? (project-compile-counters-v1-parses (counters private)) 1)
  (check-equal? (project-compile-counters-v1-rechecks (counters private)) 1)
+ ;; The unchanged consumer returns its accepted artifacts without another
+ ;; physical emission; the changed provider emits exactly once.
+ (check-equal? (project-compile-counters-v1-emits (counters private)) 1)
  (check-rechecked-source-ids private (list "warm/provider.bjs"))
  (check-true
   (eq?
@@ -231,7 +238,10 @@
  (check-true (project-compile-result-ok? interface))
  (check-equal? (project-compile-counters-v1-cache-hits (counters interface)) 0)
  (check-equal? (project-compile-counters-v1-cache-misses (counters interface)) 2)
+ (check-equal? (project-compile-counters-v1-source-reads (counters interface)) 1)
+ (check-equal? (project-compile-counters-v1-parses (counters interface)) 2)
  (check-equal? (project-compile-counters-v1-rechecks (counters interface)) 2)
+ (check-equal? (project-compile-counters-v1-emits (counters interface)) 2)
  (check-rechecked-source-ids
   interface
   (list "warm/consumer.bjs" "warm/provider.bjs"))
