@@ -31,7 +31,7 @@ jobs:
       - name: Install babashka (pinned)
         uses: turtlequeue/setup-babashka@v1.8.0
         with:
-          babashka-version: '1.12.218'
+          babashka-version: '1.13.220'
 
       - name: Remint fixpoint gate
         run: bin/beagle-remint
@@ -105,7 +105,7 @@ jobs:
       - name: Install babashka (CLJ oracle + graph-native repair tooling)
         uses: turtlequeue/setup-babashka@v1.8.0
         with:
-          babashka-version: '1.12.218'
+          babashka-version: '1.13.220'
 
       - name: Install nix (pinned Beagle test environment)
         uses: cachix/install-nix-action@v31
@@ -160,7 +160,7 @@ jobs:
       - name: Install babashka (CLJ oracle + graph-native repair tooling)
         uses: turtlequeue/setup-babashka@v1.8.0
         with:
-          babashka-version: '1.12.218'
+          babashka-version: '1.13.220'
 
       # Self-host three-way agreement: the blessed seed (self-host/seed/), the
       # seed compiler's remint of its own sources, and the Racket oracle's
@@ -226,7 +226,7 @@ jobs:
       - name: Install babashka (CLJ oracle + graph-native repair tooling)
         uses: turtlequeue/setup-babashka@v1.8.0
         with:
-          babashka-version: '1.12.218'
+          babashka-version: '1.13.220'
 
       # Graph-native repair: beagle-cascade derives its call graph from the Beagle Store
       # occurrence store (scope-correct), not regex over text. That runs on the Beagle Store

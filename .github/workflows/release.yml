@@ -116,7 +116,7 @@ jobs:
       - name: Install babashka
         uses: turtlequeue/setup-babashka@v1.8.0
         with:
-          babashka-version: '1.12.218'
+          babashka-version: '1.13.220'
 
       # out/ is committed, so the branch-ref identity check needs only babashka.
       # It runs before the heavier toolchains because it covers the identity
@@ -225,7 +225,7 @@ jobs:
       - name: Install babashka
         uses: turtlequeue/setup-babashka@v1.8.0
         with:
-          babashka-version: '1.12.218'
+          babashka-version: '1.13.220'
 
       - name: Install native build toolchains
         run: |

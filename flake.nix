@@ -32,6 +32,45 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        babashkaVersion = "1.13.220";
+        babashkaRelease = {
+          "x86_64-linux" = {
+            asset = "linux-amd64-static";
+            hash = "sha256-6z7dEoJ28Lb73vyxjcfUJlKpXqQJqBs08I42uKw8vDw=";
+          };
+          "aarch64-linux" = {
+            asset = "linux-aarch64-static";
+            hash = "sha256-Dv1u82uT6i8K5uv50bzRpmFnwvQcF+mQZZqgZ2VEN+g=";
+          };
+          "x86_64-darwin" = {
+            asset = "macos-amd64";
+            hash = "sha256-67/fFZ6NXui3AVsVxlWLIDn+dkeN6JPPMXyMUIBTQN4=";
+          };
+          "aarch64-darwin" = {
+            asset = "macos-aarch64";
+            hash = "sha256-99GMOrEbtK0OMqRcGuQK4lkR1foGuk3tB8uQuK8VgHc=";
+          };
+        }.${system};
+        babashka = pkgs.stdenvNoCC.mkDerivation {
+          pname = "babashka";
+          version = babashkaVersion;
+          src = pkgs.fetchurl {
+            url = "https://github.com/babashka/babashka/releases/download/v${babashkaVersion}/babashka-${babashkaVersion}-${babashkaRelease.asset}.tar.gz";
+            hash = babashkaRelease.hash;
+          };
+          sourceRoot = ".";
+          dontBuild = true;
+          installPhase = ''
+            runHook preInstall
+            install -Dm755 bb "$out/bin/bb"
+            runHook postInstall
+          '';
+          doInstallCheck = true;
+          installCheckPhase = ''
+            test "$("$out/bin/bb" --version)" = "babashka v${babashkaVersion}"
+          '';
+          meta = pkgs.babashka.meta;
+        };
         typescriptForeignAdapterRoot = ./tools/typescript-foreign-interface-v1;
         typescriptForeignPackage =
           builtins.fromJSON
@@ -116,7 +155,7 @@
         # installs that adapter's dependencies at runtime.
         runtimeDeps = [
           racket
-          pkgs.babashka
+          babashka
           pkgs.bun
           pkgs.clojure
           pkgs.jdk
@@ -473,7 +512,7 @@
 
           buildInputs = [
             racket
-            pkgs.babashka
+            babashka
             pkgs.python3
             pkgs.clojure
             pkgs.bun

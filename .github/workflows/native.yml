@@ -101,7 +101,7 @@ jobs:
       - name: Install babashka (bb seed-emit leg of verify-native)
         uses: turtlequeue/setup-babashka@v1.8.0
         with:
-          babashka-version: '1.12.218'
+          babashka-version: '1.13.220'
 
       # native-image + AOT compile run under the ambient-registry nixpkgs
       # graalvm-ce + clojure. Build tools are intentionally unpinned here — the
