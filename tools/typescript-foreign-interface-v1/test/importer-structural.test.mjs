@@ -15,6 +15,7 @@ const repositoryRoot = resolve(adapterRoot, "../..");
 const runtimeRoot = resolve(repositoryRoot, "beagle-lib/lib/beagle");
 const fixture = resolve(adapterRoot, "fixture/structural-intersection.ts");
 const classLoopFixture = resolve(adapterRoot, "fixture/class-loop-operators.ts");
+const objectLiteralFixture = resolve(adapterRoot, "fixture/object-literal-spreads.ts");
 const temporary = mkdtempSync(join(tmpdir(), "beagle-ts-structural-import-"));
 const compiled = resolve(temporary, "importer.mjs");
 
@@ -75,8 +76,10 @@ test("intersections and anonymous object types become deterministic checked reco
   expect(first.source).toContain(
     "(defrecord OptionalEvidence [observedAt (U Nil String) pressure (U Nil String)])",
   );
-  expect(first.source).toContain("(defrecord TypeScriptUnknownV1 [])");
-  expect(first.source).toContain("(defrecord TypeScriptObjectV1 [])");
+  expect(first.source).toContain(
+    "(defalias TypeScriptUnknownV1 (U JsObject JsArray String Number Bool Nil))",
+  );
+  expect(first.source).toContain("(defalias TypeScriptObjectV1 JsObject)");
   expect(first.source).toContain(
     "(->TypeScriptAnonymousObjectV1 entry nil)",
   );
@@ -121,6 +124,46 @@ test("classes, local constructors, bounded loops, and exact JS operators lower t
   expect(result.source).not.toContain("__typescript_import_unsupported__");
 
   const imported = resolve(temporary, "class-loop-operators.bjs");
+  writeFileSync(imported, result.source);
+  const checked = Bun.spawnSync([
+    resolve(repositoryRoot, "bin/beagle"),
+    "check",
+    imported,
+  ], {
+    cwd: repositoryRoot,
+    stderr: "pipe",
+    stdout: "pipe",
+  });
+  expect(checked.exitCode, checked.stderr.toString()).toBe(0);
+});
+
+test("object aliases, spreads, computed keys, and record returns preserve their fields", async () => {
+  const result = await importFixture(
+    objectLiteralFixture,
+    "beagle.typescript.object-literal-spreads",
+  );
+
+  expect(result.diagnostics).toEqual([]);
+  expect(result.source).toContain(
+    "(defalias TypeScriptUnknownV1 (U JsObject JsArray String Number Bool Nil))",
+  );
+  expect(result.source).toContain("(defalias TypeScriptObjectV1 JsObject)");
+  expect(result.source).toContain("(defalias JsonObject (Map String TypeScriptUnknownV1))");
+  expect(result.source).toContain("(assoc {} projectRoot");
+  expect(result.source).toContain("inherited {\"projects\"");
+  expect(result.source).toContain(
+    "(defrecord TypeScriptAnonymousObjectV1 [environment_id String name TypeScriptUnknownV1])",
+  );
+  expect(result.source).toContain(
+    "(defrecord HookRow [eventName String enabled Bool])",
+  );
+  expect(result.source).toContain("(->HookRow \"Start\" true)");
+  expect(result.source).not.toContain("->__object");
+  expect(result.source).not.toContain("->JsonObject");
+  expect(result.source).not.toMatch(/\(defrecord [^\s]+ \[\]\)/);
+  expect(result.source).not.toContain("__typescript_import_unsupported__");
+
+  const imported = resolve(temporary, "object-literal-spreads.bjs");
   writeFileSync(imported, result.source);
   const checked = Bun.spawnSync([
     resolve(repositoryRoot, "bin/beagle"),
