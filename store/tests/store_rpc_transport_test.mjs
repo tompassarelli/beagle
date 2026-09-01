@@ -163,8 +163,9 @@ test('first request ids are distinct across Bun processes', async () => {
   assert.notEqual(left.requestId, right.requestId);
   for (const identity of [left, right]) {
     const requestId = BigInt(identity.requestId);
-    assert.equal(requestId >> 32n, BigInt(identity.pid));
-    assert.equal(requestId & ((1n << 32n) - 1n), 1n);
+    assert.equal(requestId >> 31n, BigInt(identity.pid));
+    assert.equal(requestId & ((1n << 31n) - 1n), 1n);
+    assert.equal(requestId, (BigInt(identity.pid) * (1n << 31n)) + 1n);
     assert(requestId > 0n && requestId <= (1n << 63n) - 1n);
   }
 });

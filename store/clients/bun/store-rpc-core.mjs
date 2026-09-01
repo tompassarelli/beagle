@@ -16,8 +16,9 @@ const MAX_PAGE_LIMIT = 4096;
 const I64_MIN = -(1n << 63n);
 const I64_MAX = (1n << 63n) - 1n;
 const U32_MAX = (1n << 32n) - 1n;
-const REQUEST_NAMESPACE_MAX = (1n << 31n) - 1n;
-const REQUEST_SEQUENCE_BITS = 32n;
+const REQUEST_NAMESPACE_MAX = U32_MAX;
+const REQUEST_SEQUENCE_BITS = 31n;
+const REQUEST_SEQUENCE_MAX = (1n << REQUEST_SEQUENCE_BITS) - 1n;
 const I64 = /^(?:0|-[1-9][0-9]*|[1-9][0-9]*)$/;
 const FLOAT64 = /^[0-9a-f]{16}$/;
 const OPERATIONS = new Set([
@@ -115,7 +116,7 @@ const REQUEST_NAMESPACE = requestNamespace();
 let nextRequestSequence = 1n;
 
 function nextRequestId() {
-  if (nextRequestSequence > U32_MAX) {
+  if (nextRequestSequence > REQUEST_SEQUENCE_MAX) {
     fail('request id sequence exhausted', 'client/request-id-exhausted');
   }
   const requestId = (REQUEST_NAMESPACE << REQUEST_SEQUENCE_BITS) | nextRequestSequence;
