@@ -7224,21 +7224,23 @@
     [else #f]))
 
 (define (jst-native-member-contract receiver-type selector)
-  (define head (jst-receiver-type-head receiver-type))
-  (define entry (and head (hash-ref JS-MEMBER-CONTRACTS head #f)))
-  (and entry
-       (let* ([member-name (string->symbol selector)]
-              [raw-contract
-               (hash-ref (hash-ref entry 'members) member-name #f)])
-         (and raw-contract
-              (let ([bindings (make-hasheq)]
-                    [args (if (type-app? receiver-type)
-                              (type-app-args receiver-type)
-                              '())])
-                (for ([var (in-list (hash-ref entry 'vars))]
-                      [arg (in-list args)])
-                  (hash-set! bindings var arg))
-                (apply-type-bindings raw-contract bindings))))))
+  (or
+   (foreign-native-member-type-v1 receiver-type selector)
+   (let* ([head (jst-receiver-type-head receiver-type)]
+          [entry (and head (hash-ref JS-MEMBER-CONTRACTS head #f))])
+     (and entry
+          (let* ([member-name (string->symbol selector)]
+                 [raw-contract
+                  (hash-ref (hash-ref entry 'members) member-name #f)])
+            (and raw-contract
+                 (let ([bindings (make-hasheq)]
+                       [args (if (type-app? receiver-type)
+                                 (type-app-args receiver-type)
+                                 '())])
+                   (for ([var (in-list (hash-ref entry 'vars))]
+                         [arg (in-list args)])
+                     (hash-set! bindings var arg))
+                   (apply-type-bindings raw-contract bindings))))))))
 
 (define (jst-record-member-contract receiver-type selector)
   (record-field-type-for

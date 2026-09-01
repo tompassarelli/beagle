@@ -2,6 +2,7 @@
 
 (require rackunit
          racket/file
+         racket/list
          racket/runtime-path
          racket/string
          racket/system
@@ -175,7 +176,15 @@
      (build-path package-root "index.d.ts")
      (string-append
       "import * as RuntimeModule from \"./runtime-module\";\n"
-      "declare global { export import Runtime = RuntimeModule; }\n"
+      "declare global {\n"
+      "  export import Runtime = RuntimeModule;\n"
+      "  interface GenericBox<T> { readonly value: T; }\n"
+      "  interface GenericBoxConstructor {\n"
+      "    new(value: string): GenericBox<string>;\n"
+      "    new(value: number): GenericBox<number>;\n"
+      "  }\n"
+      "  var GenericBox: GenericBoxConstructor;\n"
+      "}\n"
       "export {};\n"))
     (define source-path (build-path project-root "ambient-alias.bjs"))
     (write-source!
@@ -183,8 +192,10 @@
      (string-append
       "#lang beagle/js\n"
       "(ns resolver-test.ambient-alias\n"
-      "  (:require-global [\"@types/runtime-alias\" :refer [Runtime]]))\n"
-      "(def marker String \"typed\")\n"))
+      "  (:require-global [\"@types/runtime-alias\""
+      " :refer [GenericBox Runtime]]))\n"
+      "(def marker String \"typed\")\n"
+      "(def boxed (GenericBox String) (new GenericBox marker))\n"))
     (define closure
       (resolve-production-module-source-closure
        (list (module-source-input "resolver-test/ambient-alias.bjs" source-path))
@@ -192,10 +203,19 @@
     (define resolutions
       (module-source-closure-foreign-module-resolutions closure))
     (check-equal? (hash-count resolutions) 1)
+    (define resolved-source (car (hash-values resolutions)))
     (define interface
       (module-interface-foreign-interface-v1
-       (module-source-interface (car (hash-values resolutions)))))
-    (define binding (car (foreign-interface-v1-ambient-values interface)))
+       (module-source-interface resolved-source)))
+    (check-equal?
+     (map (lambda (entry) (hash-ref entry 'name))
+          (foreign-interface-v1-ambient-values interface))
+     '("GenericBox" "Runtime"))
+    (define binding
+      (findf
+       (lambda (entry) (string=? (hash-ref entry 'name) "Runtime"))
+       (foreign-interface-v1-ambient-values interface)))
+    (check-pred hash? binding)
     (check-equal? (hash-ref binding 'name) "Runtime")
     (define runtime-node
       (hash-ref (foreign-interface-v1-nodes interface) (hash-ref binding 'node)))
@@ -203,6 +223,12 @@
     (check-true
      (for/or ([property (in-list (hash-ref runtime-node 'properties))])
        (string=? (hash-ref property 'name) "file")))
+    (define generic-box-export
+      (hash-ref
+       (module-interface-type-exports (module-source-interface resolved-source))
+       'GenericBox))
+    (check-equal? (interface-type-export-kind generic-box-export) 'foreign)
+    (check-equal? (interface-type-export-arity generic-box-export) 1)
     (define checked (check-module-source-closure closure #:emit? #f))
     (check-true
      (overlay-check-result-ok? checked)
@@ -278,6 +304,69 @@
      (hash-count
       (module-source-closure-foreign-module-resolutions closure))
      1))))
+
+(test-case
+ "exact maps satisfy optional Partial mapped-type constructor parameters"
+ (with-isolated-adapter-cache
+  (lambda (project-root _adapter-cache)
+    (write-source!
+     (build-path project-root "package.json")
+     "{\"name\":\"mapped-material-test\",\"private\":true,\"type\":\"module\"}\n")
+    (define package-root
+      (build-path project-root "node_modules" "@fixture" "mapped-material"))
+    (make-directory* package-root)
+    (write-source!
+     (build-path package-root "package.json")
+     (string-append
+      "{\"name\":\"@fixture/mapped-material\",\"version\":\"1.0.0\","
+      "\"type\":\"module\",\"exports\":{\".\":{"
+      "\"beagle\":\"./index.d.ts\","
+      "\"types\":\"./index.d.ts\","
+      "\"default\":\"./index.js\"}}}\n"))
+    (write-source!
+     (build-path package-root "index.d.ts")
+     (string-append
+      "export declare class Color { readonly isColor: true; }\n"
+      "export type ColorRepresentation = Color | string | number;\n"
+      "export type MapColorPropertiesToColorRepresentations<T> = {\n"
+      "  [P in keyof T]: T[P] extends Color | null"
+      " ? ColorRepresentation : T[P];\n"
+      "};\n"
+      "export interface MeshStandardMaterialProperties {\n"
+      "  color: Color; emissive: Color; metalness: number;\n"
+      "  roughness: number; transparent: boolean; opacity: number;\n"
+      "}\n"
+      "export interface MeshStandardMaterialParameters extends"
+      " Partial<MapColorPropertiesToColorRepresentations<"
+      "MeshStandardMaterialProperties>> {}\n"
+      "export declare class MeshStandardMaterial {\n"
+      "  constructor(parameters?: MeshStandardMaterialParameters);\n"
+      "}\n"))
+    (define source-path (build-path project-root "mapped-material.bjs"))
+    (write-source!
+     source-path
+     (string-append
+      "#lang beagle/js\n"
+      "(ns resolver-test.mapped-material\n"
+      "  (:require [\"@fixture/mapped-material\""
+      " :refer [MeshStandardMaterial]]))\n"
+      "(def empty MeshStandardMaterial (new MeshStandardMaterial {}))\n"
+      "(def configured MeshStandardMaterial\n"
+      "  (new MeshStandardMaterial\n"
+      "    {:color 16777215 :emissive 0 :metalness 0.16"
+      " :roughness 0.68 :transparent true :opacity 1.0}))\n"))
+    (define checked
+      (check-module-source-closure
+       (resolve-production-module-source-closure
+        (list
+         (module-source-input
+          "resolver-test/mapped-material.bjs"
+          source-path))
+        '())
+       #:emit? #f))
+    (check-true
+     (overlay-check-result-ok? checked)
+     (format "~a" (overlay-check-result-diagnostics checked))))))
 
 (test-case
  "foreign graph reuse validates local declaration and importer dependencies"
@@ -431,6 +520,15 @@
       "(js/export (defn consumeConstructedBytes [request (Vec Int)] Number (consumeBytes (new Uint8Array request))))\n"
       "(js/export (defn consumeCopiedBytes [] Number (consumeBytes (new Uint8Array (makeBytes)))))\n"
       "(js/export (defn loadTogether [] Any (.all Promise [(loadBuffer) (loadText)])))\n"
+      "(js/export (defn settleTogether [] Any\n"
+      "  (.then (.all Promise [(loadBuffer) (loadText)])\n"
+      "    (fn [values Any] String \"settled\"))))\n"
+      "(js/export (defn loadThenTogether [] Any\n"
+      "  (.all Promise\n"
+      "    [(.then (loadBuffer) (fn [value ArrayBuffer] (Promise String) (loadText)))\n"
+      "     (.then (loadText) (fn [value String] (Promise ArrayBuffer) (loadBuffer)))])))\n"
+      "(js/export (defn loadDynamicThen [] Any\n"
+      "  (.then (loadBuffer) (fn [value ArrayBuffer] Any value))))\n"
       "(js/export (defn run [] Nil (schedule (fn [] Nil (notify)))))\n"))
 
     (define closure
@@ -641,15 +739,42 @@
                       (string=? (jst-selector-name (jst-call-key expression))
                                 "all")))
         inferred))
-    (check-equal? (length promise-all-results) 1)
-    (define promise-all-result (car promise-all-results))
-    (check-true
-     (and (type-app? promise-all-result)
-          (eq? (type-app-ctor promise-all-result) 'Promise)
-          (= (length (type-app-args promise-all-result)) 1)
-          (type-foreign? (car (type-app-args promise-all-result)))
-          (not (type-has-any? promise-all-result)))
-     (type->string promise-all-result))
+    (check-equal? (length promise-all-results) 3)
+    (for ([promise-all-result (in-list promise-all-results)])
+      (check-true
+       (and (type-app? promise-all-result)
+            (eq? (type-app-ctor promise-all-result) 'Promise)
+            (= (length (type-app-args promise-all-result)) 1)
+            (type-foreign? (car (type-app-args promise-all-result)))
+            (not (type-has-any? promise-all-result)))
+       (type->string promise-all-result))
+      (define promise-payload (car (type-app-args promise-all-result)))
+      (define indexed-payload
+        (parameterize
+            ([current-foreign-interfaces
+              (hash
+               (foreign-interface-v1-semantic-id foreign-interface)
+               foreign-interface)])
+          (foreign-index-type-v1 promise-payload (type-prim 'Int))))
+      (check-true (type-union? indexed-payload)
+                  (type->string indexed-payload))
+      (check-equal?
+       (sort (map type->string (type-union-alts indexed-payload)) string<?)
+       '("ArrayBuffer" "String")))
+    (define promise-then-results
+      (for/list ([(expression inferred)
+                  (in-hash (program-type-table checked-program))]
+                 #:when
+                 (and (jst-call? expression)
+                      (jst-selector? (jst-call-key expression))
+                      (string=? (jst-selector-name (jst-call-key expression))
+                                "then")))
+        inferred))
+    (check-equal? (length promise-then-results) 4)
+    (check-equal?
+     (count type-has-any? promise-then-results)
+     1
+     "an explicitly dynamic callback result must remain dynamic")
     (define emitted
       (checked-overlay-module-emitted
        (car (overlay-check-result-modules checked))))

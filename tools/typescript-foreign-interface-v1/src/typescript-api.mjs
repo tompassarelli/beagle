@@ -905,6 +905,27 @@ export function createCompilerBridge({
       ? aliasArguments
       : [];
   };
+  const builtinAwaitedArgument = (context, type) => {
+    const symbol = type.aliasSymbol;
+    const arguments_ = type.aliasTypeArguments ?? [];
+    if (symbol?.getName() !== "Awaited" || arguments_.length !== 1) return null;
+    const declarations = symbol.declarations ?? [];
+    if (declarations.length !== 1 || !ts.isTypeAliasDeclaration(declarations[0])) return null;
+    const source = declarations[0].getSourceFile?.();
+    if (!source?.fileName) return null;
+    try {
+      const snapshot = context.reads.record(
+        source.fileName,
+        "Builtin Awaited alias identity",
+      );
+      const input = compilerInputDigest(context, snapshot);
+      return input.path === "adapter/node_modules/typescript/lib/lib.es5.d.ts"
+        ? arguments_[0]
+        : null;
+    } catch {
+      return null;
+    }
+  };
   const enumMemberValue = (context, type) => {
     const symbol = type.aliasSymbol ?? type.symbol;
     if (!symbol) return undefined;
@@ -922,6 +943,7 @@ export function createCompilerBridge({
   };
   const typeKind = (context, type) => {
     if (forcedCodes.has(type)) return "unsupported";
+    if (builtinAwaitedArgument(context, type)) return "awaited";
     let kind;
     if (exactFlag(type, ts.TypeFlags.IndexedAccess)) kind = "indexed-access";
     else if (exactFlag(type, ts.TypeFlags.NonPrimitive)
@@ -1193,6 +1215,7 @@ export function createCompilerBridge({
     tupleElements(type) { return tupleElements(this.context, type); },
     templateLiteralTexts: (type) => [...type.texts],
     templateLiteralTypes: (type) => [...type.types],
+    awaitedArgument(type) { return builtinAwaitedArgument(this.context, type); },
     typeArguments(type) {
       const referenceArguments = this.context.checker.getTypeArguments?.(type) ?? [];
       return referenceArguments.length > 0

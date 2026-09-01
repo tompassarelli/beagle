@@ -100,6 +100,9 @@
     [id String
      elements (Vec TupleElementV1)
      readonly Bool])
+  (AwaitedNode
+    [id String
+     argumentNode String])
   (ObjectNode
     [id String
      name (U String Nil)
@@ -418,6 +421,11 @@
           (.tupleElements bridge type))
         (.readonlyArray? bridge type))
 
+      (.equal bridge kind "awaited")
+      (->AwaitedNode
+        id
+        (node-for! bridge state (.awaitedArgument bridge type)))
+
       (.equal bridge kind "type-parameter")
       (->TypeParameterNode
         id
@@ -634,6 +642,11 @@
         ["elements"
          (mapv tuple-element->wire elements)]
         ["readonly" readonly]])]
+
+    [(AwaitedNode id argument-node)
+     (object [["id" id]
+              ["kind" "awaited"]
+              ["argument" argument-node]])]
 
     [(ObjectNode
        id name identity type-parameters properties indexes call-signatures
