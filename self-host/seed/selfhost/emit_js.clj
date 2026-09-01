@@ -18,6 +18,8 @@
 
 (def constrained-binding-counter (atom 0))
 
+(def lexical-shadow-counter (atom 0))
+
 (def loop-try-counter (atom 0))
 
 (def current-namespace (atom "beagle.user"))
@@ -95,6 +97,13 @@
 (defn add-names [m names]
   (reduce (fn [acc ^String n] (assoc acc n true)) m names))
 
+(defn with-inline-scope! [names thunk]
+  (let [saved (deref inline-scope)]
+  (reset! inline-scope (add-names saved names))
+  (let [result (thunk)]
+  (reset! inline-scope saved)
+  result)))
+
 (defn ^String with-bound! [names thunk]
   (let [saved (deref bound-vars)]
   (reset! bound-vars (add-names saved names))
@@ -142,6 +151,11 @@
   (swap! constrained-binding-counter inc)
   n))
 
+(defn next-lexical-shadow-id! []
+  (let [n (deref lexical-shadow-counter)]
+  (swap! lexical-shadow-counter inc)
+  n))
+
 (defn with-pattern-default-env! [bound types renames thunk]
   (let [saved-bound (deref pattern-default-bound)
    saved-types (deref pattern-default-types)
@@ -158,7 +172,7 @@
 (def JS-RESERVED {"break" true "case" true "catch" true "class" true "const" true "continue" true "debugger" true "default" true "delete" true "do" true "else" true "enum" true "export" true "extends" true "finally" true "for" true "function" true "if" true "implements" true "import" true "in" true "instanceof" true "interface" true "let" true "new" true "null" true "package" true "private" true "protected" true "public" true "return" true "static" true "switch" true "throw" true "try" true "typeof" true "var" true "void" true "while" true "with" true "yield" true "await" true "eval" true "arguments" true})
 
 (defn ^String mangle-punctuation [^String s]
-  (str/replace (str/replace (str/replace (str/replace (str/replace (str/replace (str/replace s "-" "_") "?" "_p") "!" "_bang") "=" "_eq") ">" "_gt") "<" "_lt") "%" "_pct"))
+  (str/replace (str/replace (str/replace (str/replace (str/replace (str/replace (str/replace (str/replace (str/replace s "-" "_") "?" "_p") "!" "_bang") "=" "_eq") ">" "_gt") "<" "_lt") "%" "_pct") "*" "_star") "+" "_plus"))
 
 (defn ^String mangle-chars [^String s]
   (mangle-punctuation (str/replace s "_" "__")))
@@ -181,6 +195,9 @@
 
 (defn ^Boolean declaration-only-form? [form]
   (and (= (get form "node") "static-call") (or (qualified-reference=? form "js" "declare-record") (qualified-reference=? form "js" "declare-type") (qualified-reference=? form "js" "declare-export"))))
+
+(defn ^Boolean forward-declaration-form? [form]
+  (and (= (get form "node") "call") (= (get (get form "fn") "node") "ref") (= (get (get form "fn") "name") "declare") (not (qualified-reference? (get form "fn")))))
 
 (defn ^Boolean qualified-reference-same-binding? [left right]
   (and (qualified-reference? left) (qualified-reference? right) (= (get left "qualifier") (get right "qualifier")) (= (get left "name") (get right "name")) (or (nil? (get left "providerId")) (nil? (get right "providerId")) (= (get left "providerId") (get right "providerId")))))
@@ -254,8 +271,7 @@
   (str (subs HEX (quot code 16) (+ (quot code 16) 1)) (subs HEX (mod code 16) (+ (mod code 16) 1))))
 
 (defn ^String js-escape-char [^String c]
-  (let [cs c
-   code (int (first cs))]
+  (let [code (.codePointAt c 0)]
   (cond
   (= c "\"") "\\\""
   (= c "\\") "\\\\"
@@ -319,7 +335,9 @@
 (defn ^Boolean js-unary? [^String s]
   (contains? JS-UNARY-OPS s))
 
-(def JS-VALUE-WRAPPERS {"inc" "((_x) => (_x + 1))" "dec" "((_x) => (_x - 1))" "+" "((_a, _b) => _a + _b)" "-" "((_a, _b) => _a - _b)" "*" "((_a, _b) => _a * _b)" "/" "((_a, _b) => _a / _b)" "mod" "((_a, _b) => _a % _b)" "str" "((..._xs) => \"\".concat(..._xs))" "identity" "((_x) => _x)" "nil?" "((_x) => _x == null)" "some?" "((_x) => _x != null)" "true?" "((_x) => _x === true)" "false?" "((_x) => _x === false)" "zero?" "((_x) => _x === 0)" "pos?" "((_x) => _x > 0)" "neg?" "((_x) => _x < 0)" "even?" "((_x) => _x % 2 === 0)" "odd?" "((_x) => _x % 2 !== 0)" "not" "((_x) => !_x)" "string?" "((_x) => typeof _x === 'string')" "number?" "((_x) => typeof _x === 'number')" "keyword?" "((_x) => typeof _x === 'string')" "fn?" "((_x) => typeof _x === 'function')" "integer?" "((_x) => Number.isInteger(_x))" "vector?" "((_x) => Array.isArray(_x))" "sequential?" "((_x) => Array.isArray(_x))" "seq?" "((_x) => Array.isArray(_x))" "empty?" "((_x) => _x.length === 0)" "count" "((_x) => _x.length)" "first" "((_x) => _x[0])" "second" "((_x) => _x[1])" "last" "((_x) => _x[_x.length - 1])" "rest" "((_x) => _x.slice(1))" "abs" "((_x) => Math.abs(_x))" "boolean" "((_x) => Boolean(_x))" "name" "((_x) => String(_x))" "cons" "((_x, _xs) => [_x, ..._xs])" "butlast" "((_xs) => _xs.slice(0, -1))" "boolean?" "((_x) => typeof _x === 'boolean')" "symbol?" "((_x) => typeof _x === 'symbol')" "list?" "((_x) => Array.isArray(_x))" "any?" "((_x) => true)" "quot" "((_a, _b) => Math.trunc(_a / _b))" "rem" "((_a, _b) => _a % _b)" "run!" "((_f, _c) => (_c.forEach(_f), null))"})
+(def JS-VALUE-WRAPPERS {"inc" "((_x) => (_x + 1))" "dec" "((_x) => (_x - 1))" "+" "((_a, _b) => _a + _b)" "-" "((_a, _b) => _a - _b)" "*" "((_a, _b) => _a * _b)" "/" "((_a, _b) => _a / _b)" "mod" "((_a, _b) => _a % _b)" "str" "((..._xs) => \"\".concat(..._xs))" "flush" "(() => null)" "identity" "((_x) => _x)" "nil?" "((_x) => _x == null)" "some?" "((_x) => _x != null)" "true?" "((_x) => _x === true)" "false?" "((_x) => _x === false)" "zero?" "((_x) => _x === 0)" "pos?" "((_x) => _x > 0)" "neg?" "((_x) => _x < 0)" "even?" "((_x) => _x % 2 === 0)" "odd?" "((_x) => _x % 2 !== 0)" "not" "((_x) => !_x)" "string?" "((_x) => typeof _x === 'string')" "number?" "((_x) => typeof _x === 'number')" "int?" "((_x) => Number.isInteger(_x))" "double?" "((_x) => typeof _x === 'number')" "keyword?" "((_x) => typeof _x === 'string')" "fn?" "((_x) => typeof _x === 'function')" "integer?" "((_x) => Number.isInteger(_x))" "vector?" "((_x) => Array.isArray(_x))" "sequential?" "((_x) => Array.isArray(_x))" "seq?" "((_x) => Array.isArray(_x))" "empty?" "((_x) => _x.length === 0)" "count" "((_x) => _x.length)" "first" "((_x) => _x[0])" "second" "((_x) => _x[1])" "last" "((_x) => _x[_x.length - 1])" "rest" "((_x) => _x.slice(1))" "abs" "((_x) => Math.abs(_x))" "boolean" "((_x) => Boolean(_x))" "name" "((_x) => String(_x))" "cons" "((_x, _xs) => [_x, ..._xs])" "butlast" "((_xs) => _xs.slice(0, -1))" "boolean?" "((_x) => typeof _x === 'boolean')" "symbol?" "((_x) => typeof _x === 'symbol')" "list?" "((_x) => Array.isArray(_x))" "any?" "((_x) => true)" "quot" "((_a, _b) => Math.trunc(_a / _b))" "rem" "((_a, _b) => _a % _b)" "run!" "((_f, _c) => (_c.forEach(_f), null))" "concat" "((..._xs) => [].concat(..._xs))" "vector" "((..._xs) => _xs)" "min" "((..._xs) => Math.min(..._xs))"})
+
+(def JS-RUNTIME-VALUE-WRAPPERS {"keys" {"rendered" "$$bc$keys" "imports" ["keys"]} "assoc" {"rendered" "((_m, _k, _v) => $$bc$assoc_value(_m, _k, _v))" "imports" ["assoc_value"]} "conj" {"rendered" "((_c, ..._xs) => $$bc$conj_value(_c, ..._xs))" "imports" ["conj_value"]} "into" {"rendered" "((_to, _from) => $$bc$into_value(_to, _from))" "imports" ["into_value"]} "assoc-in" {"rendered" "((_m, _path, _v) => $$bc$assoc_in(_m, _path, _v))" "imports" ["assoc_in"]} "update" {"rendered" "((_m, _k, _f) => $$bc$assoc_value(_m, _k, _f($$bc$get(_m, _k))))" "imports" ["assoc_value" "get"]} "dissoc" {"rendered" "((_m, ..._ks) => $$bc$dissoc_value(_m, ..._ks))" "imports" ["dissoc_value"]}})
 
 (defn ^Boolean absent? [x]
   (or (nil? x) (false? x)))
@@ -717,8 +735,12 @@
   (cond
   (= name "nil") "null"
   (bound? name) (resolved-name name)
+  (contains? JS-RUNTIME-VALUE-WRAPPERS name) (get (get JS-RUNTIME-VALUE-WRAPPERS name) "rendered")
   (contains? JS-VALUE-WRAPPERS name) (get JS-VALUE-WRAPPERS name)
   :else (mangle-name name)))))
+
+(defn runtime-value-imports [^String body]
+  (reduce (fn [uses spec] (if (str/includes? body (get spec "rendered")) (reduce (fn [next ^String name] (assoc next name true)) uses (get spec "imports")) uses)) {} (vals JS-RUNTIME-VALUE-WRAPPERS)))
 
 (defn ^String emit-call-fn-name [ref]
   (if (qualified-reference? ref) (emit-qualified-reference ref (qualified-member-constructor? ref)) (let [name (if (map? ref) (get ref "name") ref)]
@@ -749,6 +771,7 @@
   (= fn-sym "pr") (str "console.log(" (emit-args-list args) ")")
   (= fn-sym "prn") (str "console.log(" (emit-args-list args) ")")
   (= fn-sym "print") (if (= n 1) (str "process.stdout.write(" a0 ")") (str "process.stdout.write(\"\".concat(" (emit-args-list args) "))"))
+  (= fn-sym "flush") (if (= n 0) "null" nil)
   (= fn-sym "newline") (if (= n 0) "console.log()" nil)
   (= fn-sym "nil?") (if (= n 1) (str "(" a0 " == null)") nil)
   (= fn-sym "some?") (if (= n 1) (str "(" a0 " != null)") nil)
@@ -781,6 +804,9 @@
   (= n 3) (str "(() => { const _x = " a0 ", _k = " a1 "; return _x[_k] != null ? _x[_k] : " a2 "; })()")
   :else nil)
   (= fn-sym "conj") (if (>= n 2) (if (= (coll-kind (nth args 0)) "set") (str "new Set([..." a0 ", " (str/join ", " (mapv emit-expr*! (subvec args 1))) "])") (str "[..." a0 ", " (str/join ", " (mapv emit-expr*! (subvec args 1))) "]")) nil)
+  (= fn-sym "transient") (if (= n 1) (demand-runtime-call! "transient_vec" args) nil)
+  (= fn-sym "conj!") (if (= n 2) (demand-runtime-call! "transient_vec_push" args) nil)
+  (= fn-sym "persistent!") (if (= n 1) (demand-runtime-call! "transient_vec_freeze" args) nil)
   (= fn-sym "cons") (if (= n 2) (str "[" a0 ", ..." a1 "]") nil)
   (= fn-sym "vec") (if (= n 1) (str "Array.from(" a0 ")") nil)
   (= fn-sym "vector") (str "[" (emit-args-list args) "]")
@@ -807,6 +833,8 @@
   (= fn-sym "not=") (if (= n 2) (str "(" a0 " !== " a1 ")") nil)
   (= fn-sym "string?") (if (= n 1) (str "(typeof " a0 " === 'string')") nil)
   (= fn-sym "number?") (if (= n 1) (str "(typeof " a0 " === 'number')") nil)
+  (= fn-sym "int?") (if (= n 1) (str "Number.isInteger(" a0 ")") nil)
+  (= fn-sym "double?") (if (= n 1) (str "(typeof " a0 " === 'number')") nil)
   (= fn-sym "keyword?") (if (= n 1) (str "(typeof " a0 " === 'string')") nil)
   (= fn-sym "fn?") (if (= n 1) (str "(typeof " a0 " === 'function')") nil)
   (= fn-sym "throw") (if (and (= n 1) (not (bound? fn-sym))) (iife (str "throw " a0 ";") false) nil)
@@ -986,7 +1014,10 @@
    post-bound (add-names bound names)
    post-types (add-types types [binding])
    id (if constrained-sequence? (next-constrained-binding-id!) i)
-   post-renames (reduce (fn [next ^String name] (assoc next name (if constrained-sequence? (str "$beagle$constrained$binding$" id "$" (mangle-name name)) (mangle-name name)))) renames names)
+   post-renames (reduce (fn [next ^String name] (assoc next name (cond
+  constrained-sequence? (str "$beagle$constrained$binding$" id "$" (mangle-name name))
+  (contains? bound name) (str "$beagle$shadow$" (next-lexical-shadow-id!) "$" (mangle-name name))
+  :else (mangle-name name)))) renames names)
    mutable? (> (count (filterv (fn [^String name] (> (count (filterv (fn [^String x] (= x name)) mutated)) 0)) names)) 0)
    slot (if constrained-sequence? (str "$beagle$constrained$binding$" id) (str "$beagle$binding$" i))
    stmts (emit-let-binding-stmts! binding value mutable? slot constrained-sequence? bound types renames post-bound post-types post-renames)]
@@ -1086,14 +1117,10 @@
   (cond
   (= node "let") (let [bindings (get e "bindings")
    body (get e "body")
-   lnames (let-names-of bindings)]
-  (if (shadows-inline? lnames) (emit-expr-stmt! e) (let [info (emit-let-bind-info! bindings body)
+   lnames (let-names-of bindings)
+   info (emit-let-bind-info! bindings body)
    bind-strs (get info "strs")]
-  (with-emission-env! (get info "bound") (get info "types") (get info "renames") (fn [] (let [saved (deref inline-scope)]
-  (reset! inline-scope (add-names saved lnames))
-  (let [r (str (str/join (str "\n" indent) bind-strs) "\n" indent (emit-body-stmts body indent))]
-  (reset! inline-scope saved)
-  r)))))))
+  (with-emission-env! (get info "bound") (get info "types") (get info "renames") (fn [] (with-inline-scope! lnames (fn [] (str "{\n" inner (str/join (str "\n" inner) bind-strs) "\n" inner (emit-body-stmts body inner) "\n" indent "}"))))))
   (= node "do") (emit-body-stmts (get e "body") indent)
   (= node "when") (str "if (" (emit-expr*! (get e "cond")) ") {\n" inner (emit-body-stmts (get e "body") inner) "\n" indent "}")
   (= node "when-let") (let [val-str (emit-expr*! (get e "expr"))
@@ -1291,8 +1318,8 @@
    outer-types (deref type-env)
    renames (callable-param-renames (get e "params") (get e "rest"))
    setup (emit-js-param-setup! (get e "params") (get e "rest") renames)]
-  (with-emission-env! (add-names outer-bound bound) (add-types outer-types (param-type-entries (get e "params") (get e "rest"))) renames (fn [] (if (and (= 0 (count setup)) (= 1 (count body)) (not (stmt-inline? (nth body 0)))) (let [body-str (emit-expr*! (nth body 0))]
-  (if (leading-brace? body-str) (str prefix "(" params ") => (" body-str ")") (str prefix "(" params ") => " body-str))) (str prefix "(" params ") => { " (str/join " " (into setup [(emit-body-return* body "")])) " }"))))))
+  (with-emission-env! (add-names outer-bound bound) (add-types outer-types (param-type-entries (get e "params") (get e "rest"))) renames (fn [] (with-inline-scope! bound (fn [] (if (and (= 0 (count setup)) (= 1 (count body)) (not (stmt-inline? (nth body 0)))) (let [body-str (emit-expr*! (nth body 0))]
+  (if (leading-brace? body-str) (str prefix "(" params ") => (" body-str ")") (str prefix "(" params ") => " body-str))) (str prefix "(" params ") => { " (str/join " " (into setup [(emit-body-return* body "")])) " }"))))))))
 
 (defn ^String emit-eq-pairs! [args]
   (let [n (count args)
@@ -1384,7 +1411,7 @@
    has-await (or (contains-await? (mapv (fn [b] (get b "value")) bindings)) (> (count (filterv binding-constraint-has-await? bindings)) 0) (contains-await? body))
    info (emit-let-bind-info! bindings body)
    bind-strs (get info "strs")]
-  (with-emission-env! (get info "bound") (get info "types") (get info "renames") (fn [] (iife (str (str/join " " bind-strs) " " (emit-body-return* body "")) has-await))))
+  (with-emission-env! (get info "bound") (get info "types") (get info "renames") (fn [] (with-inline-scope! (let-names-of bindings) (fn [] (iife (str (str/join " " bind-strs) " " (emit-body-return* body "")) has-await))))))
   (= node "loop") (let [bindings (get e "bindings")
    body (get e "body")
    constrained? (bindings-have-constraints? bindings)
@@ -1473,7 +1500,7 @@
    pre-types (deref type-env)
    renames (callable-param-renames (get f "params") (get f "rest"))
    setup (emit-js-param-setup! (get f "params") (get f "rest") renames)
-   emitted-body (with-emission-env! (add-names pre-bound fb) (add-types pre-types (param-type-entries (get f "params") (get f "rest"))) renames (fn [] (emit-body-return* (get f "body") "")))]
+   emitted-body (with-emission-env! (add-names pre-bound fb) (add-types pre-types (param-type-entries (get f "params") (get f "rest"))) renames (fn [] (with-inline-scope! fb (fn [] (emit-body-return* (get f "body") "")))))]
   (str (if fa? "async " "") "function " (mangle-name (get f "name")) "(" (emit-js-params! (get f "params") (get f "rest")) ") { " (str/join " " (into setup [emitted-body])) " }"))) fns)]
   (iife (str (str/join " " fn-strs) " " (emit-body-return* body "")) has-await)))))
   (= node "target-case") (let [cases (vec (get e "cases"))
@@ -1505,7 +1532,7 @@
    outer-types (deref type-env)
    renames (callable-param-renames (get f "params") (get f "rest"))
    setup (emit-js-param-setup! (get f "params") (get f "rest") renames)]
-  (str (if async? "async " "") "function " (mangle-name (get f "name")) "(" params ") {\n  " (with-emission-env! (add-names outer-bound bound) (add-types outer-types (param-type-entries (get f "params") (get f "rest"))) renames (fn [] (str/join "\n  " (into setup [(emit-body-return* (get f "body") "  ")])))) "\n}"))
+  (str (if async? "async " "") "function " (mangle-name (get f "name")) "(" params ") {\n  " (with-emission-env! (add-names outer-bound bound) (add-types outer-types (param-type-entries (get f "params") (get f "rest"))) renames (fn [] (with-inline-scope! bound (fn [] (str/join "\n  " (into setup [(emit-body-return* (get f "body") "  ")])))))) "\n}"))
   (= node "defn-multi") (let [name (mangle-name (get f "name"))
    arities (get f "arities")
    async? (or (= (get f "async") true) (> (count (filterv (fn [a] (or (params-have-constraint-await? (get a "params") (get a "rest")) (contains-await? (get a "body")))) arities)) 0))
@@ -1523,7 +1550,7 @@
    fixed (vec (apply concat (map-indexed (fn [i p] (emit-js-argument-binding-setup! p (str "$beagle$args[" i "]") (str "$beagle$arg$" i) pre-bound pre-types pre-renames post-bound post-types post-renames)) ps)))
    rest-setup (if (absent? rest?) [] (emit-js-argument-binding-setup! rest? (str "$beagle$args.slice(" np ")") "$beagle$arg$rest" pre-bound pre-types pre-renames post-bound post-types post-renames))
    allb (into fixed rest-setup)
-   body (with-emission-env! post-bound post-types post-renames (fn [] (emit-body-return* (get a "body") "    ")))
+   body (with-emission-env! post-bound post-types post-renames (fn [] (with-inline-scope! abound (fn [] (emit-body-return* (get a "body") "    ")))))
    inner (if (= 0 (count allb)) body (str (str/join "\n    " allb) "\n    " body))]
   (if (absent? rest?) (str "  if (arguments.length === " np ") {\n    " inner "\n  }") (str "  if (arguments.length >= " np ") {\n    " inner "\n  }")))) arities)]
   (str (if async? "async " "") "function " name "(...$beagle$args) {\n" (str/join "\n" branches) "\n  throw new Error('No matching arity: ' + $beagle$args.length);\n}"))
@@ -1535,6 +1562,7 @@
   (= node "defprotocol") (throw (ex-info "protocol-form is not supported for JS target" {}))
   (= node "extend-type") (throw (ex-info "extend-type is not supported for JS target" {}))
   (declaration-only-form? f) ""
+  (forward-declaration-form? f) ""
   (and (= node "static-call") (qualified-reference=? f "js" "export")) (emit-public-esm-form! (nth (get f "args") 0))
   :else (emit-stmt-inline! f ""))))
 
@@ -1640,6 +1668,7 @@
   (reset! match-counter 0)
   (reset! logical-counter 0)
   (reset! constrained-binding-counter 0)
+  (reset! lexical-shadow-counter 0)
   (reset! loop-try-counter 0)
   (reset! current-namespace (get prog "namespace"))
   (reset! type-env {})
@@ -1662,7 +1691,8 @@
   (let [body (str/join "\n\n" (mapv (fn [f] (reset! ctx "stmt")
   (emit-form! f)) forms))
    header (emit-module-header prog)
-   demanded-runtime-bindings (mapv (fn [^String name] (str name " as $$bc$" name)) (sort (keys (deref runtime-call-uses))))
+   all-runtime-uses (reduce (fn [uses ^String name] (assoc uses name true)) (deref runtime-call-uses) (keys (runtime-value-imports body)))
+   demanded-runtime-bindings (mapv (fn [^String name] (str name " as $$bc$" name)) (sort (keys all-runtime-uses)))
    runtime-bindings (into (if (some? (str/index-of body "$$bc$equiv")) ["equivV as $$bc$equiv"] []) (into (if (deref bc-get-used) ["get as $$bc$get"] []) (into (if (deref bc-range-used) ["range as $$bc$range"] []) (into (if (deref bc-record-instance-used) ["record_instance_p as $$bc$record_instance_p"] []) demanded-runtime-bindings))))
    runtime-import (if (= 0 (count runtime-bindings)) "" (str "import { " (str/join ", " runtime-bindings) " } from 'beagle/core.js';\n"))
    host-bindings (mapv (fn [^String name] (str name " as $$bh$" name)) (sort (keys (deref host-call-uses))))
@@ -1699,6 +1729,7 @@
   (reset! match-counter 0)
   (reset! logical-counter 0)
   (reset! constrained-binding-counter 0)
+  (reset! lexical-shadow-counter 0)
   (reset! loop-try-counter 0)
   (reset! current-namespace "beagle.user")
   (reset! bound-vars {})
@@ -1720,6 +1751,8 @@
   (expect! "mangle: hyphen" (= (mangle-str "make-product") "make_product"))
   (expect! "mangle: predicate" (= (mangle-str "cheap?") "cheap_p"))
   (expect! "mangle: bang" (= (mangle-str "swap!") "swap_bang"))
+  (expect! "mangle: star" (= (mangle-str "scan-datum*!") "scan_datum_star_bang"))
+  (expect! "mangle: plus" (= (mangle-str "params+rest") "params_plusrest"))
   (expect! "mangle: reserved private" (= (mangle-str "private") "private$"))
   (expect! "mangle: underscore doubles" (= (mangle-str "a_b") "a__b"))
   (expect! "mangle-prop: authored underscore preserved" (= (mangle-prop "wall_s") "wall_s"))
@@ -1805,6 +1838,11 @@
   (expect! "unbound 'name' -> value wrapper" (do
   (reset! bound-vars {})
   (= (emit-ref-name "name") "((_x) => String(_x))")))
+  (expect! "unbound 'assoc' -> demanded runtime value" (do
+  (reset! bound-vars {})
+  (let [rendered (emit-ref-name "assoc")]
+  (and (= rendered "((_m, _k, _v) => $$bc$assoc_value(_m, _k, _v))") (= true (get (runtime-value-imports rendered) "assoc_value"))))))
+  (expect! "remaining compiler core values lower without bare identifiers" (and (= (emit-ref-name "concat") "((..._xs) => [].concat(..._xs))") (= (emit-ref-name "vector") "((..._xs) => _xs)") (= (emit-ref-name "min") "((..._xs) => Math.min(..._xs))") (= (emit-ref-name "keys") "$$bc$keys") (= true (get (runtime-value-imports "$$bc$keys") "keys"))))
   (expect! "require: dotted npm subpath remains exact" (= (emit-require-line "fixture.app" {"ns" "three/addons/loaders/GLTFLoader.js" "alias" "loader" "refer" false} {}) "import * as loader from 'three/addons/loaders/GLTFLoader.js';"))
   (expect! "require: dotted Beagle namespace remains importer-relative" (= (emit-require-line "fixture.app" {"ns" "fixture.shared.loader" "alias" "loader" "refer" false} {}) "import * as loader from './shared/loader.js';"))
   (expect! "require: referred Beagle export keeps its authored ESM name" (= (emit-require-line "fixture.app" {"ns" "fixture.shared.loader" "alias" "loader" "refer" ["decode-hook-event"]} {}) "import { \"decode-hook-event\" as decode_hook_event } from './shared/loader.js';"))
@@ -1812,6 +1850,13 @@
   (expect! "typed sequential param projects each leaf" (= (emit-js-param-setup! [{"type" "param" "name" {"type" "seq-destructure" "names" ["x" "y"] "rest" false} "ann" {"kind" "hvec" "members" []}}] false {}) ["let x = $beagle$param$0[0];" "let y = $beagle$param$0[1];"]))
   (expect! "typed nested map param preserves defaults and aggregate alias" (= (emit-js-param-setup! [{"type" "param" "name" {"type" "map-destructure" "keys" ["x"] "or" [{"key" "x" "value" {"node" "literal" "kind" "number" "value" 4}}] "as" "whole"} "ann" {"kind" "any"}}] false {}) ["let whole = $beagle$param$0;" "let x = ($beagle$param$0[\"x\"] ?? 4);"]))
   (expect! "destructured let owns one hidden aggregate slot" (= (get (emit-let-bind-info! [{"name" {"type" "seq-destructure" "names" ["x" "y"] "rest" false} "constraint" nil "value" {"node" "call" "fn" {"node" "ref" "name" "value"} "args" []}}] []) "strs") ["const $beagle$binding$0 = value();" "let x = $beagle$binding$0[0];" "let y = $beagle$binding$0[1];"]))
+  (expect! "let initializer resolves an outer callable before installing its same-named binder" (do
+  (reset! bound-vars {"target-stdlib" true})
+  (reset! lexical-shadow-counter 0)
+  (let [info (emit-let-bind-info! [{"name" "target-stdlib" "ann" {"kind" "prim" "name" "Any"} "constraint" nil "value" {"node" "call" "fn" {"node" "ref" "name" "target-stdlib"} "args" [{"node" "literal" "kind" "string" "value" "js"}]}}] [])
+   ok (and (= (get info "strs") ["const $beagle$shadow$0$target_stdlib = target_stdlib(\"js\");"]) (= (get (get info "renames") "target-stdlib") "$beagle$shadow$0$target_stdlib"))]
+  (reset! bound-vars {})
+  ok)))
   (expect! "destructured loop keeps recur arity at one aggregate slot" (let [emitted (emit-expr! {"node" "loop" "bindings" [{"name" {"type" "seq-destructure" "names" ["x" "y"] "rest" false} "ann" {"kind" "app" "name" "HVec" "args" []} "value" {"node" "vec" "items" [{"node" "literal" "kind" "number" "value" 1} {"node" "literal" "kind" "number" "value" 2}]}}] "body" [{"node" "ref" "name" "x"}]})]
   (and (str/includes? emitted "let $beagle$loop$0 = [1, 2];") (str/includes? emitted "let x = $beagle$loop$0[0];"))))
   (expect! "typed pattern setup is wired into defn, fn, and letfn" (let [target {"type" "seq-destructure" "names" ["x" "y"] "rest" false}

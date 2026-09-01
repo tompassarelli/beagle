@@ -1741,9 +1741,9 @@
       (get key "value")
       nil)))
 
-(declare foreign-argument-compatible?)
+(declare foreign-argument-compatible?!)
 
-(defn foreign-map-literal-compatible?
+(defn foreign-map-literal-compatible?!
   [expected-view Any
    expression Any
    env Any
@@ -1773,7 +1773,7 @@
                                (= (get candidate "name") name))
                              properties))]
             (and (some? property)
-                 (foreign-argument-compatible?
+                 (foreign-argument-compatible?!
                    (get expected-view "interface")
                    (get property "type")
                    (get pair "val")
@@ -1781,7 +1781,7 @@
                    env bindings))))
         pairs))))
 
-(defn foreign-argument-compatible?
+(defn foreign-argument-compatible?!
   [interface-key String
    expected-id String
    expression Any
@@ -1810,14 +1810,14 @@
           (boolean
             (some
               (fn [member String] Bool
-                (foreign-argument-compatible?
+                (foreign-argument-compatible?!
                   interface-key member expression actual env bindings))
               (get expected "members")))
 
           (= kind "intersection")
           (every?
             (fn [member String] Bool
-              (foreign-argument-compatible?
+              (foreign-argument-compatible?!
                 interface-key member expression actual env bindings))
             (get expected "members"))
 
@@ -1826,14 +1826,14 @@
                        interface-key expected-id (deref bindings))]
             (if (and (= (get expression "node") "map")
                      (foreign-object-type? view))
-              (foreign-map-literal-compatible? view expression env bindings)
+              (foreign-map-literal-compatible?! view expression env bindings)
               (type-compatible? actual view)))
 
           (= kind "object")
           (let [view (make-foreign-object-type
                        interface-key expected-id (deref bindings))]
             (if (= (get expression "node") "map")
-              (foreign-map-literal-compatible? view expression env bindings)
+              (foreign-map-literal-compatible?! view expression env bindings)
               (type-compatible? actual view)))
 
           (= kind "function")
@@ -1920,7 +1920,7 @@
       (get node "element")
       node-id)))
 
-(defn foreign-signature-attempt
+(defn foreign-signature-attempt!
   [callable Any
    signature Any
    args (Vec Any)
@@ -1948,7 +1948,7 @@
                                   (get parameter "type"))
                     expression (nth args index)
                     actual (infer-expr! expression env)]
-                (foreign-argument-compatible?
+                (foreign-argument-compatible?!
                   interface-key expected-id expression actual env bindings)))
             (range (count args)))]
         (if compatible
@@ -1975,7 +1975,7 @@
    display String] Any
   (let [attempts (mapv
                    (fn [signature Any] Any
-                     (foreign-signature-attempt
+                     (foreign-signature-attempt!
                        callable signature args env expected-result))
                    (foreign-callable-signatures callable))
         selected (first (filterv some? attempts))]

@@ -17,6 +17,23 @@
 
 (def ^String SET-TAG "#%set")
 
+(def ^String READER-FLOAT-KIND "beagle/reader-float-v1")
+
+(defn make-reader-float-datum [value ^String source-text]
+  {"kind" READER-FLOAT-KIND "value" value "sourceText" source-text})
+
+(defn ^Boolean reader-float-datum? [value]
+  (and (map? value) (= (get value "kind") READER-FLOAT-KIND) (number? (get value "value")) (string? (get value "sourceText"))))
+
+(defn ^Boolean reader-number-datum? [value]
+  (or (number? value) (reader-float-datum? value)))
+
+(defn reader-number-value [value]
+  (cond
+  (reader-float-datum? value) (get value "value")
+  (number? value) value
+  :else 0))
+
 (defn ^Boolean bracketed? [d]
   (and (vector? d) (> (count d) 0) (= (nth d 0) BRACKET-TAG)))
 

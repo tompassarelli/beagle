@@ -393,7 +393,7 @@
        (subs HEX (mod code 16) (+ (mod code 16) 1))))
 
 (defn js-escape-char [c String] String
-  (let [code Int (.charCodeAt c 0)]
+  (let [code Int (.codePointAt c 0)]
     (cond
       (= c "\"") "\\\""
       (= c "\\") "\\\\"

@@ -137,7 +137,9 @@
 
 (def JS-ATOM-STDLIB {"atom" JS-ATOM-POLY "deref" JS-DEREF-POLY "reset!" JS-RESET-POLY "swap!" JS-SWAP-POLY "Math" (make-prim "JsMath") "Map" (make-poly ["K" "V"] (make-fn [] nil (make-app "JsMap" [(make-var "K") (make-var "V")])) nil) "Date" (make-prim "JsDate") "performance" (make-prim "JsPerformance")})
 
-(def STATE (atom {"record-fields" {} "record-field-order" {} "record-validators" {} "record-updates" {} "record-field-accesses" {} "binding-constraint-proofs" {} "union-members" {} "enum-types" {} "parametric-unions" {} "parametric-member-union" {} "definition-inference-counter" 0 "definition-inference-bindings" {} "diagnostics" []}))
+(def ^String FOREIGN-INTERFACES-KEY "$beagle$selfhost$foreign-interfaces")
+
+(def STATE (atom {"record-fields" {} "record-field-order" {} "record-validators" {} "record-updates" {} "record-field-accesses" {} "binding-constraint-proofs" {} "union-members" {} "enum-types" {} "parametric-unions" {} "parametric-member-union" {} "foreign-interfaces" {} "foreign-types" {} "foreign-exports" [] "definition-inference-counter" 0 "definition-inference-bindings" {} "diagnostics" []}))
 
 (defn ^Boolean prim? [t]
   (and (not (nil? t)) (not= (get t "kind") nil) (= (get t "kind") "prim")))
@@ -156,6 +158,12 @@
 
 (defn ^Boolean poly-type? [t]
   (and (not (nil? t)) (= (get t "kind") "poly")))
+
+(defn ^Boolean foreign-object-type? [t]
+  (and (not (nil? t)) (= (get t "kind") "foreign-object")))
+
+(defn ^Boolean foreign-callable-type? [t]
+  (and (not (nil? t)) (= (get t "kind") "foreign-callable")))
 
 (defn ^Boolean any-type? [t]
   (and (prim? t) (= (get t "name") "Any")))
@@ -274,6 +282,9 @@
    var-strs (mapv (fn [^String v] (let [b (if (nil? bounds) nil (get bounds v))]
   (if (nil? b) v (str "(" v " <: " (type->string b) ")")))) (get t "vars"))]
   (str "(forall [" (str/join " " var-strs) "] " (type->string (get t "body")) ")"))
+  (foreign-object-type? t) (let [name (get t "name")]
+  (if (string? name) name (str "foreign#" (get t "node"))))
+  (foreign-callable-type? t) "ForeignCallable"
   :else "?"))
 
 (defn ^String unqualify-name [^String name]
@@ -296,6 +307,8 @@
 (defn ^Boolean parametric-member-view? [value]
   (and (app-type? value) (not (nil? (get-in (deref STATE) ["parametric-member-union" (get value "name")])))))
 
+(declare foreign-type-compatible?)
+
 (defn ^Boolean type-compatible? [actual expected]
   (cond
   (or (nil? actual) (nil? expected)) true
@@ -308,6 +321,7 @@
   (and (union-type? actual) (union-type? expected)) (every? (fn [a-alt] (boolean (some (fn [e-alt] (type-compatible? a-alt e-alt)) (get expected "members")))) (get actual "members"))
   (union-type? expected) (boolean (some (fn [alt] (type-compatible? actual alt)) (get expected "members")))
   (union-type? actual) (every? (fn [alt] (type-compatible? alt expected)) (get actual "members"))
+  (or (foreign-object-type? actual) (foreign-object-type? expected)) (foreign-type-compatible? actual expected)
   (parametric-member-view? actual) (type-compatible? (make-prim (get actual "name")) expected)
   (parametric-member-view? expected) (type-compatible? actual (make-prim (get expected "name")))
   (and (prim? actual) (app-type? expected) (nominal-union-has-member? (get expected "name") (get actual "name"))) true
@@ -486,7 +500,7 @@
 
 (def JS-BUILTIN-MEMBER-CONTRACTS {"Math" {"sqrt" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "pow" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil FLOAT-TYPE) "exp" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "atan" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "atan2" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil FLOAT-TYPE) "floor" (make-fn [NUMBER-TYPE] nil INT-TYPE) "ceil" (make-fn [NUMBER-TYPE] nil INT-TYPE) "min" (make-poly ["A"] (make-fn [] (make-var "A") (make-var "A")) {"A" NUMBER-TYPE}) "max" (make-poly ["A"] (make-fn [] (make-var "A") (make-var "A")) {"A" NUMBER-TYPE}) "PI" FLOAT-TYPE "round" (make-fn [NUMBER-TYPE] nil INT-TYPE) "sin" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "cos" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "tan" (make-fn [NUMBER-TYPE] nil FLOAT-TYPE) "abs" (make-poly ["A"] (make-fn [(make-var "A")] nil (make-var "A")) {"A" NUMBER-TYPE})} "String" {"indexOf" (make-fn [(make-prim "String")] nil INT-TYPE) "trim" (make-fn [] nil (make-prim "String")) "slice" (make-fn [] NUMBER-TYPE (make-prim "String"))} "Date" {"now" (make-fn [] nil INT-TYPE)} "performance" {"now" (make-fn [] nil FLOAT-TYPE)} "Map" {"size" INT-TYPE "get" (make-fn [(make-var "K")] nil (make-union [(make-var "V") NIL-TYPE])) "set" (make-fn [(make-var "K") (make-var "V")] nil (make-app "JsMap" [(make-var "K") (make-var "V")]))} "Canvas" {"getBoundingClientRect" (make-fn [] nil (make-prim "JsDomRect"))} "PointerEvent" {"clientX" FLOAT-TYPE "clientY" FLOAT-TYPE} "DOMRect" {"left" FLOAT-TYPE "top" FLOAT-TYPE "width" FLOAT-TYPE "height" FLOAT-TYPE}})
 
-(def STDLIB {"true" (make-prim "Bool") "false" (make-prim "Bool") "int?" (make-fn [ANY] nil (make-prim "Bool")) "nil?" (make-fn [ANY] nil (make-prim "Bool")) "some?" (make-fn [ANY] nil (make-prim "Bool")) "string?" (make-fn [ANY] nil (make-prim "Bool")) "number?" (make-fn [ANY] nil (make-prim "Bool")) "integer?" (make-fn [ANY] nil (make-prim "Bool")) "keyword?" (make-fn [ANY] nil (make-prim "Bool")) "symbol?" (make-fn [ANY] nil (make-prim "Bool")) "boolean?" (make-fn [ANY] nil (make-prim "Bool")) "float?" (make-fn [ANY] nil (make-prim "Bool")) "map?" (make-fn [ANY] nil (make-prim "Bool")) "vector?" (make-fn [ANY] nil (make-prim "Bool")) "empty?" (make-fn [ANY] nil (make-prim "Bool")) "not" (make-fn [ANY] nil (make-prim "Bool")) "=" (make-fn [ANY] ANY (make-prim "Bool")) "not=" (make-fn [ANY] ANY (make-prim "Bool")) ">" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) ">=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<=" (make-fn [NUMBER-TYPE NUMBER-TYPE] NUMBER-TYPE (make-prim "Bool")) "and" (make-fn [] ANY ANY) "or" (make-fn [] ANY ANY) "+" (make-fn [] NUMBER-TYPE ANY) "-" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "*" (make-fn [] NUMBER-TYPE ANY) "/" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "quot" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "mod" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "bit-and" (make-fn [INT-TYPE INT-TYPE] INT-TYPE INT-TYPE) "bit-shift-left" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "max" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "min" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "inc" (make-fn [NUMBER-TYPE] nil INT-TYPE) "dec" (make-fn [NUMBER-TYPE] nil INT-TYPE) "count" (make-fn [ANY] nil (make-prim "Int")) "long" (make-fn [ANY] nil (make-prim "Int")) "int" (make-fn [ANY] nil (make-prim "Int")) "bigint" (make-fn [ANY] nil (make-prim "Int")) "double" (make-fn [ANY] nil (make-prim "Float")) "monotonic-nanoseconds" (make-fn [] nil (make-prim "Int")) ["qualified-ref" "bgl" "sha256-utf8" nil] (make-fn [(make-prim "String")] nil (make-prim "String")) ["qualified-ref" "bgl" "promote" nil] PROMOTE-POLY "str" (make-fn [] ANY (make-prim "String")) "get" (make-fn [ANY ANY] ANY ANY) "get-in" (make-fn [ANY ANY] ANY ANY) "assoc" (make-fn [ANY ANY ANY] ANY ANY) "assoc-in" (make-fn [ANY ANY ANY] nil ANY) "update" (make-fn [ANY ANY ANY] ANY ANY) "dissoc" (make-fn [ANY ANY] ANY ANY) "conj" (make-fn [ANY] ANY ANY) "cons" (make-fn [ANY ANY] nil ANY) "concat" CONCAT-POLY "into" (make-fn [ANY ANY] ANY ANY) "vec" (make-fn [ANY] nil ANY) "vals" (make-fn [ANY] nil ANY) "keys" (make-fn [ANY] nil ANY) "first" VEC-ACCESS-POLY "second" VEC-ACCESS-POLY "rest" (make-fn [ANY] nil ANY) "nth" NTH-POLY "reduce" (make-fn [ANY ANY] ANY ANY) "map" (make-fn [ANY] ANY ANY) "mapv" MAPV-POLY "filter" (make-fn [ANY ANY] nil ANY) "filterv" FILTERV-POLY "remove" (make-fn [ANY ANY] nil ANY) "some" (make-fn [ANY ANY] nil ANY) "every?" (make-fn [ANY ANY] nil (make-prim "Bool")) "range" (make-fn [] INT-TYPE (make-app "List" [INT-TYPE]))})
+(def STDLIB {"true" (make-prim "Bool") "false" (make-prim "Bool") "int?" (make-fn [ANY] nil (make-prim "Bool")) "double?" (make-fn [ANY] nil (make-prim "Bool")) "flush" (make-fn [] nil (make-prim "Nil")) "nil?" (make-fn [ANY] nil (make-prim "Bool")) "some?" (make-fn [ANY] nil (make-prim "Bool")) "string?" (make-fn [ANY] nil (make-prim "Bool")) "number?" (make-fn [ANY] nil (make-prim "Bool")) "integer?" (make-fn [ANY] nil (make-prim "Bool")) "keyword?" (make-fn [ANY] nil (make-prim "Bool")) "symbol?" (make-fn [ANY] nil (make-prim "Bool")) "boolean?" (make-fn [ANY] nil (make-prim "Bool")) "float?" (make-fn [ANY] nil (make-prim "Bool")) "map?" (make-fn [ANY] nil (make-prim "Bool")) "vector?" (make-fn [ANY] nil (make-prim "Bool")) "empty?" (make-fn [ANY] nil (make-prim "Bool")) "not" (make-fn [ANY] nil (make-prim "Bool")) "=" (make-fn [ANY] ANY (make-prim "Bool")) "not=" (make-fn [ANY] ANY (make-prim "Bool")) ">" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) ">=" (make-fn [NUMBER-TYPE NUMBER-TYPE] nil (make-prim "Bool")) "<=" (make-fn [NUMBER-TYPE NUMBER-TYPE] NUMBER-TYPE (make-prim "Bool")) "and" (make-fn [] ANY ANY) "or" (make-fn [] ANY ANY) "+" (make-fn [] NUMBER-TYPE ANY) "-" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "*" (make-fn [] NUMBER-TYPE ANY) "/" (make-fn [NUMBER-TYPE] NUMBER-TYPE ANY) "quot" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "mod" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "bit-and" (make-fn [INT-TYPE INT-TYPE] INT-TYPE INT-TYPE) "bit-shift-left" (make-fn [INT-TYPE INT-TYPE] nil INT-TYPE) "max" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "min" (make-fn [NUMBER-TYPE] NUMBER-TYPE INT-TYPE) "inc" (make-fn [NUMBER-TYPE] nil INT-TYPE) "dec" (make-fn [NUMBER-TYPE] nil INT-TYPE) "count" (make-fn [ANY] nil (make-prim "Int")) "long" (make-fn [ANY] nil (make-prim "Int")) "int" (make-fn [ANY] nil (make-prim "Int")) "bigint" (make-fn [ANY] nil (make-prim "Int")) "double" (make-fn [ANY] nil (make-prim "Float")) "monotonic-nanoseconds" (make-fn [] nil (make-prim "Int")) ["qualified-ref" "bgl" "sha256-utf8" nil] (make-fn [(make-prim "String")] nil (make-prim "String")) ["qualified-ref" "bgl" "promote" nil] PROMOTE-POLY "str" (make-fn [] ANY (make-prim "String")) "get" (make-fn [ANY ANY] ANY ANY) "get-in" (make-fn [ANY ANY] ANY ANY) "assoc" (make-fn [ANY ANY ANY] ANY ANY) "assoc-in" (make-fn [ANY ANY ANY] nil ANY) "update" (make-fn [ANY ANY ANY] ANY ANY) "dissoc" (make-fn [ANY ANY] ANY ANY) "conj" (make-fn [ANY] ANY ANY) "cons" (make-fn [ANY ANY] nil ANY) "concat" CONCAT-POLY "into" (make-fn [ANY ANY] ANY ANY) "vec" (make-fn [ANY] nil ANY) "vals" (make-fn [ANY] nil ANY) "keys" (make-fn [ANY] nil ANY) "first" VEC-ACCESS-POLY "second" VEC-ACCESS-POLY "rest" (make-fn [ANY] nil ANY) "nth" NTH-POLY "reduce" (make-fn [ANY ANY] ANY ANY) "map" (make-fn [ANY] ANY ANY) "mapv" MAPV-POLY "filter" (make-fn [ANY ANY] nil ANY) "filterv" FILTERV-POLY "remove" (make-fn [ANY ANY] nil ANY) "some" (make-fn [ANY ANY] nil ANY) "every?" (make-fn [ANY ANY] nil (make-prim "Bool")) "range" (make-fn [] INT-TYPE (make-app "List" [INT-TYPE]))})
 
 (def NIX-STDLIB {"==" (make-fn [ANY ANY] nil BOOL-TYPE) "!=" (make-fn [ANY ANY] nil BOOL-TYPE) "++" (make-poly ["A"] (let [items (make-app "Vec" [(make-var "A")])]
   (make-fn [items] items items)) nil) "//" (let [attrs (make-app "Map" [ANY ANY])]
@@ -550,6 +564,255 @@
   (if (= x false) nil x))
 
 (declare infer-expr! infer-expr-expected! check-atom-ctor! check-hvec-literal!)
+
+(defn foreign-interface-record [^String interface-key]
+  (get-in (deref STATE) ["foreign-interfaces" interface-key]))
+
+(defn foreign-node-at [^String interface-key ^String node-id]
+  (get-in (deref STATE) ["foreign-interfaces" interface-key "nodes" node-id]))
+
+(defn make-foreign-object-type [^String interface-key ^String node-id bindings]
+  (let [node (foreign-node-at interface-key node-id)]
+  {"kind" "foreign-object" "interface" interface-key "node" node-id "name" (get node "name") "bindings" bindings}))
+
+(defn make-foreign-callable-type [^String interface-key ^String node-id ^String mode bindings]
+  {"kind" "foreign-callable" "interface" interface-key "node" node-id "mode" mode "bindings" bindings})
+
+(declare foreign-node-type)
+
+(defn foreign-primitive-type [^String name]
+  (cond
+  (= name "string") (make-prim "String")
+  (= name "number") NUMBER-TYPE
+  (= name "bigint") INT-TYPE
+  (= name "boolean") BOOL-TYPE
+  (or (= name "undefined") (= name "null") (= name "void")) NIL-TYPE
+  (= name "never") (make-prim "Never")
+  (= name "symbol") (make-prim "ForeignSymbol")
+  :else (make-prim (str "Foreign<" name ">"))))
+
+(defn foreign-reference-type [^String interface-key node bindings]
+  (let [target-id (get node "target")]
+  (if (not (string? target-id)) (make-foreign-object-type interface-key (get node "id") bindings) (let [target (foreign-node-at interface-key target-id)
+   parameters (get target "typeParameters" [])
+   arguments (get node "typeArguments" [])
+   indices (vec (range (min (count parameters) (count arguments))))
+   target-bindings (reduce (fn [out index] (assoc out (get (nth parameters index) "node") (foreign-node-type interface-key (nth arguments index) bindings))) bindings indices)]
+  (foreign-node-type interface-key target-id target-bindings)))))
+
+(defn foreign-node-type [^String interface-key ^String node-id bindings]
+  (let [bound (get bindings node-id)]
+  (if (some? bound) bound (let [node (foreign-node-at interface-key node-id)
+   kind (get node "kind")]
+  (cond
+  (= kind "primitive") (foreign-primitive-type (get node "name"))
+  (= kind "literal") (foreign-primitive-type (get node "valueType"))
+  (= kind "template-literal") (make-prim "String")
+  (= kind "union") (make-union (mapv (fn [^String member] (foreign-node-type interface-key member bindings)) (get node "members")))
+  (= kind "intersection") {"kind" "foreign-intersection" "interface" interface-key "nodes" (get node "members") "bindings" bindings}
+  (= kind "array") (make-app "Vec" [(foreign-node-type interface-key (get node "element") bindings)])
+  (= kind "tuple") (make-app "HVec" (mapv (fn [element] (foreign-node-type interface-key (get element "type") bindings)) (get node "elements")))
+  (= kind "object") (make-foreign-object-type interface-key node-id bindings)
+  (= kind "function") (make-foreign-callable-type interface-key node-id "call" bindings)
+  (= kind "reference") (foreign-reference-type interface-key node bindings)
+  (= kind "type-parameter") (let [default-id (get node "default")]
+  (if (string? default-id) (foreign-node-type interface-key default-id bindings) (make-var (get node "name"))))
+  (= kind "brand") (foreign-node-type interface-key (get node "base") bindings)
+  :else (make-prim (str "ForeignUnsupported<" node-id ">")))))))
+
+(defn foreign-type-name [type]
+  (cond
+  (foreign-object-type? type) (get type "name")
+  (prim? type) (get type "name")
+  (app-type? type) (get type "name")
+  :else nil))
+
+(defn foreign-type-arguments [type]
+  (cond
+  (app-type? type) (get type "args")
+  (foreign-object-type? type) (let [node (foreign-node-at (get type "interface") (get type "node"))
+   bindings (get type "bindings")]
+  (mapv (fn [parameter] (foreign-node-type (get type "interface") (get parameter "node") bindings)) (get node "typeParameters" [])))
+  :else []))
+
+(defn foreign-view-for-type [type]
+  (if (foreign-object-type? type) type (let [name (foreign-type-name type)
+   registered (if (string? name) (get-in (deref STATE) ["foreign-types" name]) nil)]
+  (if (nil? registered) nil (let [interface-key (get registered "interface")
+   node-id (get registered "node")
+   node (foreign-node-at interface-key node-id)
+   parameters (get node "typeParameters" [])
+   arguments (foreign-type-arguments type)
+   indices (vec (range (min (count parameters) (count arguments))))
+   bindings (reduce (fn [out index] (assoc out (get (nth parameters index) "node") (nth arguments index))) {} indices)]
+  (make-foreign-object-type interface-key node-id bindings))))))
+
+(defn foreign-property-by-name [view ^String name]
+  (let [node (foreign-node-at (get view "interface") (get view "node"))]
+  (first (filterv (fn [property] (= (get property "name") name)) (get node "properties" [])))))
+
+(defn ^Boolean foreign-object-subtype? [actual expected]
+  (let [actual-view (foreign-view-for-type actual)
+   expected-view (foreign-view-for-type expected)]
+  (and (some? actual-view) (some? expected-view) (let [actual-name (get actual-view "name")
+   expected-name (get expected-view "name")]
+  (if (and (string? actual-name) (= actual-name expected-name)) (let [actual-args (foreign-type-arguments actual-view)
+   expected-args (foreign-type-arguments expected-view)]
+  (and (= (count actual-args) (count expected-args)) (every? (fn [index] (and (type-compatible? (nth actual-args index) (nth expected-args index)) (type-compatible? (nth expected-args index) (nth actual-args index)))) (range (count actual-args))))) (let [expected-node (foreign-node-at (get expected-view "interface") (get expected-view "node"))]
+  (every? (fn [property] (some? (foreign-property-by-name actual-view (get property "name")))) (get expected-node "properties" []))))))))
+
+(defn ^Boolean foreign-type-compatible? [actual expected]
+  (foreign-object-subtype? actual expected))
+
+(defn register-foreign-type! [^String interface-key node]
+  (let [name (get node "name")]
+  (if (and (string? name) (= (get node "kind") "object")) (do
+  (let [prior (get-in (deref STATE) ["foreign-types" name])
+   prior-node (if (nil? prior) nil (foreign-node-at (get prior "interface") (get prior "node")))]
+  (if (or (nil? prior-node) (> (count (get node "properties" [])) (count (get prior-node "properties" [])))) (do
+  (swap! STATE assoc-in ["foreign-types" name] {"interface" interface-key "node" (get node "id")})))))))
+  nil)
+
+(defn install-foreign-interfaces! [surfaces]
+  (doseq [index (range (count surfaces))]
+  (let [surface (nth surfaces index)
+   graph (get surface "graph")
+   interface-key (str (get graph "moduleSpecifier") "#" index)
+   nodes (reduce (fn [out node] (assoc out (get node "id") node)) {} (get graph "nodes"))
+   interface {"key" interface-key "module" (get graph "moduleSpecifier") "nodes" nodes}]
+  (swap! STATE assoc-in ["foreign-interfaces" interface-key] interface)
+  (doseq [node (get graph "nodes")]
+  (register-foreign-type! interface-key node))
+  (doseq [export (get graph "exports")]
+  (swap! STATE update "foreign-exports" conj {"interface" interface-key "node" (get export "node") "name" (get export "name") "space" (get export "space") "prefix" (get surface "prefix") "refer" (get surface "refer") "module" (get graph "moduleSpecifier")}))))
+  nil)
+
+(defn foreign-export-contract [entry]
+  (let [interface-key (get entry "interface")
+   node-id (get entry "node")
+   node (foreign-node-at interface-key node-id)
+   kind (get node "kind")]
+  (cond
+  (and (= kind "object") (> (count (get node "constructSignatures" [])) 0)) (make-foreign-callable-type interface-key node-id "construct" {})
+  (= kind "function") (make-foreign-callable-type interface-key node-id "call" {})
+  :else (foreign-node-type interface-key node-id {}))))
+
+(defn foreign-require-contracts []
+  (reduce (fn [env entry] (if (= (get entry "space") "type") env (let [name (get entry "name")
+   prefix (get entry "prefix")
+   contract (foreign-export-contract entry)
+   qualified (reference-map-assoc env (make-qualified-ref prefix name (get entry "module")) contract)
+   referred (get entry "refer")]
+  (if (and (vector? referred) (boolean (some (fn [^String candidate] (= candidate name)) referred))) (assoc qualified name contract) qualified)))) {} (get (deref STATE) "foreign-exports" [])))
+
+(defn foreign-map-pair-name [pair]
+  (let [key (get pair "key")]
+  (if (and (= (get key "node") "literal") (= (get key "kind") "keyword") (string? (get key "value"))) (get key "value") nil)))
+
+(declare foreign-argument-compatible?!)
+
+(defn ^Boolean foreign-map-literal-compatible?! [expected-view expression env bindings]
+  (let [node (foreign-node-at (get expected-view "interface") (get expected-view "node"))
+   properties (get node "properties" [])
+   pairs (get expression "pairs")
+   actual-names (mapv foreign-map-pair-name pairs)]
+  (and (every? string? actual-names) (every? (fn [property] (or (= true (get property "optional")) (boolean (some (fn [^String name] (= name (get property "name"))) actual-names)))) properties) (every? (fn [pair] (let [name (foreign-map-pair-name pair)
+   property (first (filterv (fn [candidate] (= (get candidate "name") name)) properties))]
+  (and (some? property) (foreign-argument-compatible?! (get expected-view "interface") (get property "type") (get pair "val") (infer-expr! (get pair "val") env) env bindings)))) pairs))))
+
+(defn ^Boolean foreign-argument-compatible?! [^String interface-key ^String expected-id expression actual env bindings]
+  (let [already (get (deref bindings) expected-id)]
+  (if (some? already) (type-compatible? actual already) (let [expected (foreign-node-at interface-key expected-id)
+   kind (get expected "kind")]
+  (cond
+  (or (= kind "primitive") (= kind "literal") (= kind "template-literal") (= kind "array") (= kind "tuple") (= kind "brand")) (type-compatible? actual (foreign-node-type interface-key expected-id (deref bindings)))
+  (= kind "type-parameter") (if (any-type? actual) false (do
+  (swap! bindings assoc expected-id actual)
+  true))
+  (= kind "union") (boolean (some (fn [^String member] (foreign-argument-compatible?! interface-key member expression actual env bindings)) (get expected "members")))
+  (= kind "intersection") (every? (fn [^String member] (foreign-argument-compatible?! interface-key member expression actual env bindings)) (get expected "members"))
+  (= kind "reference") (let [view (foreign-node-type interface-key expected-id (deref bindings))]
+  (if (and (= (get expression "node") "map") (foreign-object-type? view)) (foreign-map-literal-compatible?! view expression env bindings) (type-compatible? actual view)))
+  (= kind "object") (let [view (make-foreign-object-type interface-key expected-id (deref bindings))]
+  (if (= (get expression "node") "map") (foreign-map-literal-compatible?! view expression env bindings) (type-compatible? actual view)))
+  (= kind "function") (or (fn-type? actual) (foreign-callable-type? actual))
+  :else false)))))
+
+(defn foreign-bind-expected-result! [^String interface-key ^String node-id expected bindings]
+  (let [node (foreign-node-at interface-key node-id)
+   kind (get node "kind")]
+  (cond
+  (= kind "type-parameter") (if (nil? (get (deref bindings) node-id)) (do
+  (swap! bindings assoc node-id expected)))
+  (= kind "reference") (let [expected-name (foreign-type-name expected)
+   expected-args (foreign-type-arguments expected)
+   arguments (get node "typeArguments")]
+  (if (and (= expected-name (get node "name")) (= (count expected-args) (count arguments))) (do
+  (doseq [index (range (count arguments))]
+  (foreign-bind-expected-result! interface-key (nth arguments index) (nth expected-args index) bindings)))))
+  (= kind "object") (let [expected-name (foreign-type-name expected)
+   expected-args (foreign-type-arguments expected)
+   parameters (get node "typeParameters" [])]
+  (if (and (= expected-name (get node "name")) (= (count expected-args) (count parameters))) (do
+  (doseq [index (range (count parameters))]
+  (swap! bindings assoc (get (nth parameters index) "node") (nth expected-args index))))))
+  :else nil))
+  nil)
+
+(defn foreign-signature-type-parameters [signature]
+  (into (vec (get signature "capturedTypeParameters" [])) (get signature "typeParameters" [])))
+
+(defn foreign-fill-default-bindings! [^String interface-key signature bindings]
+  (doseq [parameter (foreign-signature-type-parameters signature)]
+  (let [node-id (get parameter "node")
+   default-id (get parameter "default")]
+  (if (and (nil? (get (deref bindings) node-id)) (string? default-id)) (do
+  (swap! bindings assoc node-id (foreign-node-type interface-key default-id (deref bindings)))))))
+  nil)
+
+(defn ^Boolean foreign-signature-accepts-arity? [signature arity]
+  (let [parameters (get signature "parameters")
+   rest? (and (> (count parameters) 0) (= true (get (last parameters) "rest")))
+   required (count (filterv (fn [parameter] (and (not (= true (get parameter "optional"))) (not (= true (get parameter "rest"))))) parameters))]
+  (and (>= arity required) (or rest? (<= arity (count parameters))))))
+
+(defn ^String foreign-rest-element-id [^String interface-key parameter]
+  (let [node-id (get parameter "type")
+   node (foreign-node-at interface-key node-id)]
+  (if (= (get node "kind") "array") (get node "element") node-id)))
+
+(defn foreign-signature-attempt! [callable signature args env expected-result]
+  (if (not (foreign-signature-accepts-arity? signature (count args))) nil (let [interface-key (get callable "interface")
+   bindings (atom (get callable "bindings" {}))
+   parameters (get signature "parameters")]
+  (if (some? expected-result) (do
+  (foreign-bind-expected-result! interface-key (get signature "return") expected-result bindings)))
+  (let [compatible (every? (fn [index] (let [rest? (and (> (count parameters) 0) (= true (get (last parameters) "rest")))
+   parameter (if (and rest? (>= index (- (count parameters) 1))) (last parameters) (nth parameters index))
+   expected-id (if (= true (get parameter "rest")) (foreign-rest-element-id interface-key parameter) (get parameter "type"))
+   expression (nth args index)
+   actual (infer-expr! expression env)]
+  (foreign-argument-compatible?! interface-key expected-id expression actual env bindings))) (range (count args)))]
+  (if compatible (do
+  (foreign-fill-default-bindings! interface-key signature bindings)
+  {"signature" signature "bindings" (deref bindings)}) nil)))))
+
+(defn foreign-callable-signatures [callable]
+  (let [node (foreign-node-at (get callable "interface") (get callable "node"))
+   mode (get callable "mode")]
+  (cond
+  (= mode "construct") (get node "constructSignatures" [])
+  (= (get node "kind") "function") (get node "overloads" [])
+  :else (get node "callSignatures" []))))
+
+(defn infer-foreign-call! [callable args env expected-result ^String display]
+  (let [attempts (mapv (fn [signature] (foreign-signature-attempt! callable signature args env expected-result)) (foreign-callable-signatures callable))
+   selected (first (filterv some? attempts))]
+  (if (some? selected) (foreign-node-type (get callable "interface") (get (get selected "signature") "return") (get selected "bindings")) (do
+  (doseq [arg args]
+  (infer-expr! arg env))
+  (emit-diag! (str "beagle: no foreign overload of " display " accepts " (count args) " argument(s)"))
+  (make-prim "ForeignCallError")))))
 
 (defn param-binding-target [p]
   (if (= (get p "type") "param") (get p "name") p))
@@ -1361,24 +1624,32 @@
   (and (prim? receiver-type) (= (get receiver-type "name") "JsDomRect")) "DOMRect"
   :else nil))
 
+(defn foreign-member-resolution [receiver-type ^String selector]
+  (let [view (foreign-view-for-type receiver-type)]
+  (if (nil? view) nil (let [property (foreign-property-by-name view selector)]
+  {"closed" true "type" (if (nil? property) nil (foreign-node-type (get view "interface") (get property "type") (get view "bindings"))) "readonly" (if (nil? property) false (= true (get property "readonly"))) "owner" (type->string receiver-type)}))))
+
 (defn lookup-js-static-member! [receiver receiver-type ^String selector]
-  (let [builtin (js-builtin-receiver-name receiver receiver-type)]
+  (let [foreign (foreign-member-resolution receiver-type selector)
+   builtin (js-builtin-receiver-name receiver receiver-type)]
   (cond
-  (js-record-type? receiver-type) {"closed" true "type" (record-field-type-for! receiver-type (str ":" selector)) "owner" (type->string receiver-type)}
+  (some? foreign) foreign
+  (js-record-type? receiver-type) {"closed" true "type" (record-field-type-for! receiver-type (str ":" selector)) "readonly" false "owner" (type->string receiver-type)}
   (js-vec-type? receiver-type) (let [element (nth (get receiver-type "args") 0)
    contract (cond
   (= selector "length") INT-TYPE
   (= selector "indexOf") (make-fn [element] nil INT-TYPE)
   :else nil)]
-  {"closed" false "type" contract "owner" (type->string receiver-type)})
+  {"closed" false "type" contract "readonly" false "owner" (type->string receiver-type)})
   (not (nil? builtin)) (let [contract (get-in JS-BUILTIN-MEMBER-CONTRACTS [builtin selector])
    resolved-contract (if (and (= builtin "Map") (not (nil? contract))) (let [bindings (atom {"K" (nth (get receiver-type "args") 0) "V" (nth (get receiver-type "args") 1)})]
   (apply-type-bindings contract bindings)) contract)]
-  {"closed" false "type" resolved-contract "owner" builtin})
-  :else {"closed" false "type" nil "owner" nil})))
+  {"closed" false "type" resolved-contract "readonly" false "owner" builtin})
+  :else {"closed" false "type" nil "readonly" false "owner" nil})))
 
 (defn infer-js-member-call! [^String selector ^String owner member-type args env]
   (cond
+  (foreign-callable-type? member-type) (infer-foreign-call! member-type args env nil (str "." selector))
   (poly-type? member-type) (let [resolved (resolve-poly-call! member-type args env)]
   (if (fn-type? resolved) (do
   (check-args! (str "member call ." selector) resolved args env)
@@ -1404,13 +1675,14 @@
   (doseq [value trailing]
   (infer-expr! value env))
   ANY)
-  (and (not (= operation "get")) (not (= operation "call"))) (do
+  (and (not (= operation "get")) (not (= operation "call")) (not (= operation "set"))) (do
   (doseq [value trailing]
   (infer-expr! value env))
   ANY)
   :else (let [resolved (lookup-js-static-member! receiver receiver-type selector)
    closed (get resolved "closed")
-   member-type (get resolved "type")]
+   member-type (get resolved "type")
+   readonly (get resolved "readonly")]
   (cond
   (and (nil? member-type) (not closed)) (do
   (doseq [value trailing]
@@ -1419,17 +1691,28 @@
   (nil? member-type) (do
   (doseq [value trailing]
   (infer-expr! value env))
-  (emit-diag! (str "beagle: " (if (= operation "get") "property access" "member call") ": ." selector " is not a member of " (get resolved "owner")))
+  (emit-diag! (str "beagle: " (cond
+  (= operation "get") "property access"
+  (= operation "set") "property assignment"
+  :else "member call") ": ." selector " is not a member of " (get resolved "owner")))
   ANY)
   (= operation "get") member-type
+  (= operation "set") (let [value (nth trailing 0)
+   actual (infer-expr-expected! value env member-type)]
+  (if readonly (emit-diag! (str "beagle: property assignment: ." selector " on " (get resolved "owner") " is not writable")) (if (not (type-compatible? actual member-type)) (do
+  (emit-diag! (str "beagle: property assignment: ." selector " expected " (type->string member-type) ", got " (type->string actual))))))
+  actual)
   :else (infer-js-member-call! selector (get resolved "owner") member-type trailing env))))))
 
 (defn infer-js-new-expected! [callee args env expected-result]
   (let [raw-contract (infer-expr! callee env)
    contract (if (poly-type? raw-contract) (resolve-poly-call-expected! raw-contract args env expected-result true) raw-contract)]
-  (if (fn-type? contract) (do
+  (cond
+  (foreign-callable-type? raw-contract) (infer-foreign-call! raw-contract args env expected-result "constructor")
+  (fn-type? contract) (do
   (check-args! "new" contract args env)
-  (get contract "ret")) (do
+  (get contract "ret"))
+  :else (do
   (doseq [arg args]
   (infer-expr! arg env))
   ANY))))
@@ -1858,7 +2141,7 @@
    externs (get prog "externs")
    forms (get prog "forms")
    base-stdlib (target-stdlib (get prog "target"))
-   target-stdlib (merge base-stdlib (hosted-require-contracts (get prog "requires" [])))
+   target-stdlib (merge base-stdlib (hosted-require-contracts (get prog "requires" [])) (foreign-require-contracts))
    env-with-externs (if (not (nil? externs)) (reduce (fn [env ext] (reference-map-assoc env (get ext "name") (get ext "type"))) target-stdlib externs) target-stdlib)
    env-with-externs (project-declared-extern-aliases env-with-externs externs (get prog "requires" []))
    dyn-from-defs (reduce (fn [acc f] (if (and (= (get f "node") "def") (= (get f "dynamic") true)) (assoc acc (get f "name") true) acc)) {} forms)
@@ -2701,7 +2984,7 @@
   (map? value) (let [with-check-id (get value WITH-CHECK-ID-KEY)
    kw-check-id (get value KW-ACCESS-CHECK-ID-KEY)
    binding-check-id (get value BINDING-CHECK-ID-KEY)
-   decorated (reduce (fn [out key] (if (or (= key WITH-CHECK-ID-KEY) (= key KW-ACCESS-CHECK-ID-KEY) (= key BINDING-CHECK-ID-KEY) (= key IMPORTED-RECORD-CONTRACTS-KEY) (= key IMPORTED-CALLABLE-SYNCHRONIZATION-KEY)) out (assoc out key (decorate-tagged-value (get value key) record-updates record-field-accesses binding-constraint-proofs)))) {} (ordered-keys value))]
+   decorated (reduce (fn [out key] (if (or (= key WITH-CHECK-ID-KEY) (= key KW-ACCESS-CHECK-ID-KEY) (= key BINDING-CHECK-ID-KEY) (= key IMPORTED-RECORD-CONTRACTS-KEY) (= key IMPORTED-CALLABLE-SYNCHRONIZATION-KEY) (= key FOREIGN-INTERFACES-KEY)) out (assoc out key (decorate-tagged-value (get value key) record-updates record-field-accesses binding-constraint-proofs)))) {} (ordered-keys value))]
   (let [definition-types (get (deref STATE) "effective-definition-types")
    node (get value "node")
    name (get value "name")
@@ -2768,8 +3051,9 @@
 (defn type-check! [prog]
   (let [checked-input (tag-semantic-node-ids prog)
    unstable-bindings (unstable-binding-keys checked-input)]
-  (reset! STATE {"record-fields" {} "record-field-order" {} "record-validators" {} "record-updates" {} "record-field-accesses" {} "binding-constraint-proofs" {} "union-members" {} "enum-types" {} "parametric-unions" {} "parametric-member-union" {} "unstable-bindings" unstable-bindings "definition-inference-counter" 0 "definition-inference-bindings" {} "target" (get checked-input "target") "input-program" prog "checked-input" checked-input "diagnostics" []})
+  (reset! STATE {"record-fields" {} "record-field-order" {} "record-validators" {} "record-updates" {} "record-field-accesses" {} "binding-constraint-proofs" {} "union-members" {} "enum-types" {} "parametric-unions" {} "parametric-member-union" {} "foreign-interfaces" {} "foreign-types" {} "foreign-exports" [] "unstable-bindings" unstable-bindings "definition-inference-counter" 0 "definition-inference-bindings" {} "target" (get checked-input "target") "input-program" prog "checked-input" checked-input "diagnostics" []})
   (if (some? (get checked-input "authored-refinement")) (emit-diag! "beagle [E031] [refinement-not-implemented]: refinement semantics are not yet implemented; the syntax is reserved, but static proof and trust-boundary guards land in a later seam") (do
+  (install-foreign-interfaces! (get checked-input FOREIGN-INTERFACES-KEY []))
   (install-imported-record-contracts! (get checked-input IMPORTED-RECORD-CONTRACTS-KEY []))
   (install-imported-union-contracts! (get checked-input "externs"))
   (let [initial-env (build-initial-env! checked-input)

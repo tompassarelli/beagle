@@ -163,7 +163,7 @@
 (defn num-value [^String src start end ^Boolean is-float]
   (let [text (subs src start end)]
   (if is-float (let [n (parse-double text)]
-  (if (nil? n) 0.0 n)) (let [n (parse-long text)]
+  (ast/make-reader-float-datum (if (nil? n) 0.0 n) text)) (let [n (parse-long text)]
   (if (nil? n) 0 n)))))
 
 (defn read-number [^String src pos]
@@ -532,9 +532,9 @@
   (reset! passes [])
   (reset! failures [])
   (expect! "number: integer" (= (rd1! "42") 42))
-  (expect! "number: float" (= (rd1! "3.14") 3.14))
+  (expect! "number: float" (and (ast/reader-float-datum? (rd1! "3.14")) (= (ast/reader-number-value (rd1! "3.14")) 3.14)))
   (expect! "number: negative" (= (rd1! "-7") -7))
-  (expect! "number: negative float" (= (rd1! "-3.14") -3.14))
+  (expect! "number: negative float" (= (ast/reader-number-value (rd1! "-3.14")) -3.14))
   (expect! "boolean: true" (= (rd1! "true") true))
   (expect! "boolean: false" (= (rd1! "false") false))
   (expect! "symbol" (= (rd1! "foo") "foo"))
@@ -556,14 +556,14 @@
   (expect! "string with \\u0001 escape" (= (rd1! "\"\\u0001\"") [STRING-TAG "\u0001"]))
   (expect! "\\uXXXX in context" (= (rd1! "\"a\\u0041b\"") [STRING-TAG "aAb"]))
   (expect! "\\uXXXX yields real control char (len 1)" (= (count (nth (rd1! "\"\\u0001\"") 1)) 1))
-  (expect! "1.0 stays float (not int)" (not (= (rd1! "1.0") 1)))
-  (expect! "1.0 equals 1.0 float" (= (rd1! "1.0") 1.0))
+  (expect! "1.0 stays float (not int)" (ast/reader-float-datum? (rd1! "1.0")))
+  (expect! "1.0 retains numeric value" (= (ast/reader-number-value (rd1! "1.0")) 1.0))
   (expect! "1 stays int" (= (rd1! "1") 1))
-  (expect! "exponent 1e5" (= (rd1! "1e5") 100000.0))
-  (expect! "exponent 1E5 upper" (= (rd1! "1E5") 100000.0))
-  (expect! "float exponent 1.5e-3" (= (rd1! "1.5e-3") 0.0015))
-  (expect! "negative exponent -2e3" (= (rd1! "-2e3") -2000.0))
-  (expect! "exponent classifies as float" (not (= (rd1! "1e2") 100)))
+  (expect! "exponent 1e5" (= (ast/reader-number-value (rd1! "1e5")) 100000.0))
+  (expect! "exponent 1E5 upper" (= (ast/reader-number-value (rd1! "1E5")) 100000.0))
+  (expect! "float exponent 1.5e-3" (= (ast/reader-number-value (rd1! "1.5e-3")) 0.0015))
+  (expect! "negative exponent -2e3" (= (ast/reader-number-value (rd1! "-2e3")) -2000.0))
+  (expect! "exponent classifies as float" (ast/reader-float-datum? (rd1! "1e2")))
   (expect! "simple list" (= (rd1! "(+ 1 2)") ["+" 1 2]))
   (expect! "nested list" (= (rd1! "(+ (* 2 3) 4)") ["+" ["*" 2 3] 4]))
   (expect! "bracket vector" (= (rd1! "[1 2 3]") [BRACKET-TAG 1 2 3]))

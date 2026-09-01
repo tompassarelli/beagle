@@ -360,7 +360,7 @@
     :else nil)
   nil)
 
-(defn- foreign-member-demand [datums Any] (Vec String)
+(defn- foreign-member-demand! [datums Any] (Vec String)
   (let [names Any (atom {})]
     (foreign-member-demand*! datums names)
     (vec (sort (keys (deref names))))))
@@ -370,7 +370,7 @@
    source-unit Any] Any
   (let [module-specifier (get require "ns")
         requested-exports (require-refer-syms require)
-        requested-members (foreign-member-demand (get source-unit "datums"))
+        requested-members (foreign-member-demand! (get source-unit "datums"))
         project-root (deref FOREIGN-PROJECT-ROOT)
         source-path (get source-unit "path")]
     (cond
@@ -1303,7 +1303,7 @@
             project-root project-root-seen? roots sources
             (conj positionals arg)))))))
 
-(defn -main [& (args (List String))] Nil
+(defn -main [& (args (Vec String))] Nil
   (let [cmd (if (> (count args) 0) (nth args 0) "")]
     (cond
       (or (= cmd "ast") (= cmd "check") (= cmd "emit"))

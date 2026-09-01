@@ -184,7 +184,7 @@
    values (Vec ExportV1)] (Vec ExportV1)
   (.sort bridge values))
 
-(defn empty-build-state
+(defn empty-build-state!
   [bridge OpaqueCompilerValueV1
    requested-member-names (Vec String)] BuildStateV1
   (->BuildStateV1
@@ -747,7 +747,7 @@
      requested-ambient-names (Vec String)
      requested-exports (Vec String)
      requested-member-names (Vec String)] WireValueV1
-    (let [state BuildStateV1 (empty-build-state bridge requested-member-names)
+    (let [state BuildStateV1 (empty-build-state! bridge requested-member-names)
           exports (Vec ExportV1) (sorted-exports
             bridge
             (if (empty? requested-ambient-names)
