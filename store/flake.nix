@@ -180,6 +180,9 @@
             export XDG_CACHE_HOME="$TMPDIR/beagle-cache"
             beagle build bin/beagle-store-cli.bjs \
               $out/libexec/store/bin/beagle-store-cli.js
+            ${pkgs.bun}/bin/bun build --no-bundle --target=bun \
+              --outfile="$TMPDIR/beagle-store-cli-syntax.js" \
+              $out/libexec/store/bin/beagle-store-cli.js
             cp ${beaglePkg}/beagle-lib/lib/beagle/core.js \
               ${beaglePkg}/beagle-lib/lib/beagle/host.js \
               $out/libexec/store/node_modules/beagle/
