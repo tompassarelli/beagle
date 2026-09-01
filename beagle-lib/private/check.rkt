@@ -6085,9 +6085,9 @@
 ;; project per-node types. store-type! applies the interned-leaf exclusion and
 ;; is a no-op when no table is bound (the normal check path), so this adds
 ;; nothing to ordinary type-checking. The real cond body is infer-expr*.
-(define current-foreign-map-pair-types (make-parameter #f))
+(define current-foreign-expression-types (make-parameter #f))
 
-(define (foreign-expression-evidence expression pair-types)
+(define (foreign-expression-evidence expression expression-types)
   (cond
     [(map-form? expression)
      (map-form
@@ -6096,21 +6096,29 @@
         (cons
          (car pair)
          (foreign-expression-evidence-v1
-          (foreign-expression-evidence value pair-types)
-          (hash-ref pair-types pair #f)))))]
+          (foreign-expression-evidence value expression-types)
+          (hash-ref expression-types value #f)))))]
+    [(vec-form? expression)
+     (vec-form
+      (for/list ([item (in-list (vec-form-items expression))])
+        (foreign-expression-evidence-v1
+         (foreign-expression-evidence item expression-types)
+         (hash-ref expression-types item #f))))]
     [else expression]))
 
 (define (infer-foreign-arguments arguments env)
   (for/lists (evidence types) ([argument (in-list arguments)])
-    (define pair-types (make-hasheq))
+    (define expression-types (make-hasheq))
     (define type
-      (parameterize ([current-foreign-map-pair-types pair-types])
+      (parameterize ([current-foreign-expression-types expression-types])
         (infer-expr argument env)))
-    (values (foreign-expression-evidence argument pair-types) type)))
+    (values (foreign-expression-evidence argument expression-types) type)))
 
 (define (infer-expr e env)
   (with-foreign-diagnostic e
     (define t (infer-expr* e env))
+    (when (current-foreign-expression-types)
+      (hash-set! (current-foreign-expression-types) e t))
     (store-type! e t)
     t))
 
@@ -6256,10 +6264,7 @@
          (define key-types (map (λ (p) (infer-expr (car p) env)) pairs))
          (define val-types
            (for/list ([pair (in-list pairs)])
-             (define value-type (infer-expr (cdr pair) env))
-             (when (current-foreign-map-pair-types)
-               (hash-set! (current-foreign-map-pair-types) pair value-type))
-             value-type))
+             (infer-expr (cdr pair) env)))
          (define first-k (car key-types))
          (define first-v (car val-types))
          (define kt (if (and (not (any-type? first-k))
@@ -7219,21 +7224,23 @@
     [else #f]))
 
 (define (jst-native-member-contract receiver-type selector)
-  (define head (jst-receiver-type-head receiver-type))
-  (define entry (and head (hash-ref JS-MEMBER-CONTRACTS head #f)))
-  (and entry
-       (let* ([member-name (string->symbol selector)]
-              [raw-contract
-               (hash-ref (hash-ref entry 'members) member-name #f)])
-         (and raw-contract
-              (let ([bindings (make-hasheq)]
-                    [args (if (type-app? receiver-type)
-                              (type-app-args receiver-type)
-                              '())])
-                (for ([var (in-list (hash-ref entry 'vars))]
-                      [arg (in-list args)])
-                  (hash-set! bindings var arg))
-                (apply-type-bindings raw-contract bindings))))))
+  (or
+   (foreign-native-member-type-v1 receiver-type selector)
+   (let* ([head (jst-receiver-type-head receiver-type)]
+          [entry (and head (hash-ref JS-MEMBER-CONTRACTS head #f))])
+     (and entry
+          (let* ([member-name (string->symbol selector)]
+                 [raw-contract
+                  (hash-ref (hash-ref entry 'members) member-name #f)])
+            (and raw-contract
+                 (let ([bindings (make-hasheq)]
+                       [args (if (type-app? receiver-type)
+                                 (type-app-args receiver-type)
+                                 '())])
+                   (for ([var (in-list (hash-ref entry 'vars))]
+                         [arg (in-list args)])
+                     (hash-set! bindings var arg))
+                   (apply-type-bindings raw-contract bindings))))))))
 
 (define (jst-record-member-contract receiver-type selector)
   (record-field-type-for

@@ -59,7 +59,10 @@
    'lockfile (hash 'path "bun.lock" 'sha256 ZERO-SHA256)
    'consultedFiles '()))
 
-(define (fixture-foreign-module-source module-specifier exports nodes)
+(define (fixture-foreign-module-source
+         module-specifier exports nodes
+         #:ambient-values [ambient-values '()]
+         #:ambient-provider? [ambient-provider? #f])
   (define canonical-exports
     (sort exports string<? #:key (lambda (export) (hash-ref export 'name))))
   (define canonical-nodes
@@ -71,7 +74,7 @@
      'schemaVersion FOREIGN-INTERFACE-SCHEMA-VERSION
      'frontend "typescript"
      'moduleSpecifier module-specifier
-     'ambientValues '()
+     'ambientValues ambient-values
      'exports canonical-exports
      'nodes canonical-nodes
      'obligations '()
@@ -81,7 +84,8 @@
            'exportCount (length canonical-exports)
            'obligationCount 0
            'anyCount 0
-           'generatedSourceCount 0)))))
+           'generatedSourceCount 0)))
+   #:ambient-provider? ambient-provider?))
 
 (define (wire-export name node-id runtime-name space)
   (hash 'name name
@@ -133,8 +137,31 @@
 (define (empty-foreign-module-source module-specifier)
   (fixture-foreign-module-source module-specifier '() '()))
 
+(define (ambient-function-module-source module-specifier name)
+  (fixture-foreign-module-source
+   module-specifier
+   '()
+   (list
+    (hash 'id "n:function"
+          'kind "function"
+          'typeParameters '()
+          'overloads
+          (list
+           (hash 'typeParameters '()
+                 'parameters
+                 (list
+                  (hash 'name "input"
+                        'type "n:string"
+                        'optional #f
+                        'rest #f))
+                 'return "n:string")))
+    STRING-NODE)
+   #:ambient-values
+   (list (hash 'name name 'node "n:function"))
+   #:ambient-provider? #t))
+
 (define (exact-foreign-module-resolver module-specifier source)
-  (lambda (identity _importer-source)
+  (lambda (identity _importer-source _ambient-names)
     (and (equal? identity (module-identity 'native-esm module-specifier))
          source)))
 
@@ -209,6 +236,34 @@
 
 (run-tests
  (test-suite "JS emitter"
+
+   (test-case "typed ambient require emits only the bare global, including rename"
+     (define provider "typescript:fixture.dom")
+     (define source (ambient-function-module-source provider "fetch"))
+     (define requests '())
+     (define result
+       (js-emit
+        (list
+         '(ns test.app)
+         '(define-target js)
+         (list
+          'require-global
+          (br provider
+              ':refer (br 'fetch)
+              ':rename (mt 'fetch 'host-fetch)))
+         '(defn load-text [(input String)] String (host-fetch input)))
+        #:foreign-module-resolver
+        (lambda (identity _importer ambient-names)
+          (set! requests (cons (cons identity ambient-names) requests))
+          source)))
+     (check-true (pair? requests))
+     (for ([request (in-list requests)])
+       (check-equal?
+        request
+        (cons (module-identity 'typescript-ambient provider) '(fetch))))
+     (check-true (string-contains? result "fetch(input)" ) result)
+     (check-false (string-contains? result "host_fetch") result)
+     (check-false (string-contains? result " from ") result))
 
    (check-js-contains "def -> const"
      "const x = 42;"
@@ -875,7 +930,7 @@
               (list 'require (br module-specifier ':as 'hostile))
               '(defn f [] Int 0))
         #:foreign-module-resolver
-        (lambda (identity _importer-source)
+        (lambda (identity _importer-source _ambient-names)
           (and (equal? identity (module-identity 'native-esm module-specifier))
                foreign-source))))
      (check-true

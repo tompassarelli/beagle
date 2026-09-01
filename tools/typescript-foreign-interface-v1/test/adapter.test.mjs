@@ -58,7 +58,7 @@ async function prepare({ projectRoot = adapterRoot, importer = containingFile } 
 
 async function produce(options = {}) {
   const { bridge, build, context } = await prepare(options);
-  return build(bridge, context, moduleSpecifier, conditions);
+  return build(bridge, context, moduleSpecifier, conditions, []);
 }
 
 function fixtureProject({ typedEntry = false, projectLock = true } = {}) {
@@ -181,10 +181,16 @@ describe("ForeignInterfaceV1 graph semantics", () => {
     expect(genericBoxSignature.capturedTypeParameters).toEqual(genericBoxInstance.typeParameters);
     expect(genericBoxSignature.capturedTypeParameters).toHaveLength(1);
     expect(genericBoxSignature.capturedTypeParameters[0].name).toBe("T");
+    expect(genericBoxSignature.capturedTypeParameters[0].declarationOwner).toMatch(
+      /^project\/(?:fixture\/)?node_modules\/@fixture\/foreign-interface-v1\/types\/public\.d\.ts#ClassDeclaration@[0-9]+:[0-9]+@sha256:[0-9a-f]{64}$/,
+    );
 
     const transformer = exportedNode(first, "Transformer");
     expect(transformer.kind).toBe("function");
     expect(transformer.typeParameters).toHaveLength(1);
+    expect(transformer.typeParameters[0].declarationOwner).toMatch(
+      /^project\/(?:fixture\/)?node_modules\/@fixture\/foreign-interface-v1\/types\/public\.d\.ts#TypeAliasDeclaration@[0-9]+:[0-9]+@sha256:[0-9a-f]{64}$/,
+    );
     const genericSignature = transformer.overloads[0];
     expect(genericSignature.parameters[0].type).toBe(transformer.typeParameters[0].node);
     expect(genericSignature.return).toBe(transformer.typeParameters[0].node);
@@ -306,6 +312,7 @@ describe("provenance authority", () => {
       prepared.context,
       moduleSpecifier,
       conditions,
+      [],
     )).toThrow("compiler input changed after snapshot");
   });
 
@@ -318,6 +325,7 @@ describe("provenance authority", () => {
       prepared.context,
       moduleSpecifier,
       conditions,
+      [],
     )).toThrow("project lockfile bun.lock changed after snapshot");
   });
 
@@ -332,6 +340,7 @@ describe("provenance authority", () => {
       adapterRoot,
       containingFile,
       moduleSpecifier,
+      "[]",
       ...conditions,
     ], {
       cwd: repositoryRoot,

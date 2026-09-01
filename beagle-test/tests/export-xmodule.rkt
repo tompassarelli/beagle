@@ -80,7 +80,7 @@
   (foreign-function-source "@scope/package/subpath"
                            (list (cons "make" "make"))))
 
-(define (fixture-foreign-module-resolver identity _importer)
+(define (fixture-foreign-module-resolver identity _importer _ambient-names)
   (and (equal? identity
                (module-identity 'native-esm "@scope/package/subpath"))
        PACKAGE-SOURCE))
@@ -193,7 +193,7 @@
        (set! namespace-requests (cons namespace namespace-requests))
        (and (eq? namespace 'pkg.name) namespace-provider-source))
      #:foreign-module-resolver
-     (lambda (identity _importer)
+     (lambda (identity _importer _ambient-names)
        (set! foreign-requests (cons identity foreign-requests))
        (and (equal? identity native-identity) native-provider-source))))
   (type-check! prog)

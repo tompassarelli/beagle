@@ -83,6 +83,23 @@
           throw "beagle: TypeScript foreign adapter must pin typescript 5.9.3 exactly";
         typescriptForeignIntegrity =
           "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==";
+        typescriptForeignBunTypesWrapperVersion =
+          let
+            declared = typescriptForeignPackage.dependencies."@types/bun" or null;
+          in
+          if declared == "1.3.13" then declared else
+          throw "beagle: TypeScript foreign adapter must pin @types/bun 1.3.13 exactly";
+        typescriptForeignBunTypesWrapperIntegrity =
+          "sha512-9fqXWk5YIHGGnUau9TEi+qdlTYDAnOj+xLCmSTwXfAIqXr2x4tytJb43E9uCvt09zJURKXwAtkoH4nLQfzeTXw==";
+        typescriptForeignBunTypesVersion = "1.3.13";
+        typescriptForeignBunTypesIntegrity =
+          "sha512-QXKeHLlOLqQX9LgYaHJfzdBaV21T63HhFJnvuRCcjZiaUDpbs5ED1MgxbMra71CsryN/1dAoXuJJJwIv/2drVA==";
+        typescriptForeignNodeTypesVersion = "26.4.0";
+        typescriptForeignNodeTypesIntegrity =
+          "sha512-faiGnoIrLH/V8cibOMEAZ8pMw6oXqSukl29ra4mN8GdaB2ZewzeaLj+INpV5N+Z1eKWzY+IzaIZH2EIR6YZRNQ==";
+        typescriptForeignUndiciTypesVersion = "8.3.0";
+        typescriptForeignUndiciTypesIntegrity =
+          "sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ==";
         typescriptForeignLock =
           builtins.readFile (typescriptForeignAdapterRoot + "/bun.lock");
         # Nix fetches the exact archive pinned by bun.lock. The installed
@@ -104,6 +121,67 @@
           pkgs.fetchurl {
             url = "https://registry.npmjs.org/typescript/-/typescript-${typescriptForeignVersion}.tgz";
             hash = typescriptForeignIntegrity;
+          };
+        typescriptForeignBunTypesWrapperTarball =
+          assert pkgs.lib.assertMsg
+            (pkgs.lib.hasInfix
+              "\"@types/bun\": \"${typescriptForeignBunTypesWrapperVersion}\""
+              typescriptForeignLock)
+            "beagle: TypeScript foreign adapter lock omits its exact @types/bun pin";
+          assert pkgs.lib.assertMsg
+            (pkgs.lib.hasInfix
+              "\"@types/bun@${typescriptForeignBunTypesWrapperVersion}\""
+              typescriptForeignLock)
+            "beagle: TypeScript foreign adapter lock omits resolved @types/bun";
+          assert pkgs.lib.assertMsg
+            (pkgs.lib.hasInfix
+              typescriptForeignBunTypesWrapperIntegrity typescriptForeignLock)
+            "beagle: @types/bun lock integrity does not match packaging";
+          pkgs.fetchurl {
+            url = "https://registry.npmjs.org/@types/bun/-/bun-${typescriptForeignBunTypesWrapperVersion}.tgz";
+            hash = typescriptForeignBunTypesWrapperIntegrity;
+          };
+        typescriptForeignBunTypesTarball =
+          assert pkgs.lib.assertMsg
+            (pkgs.lib.hasInfix
+              "\"bun-types@${typescriptForeignBunTypesVersion}\""
+              typescriptForeignLock)
+            "beagle: TypeScript foreign adapter lock omits resolved bun-types";
+          assert pkgs.lib.assertMsg
+            (pkgs.lib.hasInfix
+              typescriptForeignBunTypesIntegrity typescriptForeignLock)
+            "beagle: bun-types lock integrity does not match packaging";
+          pkgs.fetchurl {
+            url = "https://registry.npmjs.org/bun-types/-/bun-types-${typescriptForeignBunTypesVersion}.tgz";
+            hash = typescriptForeignBunTypesIntegrity;
+          };
+        typescriptForeignNodeTypesTarball =
+          assert pkgs.lib.assertMsg
+            (pkgs.lib.hasInfix
+              "\"@types/node@${typescriptForeignNodeTypesVersion}\""
+              typescriptForeignLock)
+            "beagle: TypeScript foreign adapter lock omits resolved @types/node";
+          assert pkgs.lib.assertMsg
+            (pkgs.lib.hasInfix
+              typescriptForeignNodeTypesIntegrity typescriptForeignLock)
+            "beagle: @types/node lock integrity does not match packaging";
+          pkgs.fetchurl {
+            url = "https://registry.npmjs.org/@types/node/-/node-${typescriptForeignNodeTypesVersion}.tgz";
+            hash = typescriptForeignNodeTypesIntegrity;
+          };
+        typescriptForeignUndiciTypesTarball =
+          assert pkgs.lib.assertMsg
+            (pkgs.lib.hasInfix
+              "\"undici-types@${typescriptForeignUndiciTypesVersion}\""
+              typescriptForeignLock)
+            "beagle: TypeScript foreign adapter lock omits resolved undici-types";
+          assert pkgs.lib.assertMsg
+            (pkgs.lib.hasInfix
+              typescriptForeignUndiciTypesIntegrity typescriptForeignLock)
+            "beagle: undici-types lock integrity does not match packaging";
+          pkgs.fetchurl {
+            url = "https://registry.npmjs.org/undici-types/-/undici-types-${typescriptForeignUndiciTypesVersion}.tgz";
+            hash = typescriptForeignUndiciTypesIntegrity;
           };
         unicodeData15 = pkgs.fetchurl {
           url = "https://www.unicode.org/Public/15.0.0/ucd/UnicodeData.txt";
@@ -230,7 +308,12 @@
               exit 2
             fi
             adapter_root="$out/tools/typescript-foreign-interface-v1"
-            mkdir -p "$adapter_root/node_modules/typescript"
+            mkdir -p \
+              "$adapter_root/node_modules/typescript" \
+              "$adapter_root/node_modules/@types/bun" \
+              "$adapter_root/node_modules/@types/node" \
+              "$adapter_root/node_modules/bun-types" \
+              "$adapter_root/node_modules/undici-types"
             cp "$adapter_source_root/package.json" "$adapter_source_root/bun.lock" \
               "$adapter_root/"
             cp -r "$adapter_source_root/src" "$adapter_root/src"
@@ -240,6 +323,14 @@
               "$adapter_root/node_modules/beagle"
             tar -xzf "${typescriptForeignTarball}" --strip-components=1 \
               -C "$adapter_root/node_modules/typescript"
+            tar -xzf "${typescriptForeignBunTypesWrapperTarball}" --strip-components=1 \
+              -C "$adapter_root/node_modules/@types/bun"
+            tar -xzf "${typescriptForeignNodeTypesTarball}" --strip-components=1 \
+              -C "$adapter_root/node_modules/@types/node"
+            tar -xzf "${typescriptForeignBunTypesTarball}" --strip-components=1 \
+              -C "$adapter_root/node_modules/bun-types"
+            tar -xzf "${typescriptForeignUndiciTypesTarball}" --strip-components=1 \
+              -C "$adapter_root/node_modules/undici-types"
             for required in package.json lib/typescript.js LICENSE.txt \
               ThirdPartyNoticeText.txt; do
               if [ ! -f "$adapter_root/node_modules/typescript/$required" ]; then
@@ -254,6 +345,22 @@
               echo "beagle: packaged TypeScript version mismatch: $actual_typescript_version" >&2
               exit 2
             fi
+            for package_spec in \
+              "@types/bun:${typescriptForeignBunTypesWrapperVersion}" \
+              "@types/node:${typescriptForeignNodeTypesVersion}" \
+              "bun-types:${typescriptForeignBunTypesVersion}" \
+              "undici-types:${typescriptForeignUndiciTypesVersion}"; do
+              package_name="''${package_spec%%:*}"
+              expected_version="''${package_spec#*:}"
+              package_json="$adapter_root/node_modules/$package_name/package.json"
+              actual_version="$(${pkgs.python3}/bin/python3 -c \
+                'import json, sys; print(json.load(open(sys.argv[1]))["version"])' \
+                "$package_json")"
+              if [ "$actual_version" != "$expected_version" ]; then
+                echo "beagle: packaged $package_name version mismatch: $actual_version" >&2
+                exit 2
+              fi
+            done
             # bin/test/ is the test-harness DIRECTORY, not an executable — if it
             # lands on PATH it shadows POSIX `test` system-wide (root shell-outs
             # exec a directory -> EACCES; broke nixos-rebuild 2026-07-09).

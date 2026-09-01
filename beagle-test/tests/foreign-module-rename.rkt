@@ -60,6 +60,7 @@
             (list
              (hash 'name "T"
                    'node "n:envelope:t"
+                   'declarationOwner "fixture:Envelope.T"
                    'constraint 'null
                    'default 'null))
             'properties '()
@@ -139,7 +140,7 @@
      body))
    #:source-path "fixtures/foreign-module-rename/consumer.bjs"
    #:foreign-module-resolver
-   (lambda (identity _importer)
+   (lambda (identity _importer _ambient-names)
      (and (equal? identity MODULE-IDENTITY) FOREIGN-SOURCE))))
 
 (define (beagle-consumer-program libspec . bodies)
@@ -300,7 +301,7 @@
         '(def answer String "unreachable")))
       #:source-path "fixtures/foreign-module-rename/cross-require.bjs"
       #:foreign-module-resolver
-      (lambda (identity _importer)
+      (lambda (identity _importer _ambient-names)
         (and (equal? identity MODULE-IDENTITY) FOREIGN-SOURCE))))))
 
 (test-case "renamed parametric foreign type keeps graph identity and arguments"

@@ -12,6 +12,7 @@
 (defrecord TypeParameterV1
   [name String
    nodeId String
+   declarationOwner String
    constraintNode (U String Nil)
    defaultNode (U String Nil)])
 
@@ -99,6 +100,9 @@
     [id String
      elements (Vec TupleElementV1)
      readonly Bool])
+  (AwaitedNode
+    [id String
+     argumentNode String])
   (ObjectNode
     [id String
      name (U String Nil)
@@ -224,6 +228,7 @@
   (->TypeParameterV1
     (.typeName bridge parameter)
     (node-for! bridge state parameter)
+    (.typeParameterDeclarationOwner bridge parameter)
     (optional-node-id! bridge state (.typeParameterConstraint bridge parameter))
     (optional-node-id! bridge state (.typeParameterDefault bridge parameter))))
 
@@ -416,6 +421,11 @@
           (.tupleElements bridge type))
         (.readonlyArray? bridge type))
 
+      (.equal bridge kind "awaited")
+      (->AwaitedNode
+        id
+        (node-for! bridge state (.awaitedArgument bridge type)))
+
       (.equal bridge kind "type-parameter")
       (->TypeParameterNode
         id
@@ -491,9 +501,10 @@
   [bridge OpaqueCompilerValueV1
    state BuildStateV1
    symbol OpaqueCompilerValueV1] AmbientValueV1
-  (->AmbientValueV1
-    (.symbolName bridge symbol)
-    (node-for! bridge state (.exportType bridge symbol))))
+  (let [resolved OpaqueCompilerValueV1 (.resolveAlias bridge symbol)]
+    (->AmbientValueV1
+      (.symbolName bridge symbol)
+      (node-for! bridge state (.exportType bridge resolved)))))
 
 ;; Raw JavaScript object construction is intentionally confined to this
 ;; explicit projection boundary.  The wire keys stay visible and reviewable.
@@ -514,6 +525,7 @@
   (object
     [["name" (typeparameterv1-name value)]
      ["node" (typeparameterv1-nodeId value)]
+     ["declarationOwner" (typeparameterv1-declarationOwner value)]
      ["constraint" (typeparameterv1-constraintNode value)]
      ["default" (typeparameterv1-defaultNode value)]]))
 
@@ -631,6 +643,11 @@
          (mapv tuple-element->wire elements)]
         ["readonly" readonly]])]
 
+    [(AwaitedNode id argument-node)
+     (object [["id" id]
+              ["kind" "awaited"]
+              ["argument" argument-node]])]
+
     [(ObjectNode
        id name identity type-parameters properties indexes call-signatures
        construct-signatures)
@@ -723,14 +740,21 @@
     [bridge OpaqueCompilerValueV1
      context OpaqueCompilerValueV1
      module-specifier String
-     conditions (Vec String)] WireValueV1
+     conditions (Vec String)
+     requested-ambient-names (Vec String)] WireValueV1
     (let [state BuildStateV1 (empty-build-state bridge)
           exports (Vec ExportV1) (sorted-exports
             bridge
-            (mapv
-              (fn [exported-symbol OpaqueCompilerValueV1] ExportV1
-                (export-node! bridge state exported-symbol))
-              (sorted-opaque bridge (.moduleExports bridge context))))
+            (if (empty? requested-ambient-names)
+              (mapv
+                (fn [exported-symbol OpaqueCompilerValueV1] ExportV1
+                  (export-node! bridge state exported-symbol))
+                (sorted-opaque bridge (.moduleExports bridge context)))
+              []))
+          ambient-candidate-names (Vec String)
+          (if (empty? requested-ambient-names)
+            (deref (buildstatev1-ambientCandidateNames state))
+            requested-ambient-names)
           ambient-values (Vec AmbientValueV1) (mapv
             (fn [symbol OpaqueCompilerValueV1] AmbientValueV1
               (ambient-value-node! bridge state symbol))
@@ -739,7 +763,8 @@
               (.ambientValues
                 bridge
                 context
-                (deref (buildstatev1-ambientCandidateNames state)))))
+                ambient-candidate-names
+                (not (empty? requested-ambient-names)))))
           nodes (Vec ForeignNodeV1) (sorted-nodes bridge (deref (buildstatev1-nodes state)))
           obligations (Vec ObligationV1) (sorted-obligations bridge (deref (buildstatev1-obligations state)))
           stats StatsV1 (->StatsV1

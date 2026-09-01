@@ -249,14 +249,17 @@
    "reuse"
    (string-append (substring reuse-key 7) ".rktd")))
 
-(define (foreign-resolution-cache-path project-root importer identity)
+(define (foreign-resolution-cache-path
+         project-root importer identity ambient-value-names)
   (define key
     (canonical-value-v1-id
      (hash
       'kind "TypeScriptForeignResolutionQueryV1"
       'projectRoot (path->string project-root)
       'importer (path->string importer)
+      'identityKind (symbol->string (module-identity-kind identity))
       'moduleSpecifier (module-identity-value identity)
+      'ambientValueNames (map symbol->string ambient-value-names)
       'conditions PRODUCTION-CONDITIONS)))
   (build-path
    (current-typescript-foreign-adapter-cache-directory)
@@ -269,14 +272,16 @@
   ;; bun:test is an adapter-owned builtin.  Ordinary node_modules lookup also
   ;; depends on negative directory probes that ForeignInterfaceV1 does not yet
   ;; retain, so it deliberately remains process-local.
-  (or (string-prefix? specifier "#")
+  (or (and (eq? (module-identity-kind identity) 'typescript-ambient)
+           (string-prefix? specifier "typescript:"))
+      (string-prefix? specifier "#")
       (string=? specifier "bun:test")))
 
 (define (logical-input-path logical project-root typescript-root)
   (define mappings
     (list
-     (cons "adapter/node_modules/typescript/"
-           (build-path typescript-root "node_modules" "typescript"))
+     (cons "adapter/node_modules/"
+           (build-path typescript-root "node_modules"))
      (cons "project/" project-root)
      (cons "adapter/" adapter-root)
      (cons "runtime/" beagle-js-runtime-root)))
@@ -697,15 +702,28 @@
    'toolchain (compiled-typescript-adapter-v1-toolchain-identity artifact)))
 
 (define (resolve-with-adapter force-artifact force-bun typescript-root
-                              identity importer)
+                              identity importer ambient-value-names)
   (let/ec return
   (unless (and (module-identity? identity)
-               (eq? (module-identity-kind identity) 'native-esm)
+               (memq (module-identity-kind identity)
+                     '(native-esm typescript-ambient))
                (string? (module-identity-value identity)))
     (error
      'typescript-foreign-resolver-v1
-     "expected exact native-ESM module identity, got ~v"
+     "expected exact native-ESM or TypeScript ambient module identity, got ~v"
      identity))
+  (define ambient-provider?
+    (eq? (module-identity-kind identity) 'typescript-ambient))
+  (unless (and (list? ambient-value-names)
+               (andmap symbol? ambient-value-names)
+               (equal? ambient-provider? (pair? ambient-value-names)))
+    (error
+     'typescript-foreign-resolver-v1
+     "TypeScript ambient providers require explicit names and native ESM providers forbid them, got ~v with ~v"
+     identity
+     ambient-value-names))
+  (define canonical-ambient-value-names
+    (sort (remove-duplicates ambient-value-names eq?) symbol<?))
   (define importer-path
     (canonical-file
      'typescript-foreign-resolver-v1
@@ -716,7 +734,8 @@
   (define cache-path
     (and
      (foreign-resolution-cacheable? identity)
-     (foreign-resolution-cache-path project-root importer-path identity)))
+     (foreign-resolution-cache-path
+      project-root importer-path identity canonical-ambient-value-names)))
   (define artifact
     (and cache-path (file-exists? cache-path) (force-artifact)))
   (define producer
@@ -726,7 +745,10 @@
          (cached-foreign-interface
           cache-path artifact producer project-root typescript-root)))
   (when cached
-    (return (foreign-interface-v1->module-source cached)))
+    (return
+     (foreign-interface-v1->module-source
+      cached
+      #:ambient-provider? ambient-provider?)))
   ;; Preserve the no-Bun boundary: on a true miss, establish the required
   ;; runtime before compiling or caching the adapter.
   (define bun (force-bun))
@@ -745,7 +767,9 @@
        (path->string beagle-js-runtime-root)
        (path->string project-root)
        (path->string importer-path)
-       module-specifier)
+       module-specifier
+       (jsexpr->string
+        (map symbol->string canonical-ambient-value-names)))
       PRODUCTION-CONDITIONS)))
   (define interface
     (validate-foreign-interface-v1
@@ -769,7 +793,9 @@
      module-specifier))
   (when cache-path
     (publish-foreign-resolution! cache-path graph-bytes))
-  (foreign-interface-v1->module-source interface)))
+  (foreign-interface-v1->module-source
+   interface
+   #:ambient-provider? ambient-provider?)))
 
 (define (make-typescript-foreign-module-resolver-v1)
   (define typescript-root (typescript-runtime-root))
@@ -781,13 +807,13 @@
            "Bun is unavailable; TypeScript foreign resolution requires the frozen Beagle Bun runtime and performs no installation or network fallback"))))
   (define artifact (delay (load-compiled-adapter typescript-root)))
   (define resolutions (make-hash))
-  (lambda (identity importer)
+  (lambda (identity importer ambient-value-names)
     (define importer-path
       (canonical-file
        'typescript-foreign-resolver-v1
        "physical Beagle importer snapshot"
        importer))
-    (define key (cons identity importer-path))
+    (define key (list identity importer-path ambient-value-names))
     (hash-ref!
      resolutions
      key
@@ -799,7 +825,7 @@
         (lambda () (force artifact))
         (lambda () (force bun))
         typescript-root
-        identity importer-path)))))
+        identity importer-path ambient-value-names)))))
 
 ;; One admitted production constructor replaces repeated caller-local policy:
 ;; all public file-backed build/check paths use the exact same resolver, while

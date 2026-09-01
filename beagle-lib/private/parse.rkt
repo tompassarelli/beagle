@@ -1933,6 +1933,10 @@
   (define imp-scalar-fns (make-hash))
   (define imp-scalar-preds (make-hash))
   (define imp-symbol-ns (make-hash))
+  ;; Typed ambient providers contribute checker evidence but no runtime
+  ;; module. Retain the authored spelling -> bare host-global projection so
+  ;; emission can erase the requirement, including ordinary :rename.
+  (define ambient-global-runtime-names (make-hash))
   (define imp-union-members (make-hash))
   (define imp-param-unions (make-hash))
   (define imp-enums (make-hash))
@@ -2300,7 +2304,10 @@
         (unless (and (eq? spelling name) (hash-has-key? externs name))
           (hash-set! externs spelling binding-type)))
       (define local (imported-local bindings name))
-      (when local (hash-set! imp-symbol-ns local prefix)))
+      (when (and local
+                 (not (eq? (module-identity-kind identity)
+                           'typescript-ambient)))
+        (hash-set! imp-symbol-ns local prefix)))
     (import-interface-macros! interface prefix bindings)
     (for ([name (in-hash-keys (module-interface-type-exports interface))])
       (for ([spelling
@@ -2332,7 +2339,7 @@
   (define (foreign-resolution-error identity reason)
     (error
      'beagle
-     "native ESM module ~a could not be resolved to a validated foreign interface by the foreign module resolver (required by ~a): ~a"
+     "foreign provider ~a could not be resolved to a validated foreign interface by the foreign module resolver (required by ~a): ~a"
      (module-identity-value identity)
      (or source-path "<unknown source>")
      reason))
@@ -2343,11 +2350,14 @@
     (define rn (canonical-require-namespace spec))
     (define source-backed? (source-backed-require? spec))
     (when source-backed? (validate-module-path! rn))
-    (when (and (eq? identity-kind 'native-esm)
+    (when (and (memq identity-kind '(native-esm typescript-ambient))
                (not (eq? pre-scan-target 'js)))
       (error
        'beagle
-       "native ESM module ~a is only available to the JavaScript target; target ~a cannot import it (required by ~a)"
+       "~a ~a is only available to the JavaScript target; target ~a cannot import it (required by ~a)"
+       (if (eq? identity-kind 'native-esm)
+           "native ESM module"
+           "TypeScript ambient provider")
        (module-identity-value identity)
        pre-scan-target
        (or source-path "<unknown source>")))
@@ -2355,11 +2365,15 @@
       (case identity-kind
         [(beagle-namespace)
          (and module-resolver (module-resolver rn source-path))]
-        [(native-esm)
+        [(native-esm typescript-ambient)
          (unless foreign-module-resolver
            (foreign-resolution-error identity
                                      "no foreign module resolver was supplied"))
-         (or (foreign-module-resolver identity source-path)
+         (define ambient-names
+           (if (eq? identity-kind 'typescript-ambient)
+               (import-bindings->refer (canonical-libspec-bindings spec))
+               '()))
+         (or (foreign-module-resolver identity source-path ambient-names)
              (foreign-resolution-error
               identity "the foreign module resolver returned #f"))]
         ;; A global is selected explicitly by `require-global`; it is neither
@@ -2378,7 +2392,7 @@
              (module-source-namespace candidate)
              identity
              (or source-path "<unknown source>")))
-    (when (and (eq? identity-kind 'native-esm)
+    (when (and (memq identity-kind '(native-esm typescript-ambient))
                (not
                 (and (module-source-interface candidate)
                      (module-interface-foreign-interface-v1
@@ -2418,6 +2432,14 @@
       (or alias (string->symbol (last-of (split-ns-segments rn)))))
     (define candidate (candidate-for-require spec))
     (define interface (and candidate (module-source-interface candidate)))
+    (when (eq? identity-kind 'typescript-ambient)
+      (define namespace (module-interface-namespace interface))
+      (for ([binding (in-list bindings)])
+        (define source (import-binding-source binding))
+        (define local (import-binding-local binding))
+        (hash-set! ambient-global-runtime-names local source)
+        (hash-set! ambient-global-runtime-names (cons prefix source) source)
+        (hash-set! ambient-global-runtime-names (cons namespace source) source)))
     (define (declared-extern? name)
       (set-member? declared-extern-names name))
     (define (qualified-extern? qualifier name)
@@ -2959,6 +2981,7 @@
              imp-type-names
              imp-rec-fields imp-rec-field-order imp-rec-ns
              (hash-keys imp-scalar-fns) imp-scalar-preds imp-symbol-ns
+             ambient-global-runtime-names
              imp-union-members imp-param-unions imp-enums external-dyn-vars
              (reverse imp-module-interfaces)
              target gen-class?))

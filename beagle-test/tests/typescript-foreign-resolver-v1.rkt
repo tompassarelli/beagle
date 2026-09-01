@@ -2,9 +2,11 @@
 
 (require rackunit
          racket/file
+         racket/list
          racket/runtime-path
          racket/string
          racket/system
+         beagle/private/ast
          beagle/private/foreign-interface-v1
          beagle/private/module-interface
          beagle/private/module-overlay-check
@@ -91,6 +93,148 @@
      "a closure without native ESM imports must not materialize the adapter"))))
 
 (test-case
+ "typed ambient provider resolves requested values and class instance types"
+ (with-isolated-adapter-cache
+  (lambda (project-root _adapter-cache)
+    (write-source!
+     (build-path project-root "package.json")
+     "{\"name\":\"typed-ambient-test\",\"private\":true,\"type\":\"module\"}\n")
+    (define source-path (build-path project-root "ambient.bjs"))
+    (write-source!
+     source-path
+     (string-append
+      "#lang beagle/js\n"
+      "(ns resolver-test.ambient\n"
+      "  (:require-global [\"typescript:lib.dom\" :refer [Response fetch]]))\n"
+      "(def marker String \"typed\")\n"
+      "(def response Response (new Response marker))\n"))
+    (define closure
+      (resolve-production-module-source-closure
+       (list (module-source-input "resolver-test/ambient.bjs" source-path))
+       '()))
+    (define resolutions
+      (module-source-closure-foreign-module-resolutions closure))
+    (check-equal? (hash-count resolutions) 1)
+    (define request (car (hash-keys resolutions)))
+    (check-equal?
+     (foreign-module-request-identity request)
+     (module-identity 'typescript-ambient "typescript:lib.dom"))
+    (check-equal?
+     (foreign-module-request-ambient-value-names request)
+     '(Response fetch))
+    (define module-source (hash-ref resolutions request))
+    (define interface
+      (module-interface-foreign-interface-v1
+       (module-source-interface module-source)))
+    (check-equal?
+     (map (lambda (entry) (hash-ref entry 'name))
+          (foreign-interface-v1-ambient-values interface))
+     '("Response" "fetch"))
+    (check-equal? (foreign-interface-v1-exports interface) '())
+    (define response-type
+      (hash-ref (module-interface-type-exports
+                 (module-source-interface module-source))
+                'Response))
+    (check-equal? (interface-type-export-kind response-type) 'foreign)
+    (check-true
+     (type-foreign? (interface-type-export-expansion response-type)))
+    (check-true
+     (for/or ([input
+               (in-list
+                (hash-ref
+                 (foreign-interface-v1-provenance interface)
+                 'consultedFiles))])
+       (string=?
+        (hash-ref input 'path)
+        "adapter/node_modules/typescript/lib/lib.dom.d.ts")))
+    (define checked (check-module-source-closure closure #:emit? #f))
+    (check-true
+     (overlay-check-result-ok? checked)
+     (format "~a" (overlay-check-result-diagnostics checked))))))
+
+(test-case
+ "typed ambient provider resolves import aliases before projection"
+ (with-isolated-adapter-cache
+  (lambda (project-root _adapter-cache)
+    (write-source!
+     (build-path project-root "package.json")
+     "{\"name\":\"typed-ambient-alias-test\",\"private\":true,\"type\":\"module\"}\n")
+    (define package-root
+      (build-path project-root "node_modules" "@types" "runtime-alias"))
+    (make-directory* package-root)
+    (write-source!
+     (build-path package-root "package.json")
+     (string-append
+      "{\"name\":\"@types/runtime-alias\",\"version\":\"1.0.0\","
+      "\"types\":\"index.d.ts\"}\n"))
+    (write-source!
+     (build-path package-root "runtime-module.d.ts")
+     (string-append
+      "export interface RuntimeFile { arrayBuffer(): Promise<ArrayBuffer>; }\n"
+      "export declare function file(path: string): RuntimeFile;\n"))
+    (write-source!
+     (build-path package-root "index.d.ts")
+     (string-append
+      "import * as RuntimeModule from \"./runtime-module\";\n"
+      "declare global {\n"
+      "  export import Runtime = RuntimeModule;\n"
+      "  interface GenericBox<T> { readonly value: T; }\n"
+      "  interface GenericBoxConstructor {\n"
+      "    new(value: string): GenericBox<string>;\n"
+      "    new(value: number): GenericBox<number>;\n"
+      "  }\n"
+      "  var GenericBox: GenericBoxConstructor;\n"
+      "}\n"
+      "export {};\n"))
+    (define source-path (build-path project-root "ambient-alias.bjs"))
+    (write-source!
+     source-path
+     (string-append
+      "#lang beagle/js\n"
+      "(ns resolver-test.ambient-alias\n"
+      "  (:require-global [\"@types/runtime-alias\""
+      " :refer [GenericBox Runtime]]))\n"
+      "(def marker String \"typed\")\n"
+      "(def boxed (GenericBox String) (new GenericBox marker))\n"))
+    (define closure
+      (resolve-production-module-source-closure
+       (list (module-source-input "resolver-test/ambient-alias.bjs" source-path))
+       '()))
+    (define resolutions
+      (module-source-closure-foreign-module-resolutions closure))
+    (check-equal? (hash-count resolutions) 1)
+    (define resolved-source (car (hash-values resolutions)))
+    (define interface
+      (module-interface-foreign-interface-v1
+       (module-source-interface resolved-source)))
+    (check-equal?
+     (map (lambda (entry) (hash-ref entry 'name))
+          (foreign-interface-v1-ambient-values interface))
+     '("GenericBox" "Runtime"))
+    (define binding
+      (findf
+       (lambda (entry) (string=? (hash-ref entry 'name) "Runtime"))
+       (foreign-interface-v1-ambient-values interface)))
+    (check-pred hash? binding)
+    (check-equal? (hash-ref binding 'name) "Runtime")
+    (define runtime-node
+      (hash-ref (foreign-interface-v1-nodes interface) (hash-ref binding 'node)))
+    (check-equal? (hash-ref runtime-node 'kind) "object")
+    (check-true
+     (for/or ([property (in-list (hash-ref runtime-node 'properties))])
+       (string=? (hash-ref property 'name) "file")))
+    (define generic-box-export
+      (hash-ref
+       (module-interface-type-exports (module-source-interface resolved-source))
+       'GenericBox))
+    (check-equal? (interface-type-export-kind generic-box-export) 'foreign)
+    (check-equal? (interface-type-export-arity generic-box-export) 1)
+    (define checked (check-module-source-closure closure #:emit? #f))
+    (check-true
+     (overlay-check-result-ok? checked)
+     (format "~a" (overlay-check-result-diagnostics checked))))))
+
+(test-case
  "missing Bun fails before adapter compilation or cache mutation"
  (with-bun-absent
   (lambda (project-root adapter-cache)
@@ -160,6 +304,69 @@
      (hash-count
       (module-source-closure-foreign-module-resolutions closure))
      1))))
+
+(test-case
+ "exact maps satisfy optional Partial mapped-type constructor parameters"
+ (with-isolated-adapter-cache
+  (lambda (project-root _adapter-cache)
+    (write-source!
+     (build-path project-root "package.json")
+     "{\"name\":\"mapped-material-test\",\"private\":true,\"type\":\"module\"}\n")
+    (define package-root
+      (build-path project-root "node_modules" "@fixture" "mapped-material"))
+    (make-directory* package-root)
+    (write-source!
+     (build-path package-root "package.json")
+     (string-append
+      "{\"name\":\"@fixture/mapped-material\",\"version\":\"1.0.0\","
+      "\"type\":\"module\",\"exports\":{\".\":{"
+      "\"beagle\":\"./index.d.ts\","
+      "\"types\":\"./index.d.ts\","
+      "\"default\":\"./index.js\"}}}\n"))
+    (write-source!
+     (build-path package-root "index.d.ts")
+     (string-append
+      "export declare class Color { readonly isColor: true; }\n"
+      "export type ColorRepresentation = Color | string | number;\n"
+      "export type MapColorPropertiesToColorRepresentations<T> = {\n"
+      "  [P in keyof T]: T[P] extends Color | null"
+      " ? ColorRepresentation : T[P];\n"
+      "};\n"
+      "export interface MeshStandardMaterialProperties {\n"
+      "  color: Color; emissive: Color; metalness: number;\n"
+      "  roughness: number; transparent: boolean; opacity: number;\n"
+      "}\n"
+      "export interface MeshStandardMaterialParameters extends"
+      " Partial<MapColorPropertiesToColorRepresentations<"
+      "MeshStandardMaterialProperties>> {}\n"
+      "export declare class MeshStandardMaterial {\n"
+      "  constructor(parameters?: MeshStandardMaterialParameters);\n"
+      "}\n"))
+    (define source-path (build-path project-root "mapped-material.bjs"))
+    (write-source!
+     source-path
+     (string-append
+      "#lang beagle/js\n"
+      "(ns resolver-test.mapped-material\n"
+      "  (:require [\"@fixture/mapped-material\""
+      " :refer [MeshStandardMaterial]]))\n"
+      "(def empty MeshStandardMaterial (new MeshStandardMaterial {}))\n"
+      "(def configured MeshStandardMaterial\n"
+      "  (new MeshStandardMaterial\n"
+      "    {:color 16777215 :emissive 0 :metalness 0.16"
+      " :roughness 0.68 :transparent true :opacity 1.0}))\n"))
+    (define checked
+      (check-module-source-closure
+       (resolve-production-module-source-closure
+        (list
+         (module-source-input
+          "resolver-test/mapped-material.bjs"
+          source-path))
+        '())
+       #:emit? #f))
+    (check-true
+     (overlay-check-result-ok? checked)
+     (format "~a" (overlay-check-result-diagnostics checked))))))
 
 (test-case
  "foreign graph reuse validates local declaration and importer dependencies"
@@ -247,6 +454,9 @@
       "export declare function notify(): void;\n"
       "export declare function pipeline(...streams: [string, ...number[], boolean]): void;\n"
       "export declare function schedule(body: () => void): void;\n"
+      "export declare function acceptOnlyPromises<T>(values: Iterable<PromiseLike<T>>): Promise<T[]>;\n"
+      "export declare function loadBuffer(): Promise<ArrayBuffer>;\n"
+      "export declare function loadText(): Promise<string>;\n"
       "export type Transformer<T> = (value: T) => T;\n"
       "export declare const stringTransformer: Transformer<string>;\n"
       "export declare function makeBytes(): Uint8Array<ArrayBuffer>;\n"))
@@ -273,6 +483,21 @@
       (file->string wasm-bindgen-fixture)
       "\nexport declare function consumeBytes(request: Uint8Array<ArrayBuffer>): number;\n"
       "export declare function makeSharedBytes(): Uint8Array<SharedArrayBuffer>;\n"))
+    (define array-buffer-augmentation-root
+      (build-path project-root "node_modules" "@types"
+                  "runtime-array-buffer-augmentation"))
+    (make-directory* array-buffer-augmentation-root)
+    (write-source!
+     (build-path array-buffer-augmentation-root "package.json")
+     (string-append
+      "{\"name\":\"@types/runtime-array-buffer-augmentation\","
+      "\"version\":\"1.0.0\",\"types\":\"index.d.ts\"}\n"))
+    (write-source!
+     (build-path array-buffer-augmentation-root "index.d.ts")
+     (string-append
+      "interface ArrayBuffer {\n"
+      "  readonly runtimeArrayBufferAugmentation: true;\n"
+      "}\n"))
     (define source-path
       (build-path project-root "nested" "native-success.bjs"))
     (make-directory* (build-path project-root "nested"))
@@ -281,17 +506,37 @@
      (string-append
       "#lang beagle/js\n"
       "(ns resolver-test.native-success\n"
-      "  (:require [\"@fixture/native\" :refer [acceptFlag makeBytes notify pipeline schedule stringTransformer value]]\n"
-      "            [\"@fixture/wasm-bindgen-init\" :refer [consumeBytes SyncInitInput initSync]]))\n"
+      "  (:require [\"@fixture/native\" :refer [acceptFlag loadBuffer loadText makeBytes notify pipeline schedule stringTransformer value]]\n"
+      "            [\"@fixture/wasm-bindgen-init\" :refer [consumeBytes SyncInitInput initSync]])\n"
+      "  (:require-global [\"typescript:lib.es5\" :refer [ArrayBuffer DataView Error]]))\n"
+      "(require '[\"bun\" :refer [file]])\n"
       "(js/export (def answer String value))\n"
       "(js/export (defn relay [flag Bool] Nil (acceptFlag flag)))\n"
       "(js/export (defn transform [value String] String (stringTransformer value)))\n"
       "(js/export (defn runPipeline [] Nil (pipeline \"source\" 1 2 true)))\n"
       "(js/export (defn initialize [module SyncInitInput] Number (initSync module)))\n"
       "(js/export (defn initializeArrayBuffer [module ArrayBuffer] Number (initSync module)))\n"
+      "(js/export (defn initializeAnnotatedArrayBuffer [module ArrayBuffer] Number\n"
+      "  (let [input SyncInitInput module] (initSync input))))\n"
       "(js/export (defn consumeProducedBytes [] Number (consumeBytes (makeBytes))))\n"
       "(js/export (defn consumeConstructedBytes [request (Vec Int)] Number (consumeBytes (new Uint8Array request))))\n"
       "(js/export (defn consumeCopiedBytes [] Number (consumeBytes (new Uint8Array (makeBytes)))))\n"
+      "(js/export (defn constructDataView [] Any\n"
+      "  (let [packed ArrayBuffer (new ArrayBuffer 8)] (new DataView packed))))\n"
+      "(js/export (defn rejectFailure [] Any (.reject Promise (new Error \"resident slice failure\"))))\n"
+      "(js/export (defn loadTogether [] Any (.all Promise [(loadBuffer) (loadText)])))\n"
+      "(js/export (defn settleTogether [] Any\n"
+      "  (.then (.all Promise [(loadBuffer) (loadText)])\n"
+      "    (fn [values Any] String \"settled\"))))\n"
+      "(js/export (defn loadThenTogether [] Any\n"
+      "  (.all Promise\n"
+      "    [(.then (loadBuffer) (fn [value ArrayBuffer] (Promise String) (loadText)))\n"
+      "     (.then (loadText) (fn [value String] (Promise ArrayBuffer) (loadBuffer)))])))\n"
+      "(js/export (defn loadDynamicThen [] Any\n"
+      "  (.then (loadBuffer) (fn [value ArrayBuffer] Any value))))\n"
+      "(js/export (defn loadBunFilesTogether [] Any\n"
+      "  (.all Promise [(.arrayBuffer (file \"fixture.wasm\"))\n"
+      "                 (.text (file \"fixture.txt\"))])))\n"
       "(js/export (defn run [] Nil (schedule (fn [] Nil (notify)))))\n"))
 
     (define closure
@@ -308,7 +553,13 @@
     (define resolutions
       (hash-values
        (module-source-closure-foreign-module-resolutions closure)))
-    (check-equal? (length resolutions) 2)
+    (check-equal? (length resolutions) 4)
+    (define resolution-interfaces
+      (for/hash ([source (in-list resolutions)])
+        (define interface
+          (module-interface-foreign-interface-v1
+           (module-source-interface source)))
+        (values (foreign-interface-v1-semantic-id interface) interface)))
     (define (foreign-source-for module-specifier)
       (for/first
           ([source (in-list resolutions)]
@@ -326,6 +577,23 @@
     (define wasm-source
       (foreign-source-for "@fixture/wasm-bindgen-init"))
     (check-pred module-source? wasm-source)
+    (define error-source (foreign-source-for "typescript:lib.es5"))
+    (check-pred module-source? error-source)
+    (define bun-source (foreign-source-for "bun"))
+    (check-pred module-source? bun-source)
+    (check-pred
+     interface-binding?
+     (module-interface-binding-ref
+      (module-source-interface bun-source)
+      'file))
+    (define error-interface
+      (module-interface-foreign-interface-v1
+       (module-source-interface error-source)))
+    (define error-binding
+      (findf
+       (lambda (binding) (string=? (hash-ref binding 'name) "Error"))
+       (foreign-interface-v1-ambient-values error-interface)))
+    (check-pred hash? error-binding)
     (check-pred
      foreign-interface-v1?
      (module-interface-foreign-interface-v1
@@ -334,6 +602,70 @@
       (module-interface-foreign-interface-v1
        (module-source-interface foreign-source)))
     (check-pred foreign-interface-v1? foreign-interface)
+    (define foreign-nodes (foreign-interface-v1-nodes foreign-interface))
+    (define promise-binding
+      (findf
+       (lambda (binding) (string=? (hash-ref binding 'name) "Promise"))
+       (foreign-interface-v1-ambient-values foreign-interface)))
+    (check-pred hash? promise-binding)
+    (define promise-constructor
+      (hash-ref foreign-nodes (hash-ref promise-binding 'node)))
+    (define promise-all-property
+      (findf
+       (lambda (property) (string=? (hash-ref property 'name) "all"))
+       (hash-ref promise-constructor 'properties)))
+    (check-pred hash? promise-all-property)
+    (define promise-all-node
+      (hash-ref foreign-nodes (hash-ref promise-all-property 'type)))
+    (define promise-all-overloads (hash-ref promise-all-node 'overloads))
+    (check-equal? (length promise-all-overloads) 2)
+    (define promise-reject-property
+      (findf
+       (lambda (property) (string=? (hash-ref property 'name) "reject"))
+       (hash-ref promise-constructor 'properties)))
+    (check-pred hash? promise-reject-property)
+    (define promise-reject-node
+      (hash-ref foreign-nodes (hash-ref promise-reject-property 'type)))
+    (define promise-reject-signature
+      (car (hash-ref promise-reject-node 'overloads)))
+    (define promise-reject-parameter-node
+      (hash-ref
+       foreign-nodes
+       (hash-ref
+        (car (hash-ref promise-reject-signature 'parameters))
+        'type)))
+    (check-equal? (hash-ref promise-reject-parameter-node 'kind) "primitive")
+    (check-equal?
+     (hash-ref promise-reject-parameter-node 'name)
+     "foreign-dynamic")
+    (define promise-reject-type-parameter
+      (car (hash-ref promise-reject-signature 'typeParameters)))
+    (define promise-reject-default-id
+      (hash-ref promise-reject-type-parameter 'default))
+    (check-pred string? promise-reject-default-id)
+    (check-equal?
+     (hash-ref (hash-ref foreign-nodes promise-reject-default-id) 'name)
+     "never")
+    (define iterable-type-parameter
+      (car (hash-ref (car promise-all-overloads) 'typeParameters)))
+    (check-false (hash-ref iterable-type-parameter 'constraint))
+    (check-false (hash-ref iterable-type-parameter 'default))
+    (define iterable-parameter
+      (hash-ref
+       foreign-nodes
+       (hash-ref
+        (car (hash-ref (car promise-all-overloads) 'parameters))
+        'type)))
+    (check-equal? (hash-ref iterable-parameter 'name) "Iterable")
+    (define iterable-element
+      (hash-ref foreign-nodes (car (hash-ref iterable-parameter 'typeArguments))))
+    (check-equal? (hash-ref iterable-element 'kind) "union")
+    (check-true
+     (for/or ([member-id (in-list (hash-ref iterable-element 'members))])
+       (define member (hash-ref foreign-nodes member-id))
+       (and (string=? (hash-ref member 'kind) "reference")
+            (string=? (hash-ref member 'name) "PromiseLike")))
+     "the fixture must retain the exact Iterable<T | PromiseLike<T>> overload")
     (check-equal?
      (hash-ref (foreign-interface-v1-stats foreign-interface) 'anyCount)
      0)
@@ -453,6 +785,67 @@
      (overlay-check-result-ok? checked)
      (format "~a" (overlay-check-result-diagnostics checked)))
     (check-equal? (length (overlay-check-result-modules checked)) 1)
+    (define checked-program
+      (checked-overlay-module-program
+       (car (overlay-check-result-modules checked))))
+    (define promise-all-results
+      (for/list ([(expression inferred)
+                  (in-hash (program-type-table checked-program))]
+                 #:when
+                 (and (jst-call? expression)
+                      (jst-selector? (jst-call-key expression))
+                      (string=? (jst-selector-name (jst-call-key expression))
+                                "all")))
+        inferred))
+    (check-equal? (length promise-all-results) 4)
+    (define promise-reject-result
+      (for/first ([(expression inferred)
+                   (in-hash (program-type-table checked-program))]
+                  #:when
+                  (and (jst-call? expression)
+                       (jst-selector? (jst-call-key expression))
+                       (string=? (jst-selector-name (jst-call-key expression))
+                                 "reject")))
+        inferred))
+    (check-true
+     (and (type-app? promise-reject-result)
+          (eq? (type-app-ctor promise-reject-result) 'Promise)
+          (= (length (type-app-args promise-reject-result)) 1)
+          (equal? (car (type-app-args promise-reject-result))
+                  (type-prim 'Never)))
+     (and promise-reject-result (type->string promise-reject-result)))
+    (for ([promise-all-result (in-list promise-all-results)])
+      (check-true
+       (and (type-app? promise-all-result)
+            (eq? (type-app-ctor promise-all-result) 'Promise)
+            (= (length (type-app-args promise-all-result)) 1)
+            (type-foreign? (car (type-app-args promise-all-result)))
+            (not (type-has-any? promise-all-result)))
+       (type->string promise-all-result))
+      (define promise-payload (car (type-app-args promise-all-result)))
+      (define indexed-payload
+        (parameterize
+            ([current-foreign-interfaces resolution-interfaces])
+          (foreign-index-type-v1 promise-payload (type-prim 'Int))))
+      (check-true (type-union? indexed-payload)
+                  (type->string indexed-payload))
+      (check-equal?
+       (sort (map type->string (type-union-alts indexed-payload)) string<?)
+       '("ArrayBuffer" "String")))
+    (define promise-then-results
+      (for/list ([(expression inferred)
+                  (in-hash (program-type-table checked-program))]
+                 #:when
+                 (and (jst-call? expression)
+                      (jst-selector? (jst-call-key expression))
+                      (string=? (jst-selector-name (jst-call-key expression))
+                                "then")))
+        inferred))
+    (check-equal? (length promise-then-results) 4)
+    (check-equal?
+     (count type-has-any? promise-then-results)
+     1
+     "an explicitly dynamic callback result must remain dynamic")
     (define emitted
       (checked-overlay-module-emitted
        (car (overlay-check-result-modules checked))))
@@ -462,6 +855,9 @@
     (check-true
      (string-contains? emitted "from \"@fixture/wasm-bindgen-init\";")
      "emission must preserve the exact wasm-bindgen ESM specifier")
+    (check-true
+     (string-contains? emitted "from \"bun\";")
+     "emission must preserve the exact Bun ESM specifier")
     (check-false
      (string-contains? emitted "foreign-interface:")
      "validated type identity must never become wrapper source")
@@ -490,4 +886,36 @@
      (string-contains?
       (format "~a" (overlay-check-result-diagnostics invalid-checked))
       "no foreign overload of Uint8ArrayConstructor accepts the supplied arguments")
-     (format "~a" (overlay-check-result-diagnostics invalid-checked))))))
+     (format "~a" (overlay-check-result-diagnostics invalid-checked)))
+
+    (define invalid-promise-path
+      (build-path project-root "nested" "invalid-promise-inputs.bjs"))
+    (write-source!
+     invalid-promise-path
+     (string-append
+      "#lang beagle/js\n"
+      "(ns resolver-test.invalid-promise-inputs\n"
+      "  (:require [\"@fixture/native\" :refer [acceptOnlyPromises loadBuffer]]))\n"
+      "(js/export (defn invalidPromiseInputs [] Any\n"
+      "  (acceptOnlyPromises [(loadBuffer) true])))\n"))
+    (define invalid-promise-checked
+      (check-module-source-closure
+       (resolve-production-module-source-closure
+        (list
+         (module-source-input
+          "resolver-test/invalid-promise-inputs.bjs"
+          invalid-promise-path))
+        '())))
+    (check-false
+     (overlay-check-result-ok? invalid-promise-checked)
+     "typed unrelated elements must not become Any/unknown evidence")
+    (check-true
+     (and
+      (string-contains?
+       (format "~a" (overlay-check-result-diagnostics invalid-promise-checked))
+       "no foreign overload")
+      (string-contains?
+       (format "~a" (overlay-check-result-diagnostics invalid-promise-checked))
+       "PromiseLike<T>"))
+     (format "~a"
+             (overlay-check-result-diagnostics invalid-promise-checked))))))
