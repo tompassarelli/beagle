@@ -1207,6 +1207,67 @@
        (foreign-interface-v1-semantic-id expected-interface)
        "expected:event")))))
 
+(test-case "cross-interface unions cover singleton foreign arrays recursively"
+  (define clip-identity
+    (format
+     "project/node_modules/@fixture/types.d.ts#AnimationClip@sha256:~a"
+     ZERO-SHA))
+  (define expected-interface
+    (make-interface
+     (list (wire-export "ExpectedChoice" "expected:choice" #:space "type"))
+     (list
+      (hash 'id "expected:choice"
+            'kind "union"
+            'members (list "expected:clips" "expected:object"))
+      (wire-array "expected:clips" "expected:clip")
+      (hash-set
+       (wire-object
+        "expected:clip"
+        #:name "AnimationClip"
+        #:properties (list (wire-property "name" "expected:string")))
+       'identity clip-identity)
+      (wire-object
+       "expected:object"
+       #:properties (list (wire-property "objectOnly" "expected:string")))
+      (wire-primitive "expected:string" "string"))))
+  (define actual-interface
+    (make-interface
+     (list
+      (wire-export "ActualClips" "actual:clips" #:space "type")
+      (wire-export "ActualUnmatched" "actual:unmatched" #:space "type"))
+     (list
+      (wire-array "actual:clips" "actual:clip")
+      (hash-set
+       (wire-object
+        "actual:clip"
+        #:name "AnimationClip"
+        #:properties (list (wire-property "name" "actual:string")))
+       'identity clip-identity)
+      (wire-primitive "actual:number" "number")
+      (wire-primitive "actual:string" "string")
+      (wire-array "actual:unmatched" "actual:wrong-clip")
+      (wire-object
+       "actual:wrong-clip"
+       #:name "WrongClip"
+       #:properties (list (wire-property "name" "actual:number"))))))
+  (define expected-id
+    (foreign-interface-v1-semantic-id expected-interface))
+  (define actual-id
+    (foreign-interface-v1-semantic-id actual-interface))
+  (parameterize
+      ([current-foreign-interfaces
+        (hash expected-id expected-interface actual-id actual-interface)])
+    (check-true
+     (foreign-type-compatible-v1
+      (type-foreign actual-id "actual:clips")
+      (type-foreign expected-id "expected:choice"))
+     "a singleton foreign array must match one expected union member recursively")
+    (check-false
+     (foreign-type-compatible-v1
+      (type-foreign actual-id "actual:unmatched")
+      (type-foreign expected-id "expected:choice"))
+     "a foreign array with a mismatched element must still reject")))
+
 (test-case "recursive structural methods preserve subtype function variance"
   (define expected-e
     (wire-type-parameter "s:expected:e" "E" #:constraint "s:string"))

@@ -3241,12 +3241,17 @@
           (mutable-set)))
        (define actual-node
          (node-at actual-interface (foreign-view-node-id actual-view)))
-       (and
-        (string=? (hash-ref actual-node 'kind) "union")
-        (for/and ([actual-member
-                   (in-list (hash-ref actual-node 'members))])
+       (define actual-views
+         (if (string=? (hash-ref actual-node 'kind) "union")
+             (for/list ([actual-member
+                         (in-list (hash-ref actual-node 'members))])
+               (make-foreign-view
+                actual-member (foreign-view-bindings actual-view)))
+             (list actual-view)))
+       (for/and ([actual-member-view (in-list actual-views)])
           (define actual-member-node
-            (node-at actual-interface actual-member))
+            (node-at
+             actual-interface (foreign-view-node-id actual-member-view)))
           (ormap
            (lambda (expected-member)
              (try-foreign-branch
@@ -3262,11 +3267,9 @@
                   #f
                   (foreign-view-type
                    actual-interface
-                   (make-foreign-view
-                    actual-member
-                    (foreign-view-bindings actual-view)))
+                   actual-member-view)
                   trial)))))
-           expected-members))))))
+           expected-members)))))
   (define (union-covers-ordinary-boolean? expected-members)
     (and
      (type-prim? actual)
@@ -3632,11 +3635,38 @@
          [(array)
           (or
            exact?
-           (and (type-app? actual)
-                (eq? (type-app-ctor actual) 'Vec)
-                (= (length (type-app-args actual)) 1)
-                (recur (hash-ref expected 'element) #f
-                       (car (type-app-args actual)))))]
+           (let ([actual-element
+                  (cond
+                    [(and (type-app? actual)
+                          (eq? (type-app-ctor actual) 'Vec)
+                          (= (length (type-app-args actual)) 1))
+                     (car (type-app-args actual))]
+                    [(type-foreign? actual)
+                     (let-values ([(actual-interface _actual-node)
+                                   (foreign-node-ref actual)])
+                       (define actual-bindings
+                         (foreign-type-bindings actual-interface actual))
+                       (define actual-view
+                         (normalize-foreign-view
+                          actual-interface
+                          (make-foreign-view
+                           (type-foreign-node-id actual)
+                           actual-bindings)
+                          (mutable-set)))
+                       (define actual-node
+                         (node-at
+                          actual-interface
+                          (foreign-view-node-id actual-view)))
+                       (and
+                        (string=? (hash-ref actual-node 'kind) "array")
+                        (foreign-result-type
+                         actual-interface
+                         (hash-ref actual-node 'element)
+                         (foreign-view-bindings actual-view))))]
+                    [else #f])])
+             (and
+              actual-element
+              (recur (hash-ref expected 'element) #f actual-element))))]
          [(tuple)
           (define elements (hash-ref expected 'elements))
           (define rest-position (tuple-rest-position elements))
