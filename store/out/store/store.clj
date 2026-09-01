@@ -1023,6 +1023,9 @@
 (defn- suppressed-occurrence-coordinates [store]
   (reduce (fn [coordinates proposition] (conj coordinates (t/triple-t3 proposition))) #{} (filterv (fn [value] (relation-proposition? :kernel/supersedes value)) (matching-live-propositions store nil :kernel/supersedes nil nil))))
 
+(defn- ^Boolean occurrence-suppressed? [store coordinate]
+  (boolean (some (fn [value] (relation-proposition? :kernel/supersedes value)) (matching-live-propositions store nil :kernel/supersedes coordinate nil))))
+
 (defn effective-live-occurrences [ctx]
   (let [store (deref ctx)
    suppressed (suppressed-occurrence-coordinates store)]
@@ -1034,7 +1037,7 @@
 (defn ^Boolean effective-live-occurrence? [ctx coordinate]
   (let [store (deref ctx)
    position (exact-occurrence-position store coordinate)]
-  (and (>= position 0) (and (operation-live? store position (operation-row-at store position)) (not (contains? (suppressed-occurrence-coordinates store) coordinate))))))
+  (and (>= position 0) (and (operation-live? store position (operation-row-at store position)) (not (occurrence-suppressed? store coordinate))))))
 
 (defn effective-live-proposition-count [ctx]
   (let [store (deref ctx)
@@ -1044,11 +1047,14 @@
   (- (live-occurrence-count ctx) suppressed-live)))
 
 (defn matching-effective-occurrences [store t1 t2 t3 maximum]
-  (let [suppressed (suppressed-occurrence-coordinates store)]
+  (let [candidate-scoped? (and (some? t1) (some? t2))
+   suppressed (if candidate-scoped? nil (suppressed-occurrence-coordinates store))]
   (loop [remaining (matching-live-occurrences store t1 t2 t3 nil)
    occurrences []]
-  (if (or (empty? remaining) (and (some? maximum) (>= (count occurrences) maximum))) occurrences (let [occurrence (first remaining)]
-  (recur (rest remaining) (if (contains? suppressed (t/operationoccurrence-coordinate occurrence)) occurrences (conj occurrences occurrence))))))))
+  (if (or (empty? remaining) (and (some? maximum) (>= (count occurrences) maximum))) occurrences (let [occurrence (first remaining)
+   coordinate (t/operationoccurrence-coordinate occurrence)
+   suppressed? (if candidate-scoped? (occurrence-suppressed? store coordinate) (contains? suppressed coordinate))]
+  (recur (rest remaining) (if suppressed? occurrences (conj occurrences occurrence))))))))
 
 (defn matching-effective-propositions [store t1 t2 t3 maximum]
   (mapv t/operationoccurrence-proposition (matching-effective-occurrences store t1 t2 t3 maximum)))

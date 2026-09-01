@@ -1917,6 +1917,18 @@
                    (matching-live-propositions
                     store nil :kernel/supersedes nil nil))))
 
+;; Candidate-scoped effective lookups must not materialize every unrelated
+;; supersession. The t2+t3 pattern uses the Store's partial index, so this cost
+;; follows only live supersession state for the exact occurrence being tested.
+(defn- occurrence-suppressed?
+  [store t/TermStore
+   coordinate Any] Bool
+  (boolean
+   (some (fn [value t/Triple] Bool
+           (relation-proposition? :kernel/supersedes value))
+         (matching-live-propositions
+          store nil :kernel/supersedes coordinate nil))))
+
 (defn effective-live-occurrences
   [ctx (Atom t/TermStore)] (Vec t/OperationOccurrence)
   (let [store t/TermStore (deref ctx)
@@ -1939,8 +1951,7 @@
         position Int (exact-occurrence-position store coordinate)]
     (and (>= position 0)
          (and (operation-live? store position (operation-row-at store position))
-              (not (contains? (suppressed-occurrence-coordinates store)
-                              coordinate))))))
+              (not (occurrence-suppressed? store coordinate))))))
 
 (defn effective-live-proposition-count [ctx (Atom t/TermStore)] Int
   (let [store t/TermStore (deref ctx)
@@ -1963,18 +1974,24 @@
    t2 Any
    t3 Any
    maximum Int?] (Vec t/OperationOccurrence)
-  (let [suppressed Any (suppressed-occurrence-coordinates store)]
+  (let [candidate-scoped? Bool (and (some? t1) (some? t2))
+        suppressed Any (if candidate-scoped?
+                         nil
+                         (suppressed-occurrence-coordinates store))]
     (loop [remaining (Vec t/OperationOccurrence) (matching-live-occurrences store t1 t2 t3 nil)
            occurrences (Vec t/OperationOccurrence) []]
       (if (or (empty? remaining)
               (and (some? maximum)
                    (>= (count occurrences) maximum)))
         occurrences
-        (let [occurrence t/OperationOccurrence (first remaining)]
+        (let [occurrence t/OperationOccurrence (first remaining)
+              coordinate Any (t/operationoccurrence-coordinate occurrence)
+              suppressed? Bool (if candidate-scoped?
+                                 (occurrence-suppressed? store coordinate)
+                                 (contains? suppressed coordinate))]
           (recur
            (rest remaining)
-           (if (contains? suppressed
-                          (t/operationoccurrence-coordinate occurrence))
+           (if suppressed?
              occurrences
              (conj occurrences occurrence))))))))
 
