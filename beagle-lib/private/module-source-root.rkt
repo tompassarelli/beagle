@@ -21,7 +21,9 @@
 (struct module-source-snapshot
   (source-id physical-path bytes target-override source target explicit?)
   #:transparent)
-(struct foreign-module-request (identity importer-physical-path) #:transparent)
+(struct foreign-module-request
+  (identity importer-physical-path ambient-value-names)
+  #:transparent)
 (struct module-source-closure
   (snapshots explicit-source-ids foreign-module-resolutions)
   #:transparent)
@@ -292,15 +294,35 @@
    #:module-resolver resolver
    #:foreign-module-resolver foreign-module-resolver))
 
-(define (make-foreign-module-request identity physical-importer)
+(define (canonical-ambient-value-names names)
+  (unless (and (list? names) (andmap symbol? names))
+    (raise-argument-error
+     'module-source-root
+     "(listof symbol?)"
+     names))
+  (sort (remove-duplicates names eq?) symbol<?))
+
+(define (make-foreign-module-request identity physical-importer ambient-names)
   (unless (and (module-identity? identity)
-               (eq? (module-identity-kind identity) 'native-esm)
+               (memq (module-identity-kind identity)
+                     '(native-esm typescript-ambient))
                (string? (module-identity-value identity)))
     (error
      'module-source-root
-     "foreign resolver expected an exact native ESM module identity, got ~v"
+     "foreign resolver expected an exact native ESM or TypeScript ambient module identity, got ~v"
      identity))
-  (foreign-module-request identity (path-string physical-importer)))
+  (define canonical-names (canonical-ambient-value-names ambient-names))
+  (unless (equal? (eq? (module-identity-kind identity) 'typescript-ambient)
+                  (pair? canonical-names))
+    (error
+     'module-source-root
+     "TypeScript ambient requests require names and native ESM requests forbid them, got ~v with ~v"
+     identity
+     canonical-names))
+  (foreign-module-request
+   identity
+   (path-string physical-importer)
+   canonical-names))
 
 (define (resolve-module-source-closure
          explicit-inputs
@@ -319,10 +341,10 @@
      roots))
   (unless (or (not resolve-foreign-module)
               (and (procedure? resolve-foreign-module)
-                   (procedure-arity-includes? resolve-foreign-module 2)))
+                   (procedure-arity-includes? resolve-foreign-module 3)))
     (raise-argument-error
      'resolve-module-source-closure
-     "(or/c #f (procedure-arity-includes/c 2))"
+     "(or/c #f (procedure-arity-includes/c 3))"
      resolve-foreign-module))
   (when (null? explicit-inputs)
     (error 'module-source-root "expected at least one explicit source"))
@@ -508,13 +530,13 @@
   ;; discovery.  Every request is keyed by the canonical module identity and
   ;; exact physical importer.  The completed closure freezes these results so
   ;; coherent checking never reruns an adapter as interfaces converge.
-  (define (foreign-resolver identity importer)
+  (define (foreign-resolver identity importer ambient-names)
     (define-values (_importer-id importer-snapshot)
       (snapshot-for-importer importer))
     (define physical-importer
       (module-source-snapshot-physical-path importer-snapshot))
     (define request
-      (make-foreign-module-request identity physical-importer))
+      (make-foreign-module-request identity physical-importer ambient-names))
     (hash-ref
      foreign-module-resolutions
      request
@@ -523,7 +545,8 @@
          (and resolve-foreign-module
               (resolve-foreign-module
                identity
-               physical-importer)))
+               physical-importer
+               (foreign-module-request-ambient-value-names request))))
        (when (and source (not (module-source? source)))
          (error
           'module-source-root
@@ -584,13 +607,14 @@
    (module-source-closure-snapshot-ref closure source-id)))
 
 (define (module-source-closure-resolve-foreign-module
-         closure identity importer)
+         closure identity importer ambient-names)
   (define snapshot
     (module-source-closure-snapshot-ref closure importer))
   (define request
     (make-foreign-module-request
      identity
-     (module-source-snapshot-physical-path snapshot)))
+     (module-source-snapshot-physical-path snapshot)
+     ambient-names))
   (define resolutions
     (module-source-closure-foreign-module-resolutions closure))
   (unless (hash-has-key? resolutions request)
@@ -608,9 +632,9 @@
   (parse-snapshot
    snapshot
    resolver
-   (lambda (identity importer)
+   (lambda (identity importer ambient-names)
      (module-source-closure-resolve-foreign-module
-      closure identity importer))))
+      closure identity importer ambient-names))))
 
 (provide
  (struct-out module-source-root-v0)

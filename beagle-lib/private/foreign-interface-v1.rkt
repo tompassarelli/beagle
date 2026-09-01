@@ -210,9 +210,12 @@
   normalized)
 
 (define (normalize-type-parameter where value)
-  (object! where value '(name node constraint default) '())
+  (object! where value '(name node declarationOwner constraint default) '())
   (hash 'name (string! (format "~a.name" where) (hash-ref value 'name))
         'node (node-ref! (format "~a.node" where) (hash-ref value 'node))
+        'declarationOwner
+        (string! (format "~a.declarationOwner" where)
+                 (hash-ref value 'declarationOwner))
         'constraint
         (nullable-node-id! (format "~a.constraint" where)
                            (hash-ref value 'constraint))
@@ -842,8 +845,13 @@
     (for ([parameter (in-list parameters)])
       (hash-update! owners
                     (hash-ref parameter 'node)
-                    (lambda (prior) (cons where prior))
-                    '())))
+                    (lambda (prior)
+                      (hash-update
+                       prior
+                       (hash-ref parameter 'declarationOwner)
+                       (lambda (paths) (cons where paths))
+                       '()))
+                    (hash))))
   (for ([node (in-list nodes)])
     (when (member (hash-ref node 'kind) '("object" "function"))
       (claim! (format "nodes[~a].typeParameters" (hash-ref node 'id))
@@ -854,13 +862,17 @@
   (for ([node (in-list nodes)]
         #:when (string=? (hash-ref node 'kind) "type-parameter"))
     (define node-id (hash-ref node 'id))
-    (define parameter-owners (reverse (hash-ref owners node-id '())))
-    (unless (= (length parameter-owners) 1)
+    (define parameter-owners (hash-ref owners node-id (hash)))
+    (unless (= (hash-count parameter-owners) 1)
       (schema-error
        (format "nodes[~a]" node-id)
-       "type-parameter node must have exactly one lexical declaration owner; got ~a: ~v"
-       (length parameter-owners)
-       parameter-owners))))
+       "type-parameter node must have exactly one declaration owner family; got ~a: ~v"
+       (hash-count parameter-owners)
+       (sort
+        (for/list ([(owner paths) (in-hash parameter-owners)])
+          (cons owner (reverse paths)))
+        string<?
+        #:key car)))))
 
 (define (validate-exported-binders! exports node-table)
   (for ([export (in-list exports)])
@@ -1242,13 +1254,15 @@
       (hash-ref node 'typeParameters)
       '()))
 
-(define (foreign-interface-v1->module-interface interface)
+(define (foreign-interface-v1->module-interface
+         interface
+         #:ambient-provider? [ambient-provider? #f])
   (register-known-foreign-interface! interface)
   (define namespace (foreign-module-namespace interface))
   (define runtime-exports
     (filter (lambda (export) (foreign-export-in-space? export "value"))
             (foreign-interface-v1-exports interface)))
-  (define bindings
+  (define export-bindings
     (for/hasheq ([export (in-list runtime-exports)])
       (define name (string->symbol (hash-ref export 'name)))
       (values
@@ -1260,6 +1274,30 @@
         #f '() #t #f
         (normalized-obligations-v1-open 'js 'hosted-js)
         #f))))
+  (define bindings
+    (if ambient-provider?
+        (for/fold ([result export-bindings])
+                  ([ambient
+                    (in-list (foreign-interface-v1-ambient-values interface))])
+          (define name (string->symbol (hash-ref ambient 'name)))
+          (when (hash-has-key? result name)
+            (error
+             'foreign-interface-v1->module-interface
+             "ambient provider declares ~a as both a module export and a global value"
+             name))
+          (hash-set
+           result
+           name
+           (interface-binding
+            name
+            'extern
+            (type-foreign
+             (foreign-interface-v1-semantic-id interface)
+             (hash-ref ambient 'node))
+            #f '() #t #f
+            (normalized-obligations-v1-open 'js 'hosted-js)
+            #f)))
+        export-bindings))
   (define public-esm-exports
     (for/hasheq ([export (in-list runtime-exports)])
       (values (string->symbol (hash-ref export 'name))
@@ -1300,8 +1338,13 @@
    (hash (foreign-interface-v1-semantic-id interface) interface))
   projected)
 
-(define (foreign-interface-v1->module-source interface)
-  (define projected (foreign-interface-v1->module-interface interface))
+(define (foreign-interface-v1->module-source
+         interface
+         #:ambient-provider? [ambient-provider? #f])
+  (define projected
+    (foreign-interface-v1->module-interface
+     interface
+     #:ambient-provider? ambient-provider?))
   (module-source
    (module-interface-namespace projected)
    (format "foreign-interface:~a"

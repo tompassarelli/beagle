@@ -1592,6 +1592,7 @@
                  imported-scalar-fns
                  imported-scalar-preds
                  imported-symbol-ns
+                 ambient-global-runtime-names
                  imported-union-members
                  imported-parametric-unions
                  imported-enums

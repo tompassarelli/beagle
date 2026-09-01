@@ -900,6 +900,7 @@
 (define current-js-declared-externs (make-parameter (set)))
 (define current-js-scalar-fns (make-parameter (set)))
 (define current-js-symbol-ns (make-parameter (hasheq)))
+(define current-js-ambient-global-runtime-names (make-parameter (hash)))
 (define current-js-namespace (make-parameter 'beagle.user))
 (define current-js-module-bindings (make-parameter (hasheq)))
 (define current-js-public-esm-members (make-parameter (hasheq)))
@@ -942,9 +943,15 @@
                 #f)))
 
 (define (emit-qualified-reference ref #:constructor? [constructor? #f])
+  (define ambient-name
+    (hash-ref
+     (current-js-ambient-global-runtime-names)
+     (cons (qualified-ref-qualifier ref) (qualified-ref-name ref))
+     #f))
   (define member
     (mangle-str (qualified-runtime-member ref constructor?)))
   (cond
+    [ambient-name (mangle-name ambient-name)]
     [(eq? (qualified-ref-qualifier ref) 'js) member]
     [(qualified-module-binding ref)
      => (lambda (binding)
@@ -2037,6 +2044,8 @@
                   (list->set (hash-keys (program-declared-externs prog)))]
                  [current-js-scalar-fns (build-scalar-fns prog)]
                  [current-js-symbol-ns (program-imported-symbol-ns prog)]
+                 [current-js-ambient-global-runtime-names
+                  (program-ambient-global-runtime-names prog)]
                  [current-js-namespace (program-namespace prog)]
                  [current-js-module-bindings
                   (build-js-module-binding-table prog)]
@@ -2371,12 +2380,16 @@
     (filter
      (lambda (s) (not (string=? s "")))
      (for/list ([r (in-list rs)])
-       (define bindings (require-entry-bindings r))
-       (define module-import (require-module-import prog r))
-       (define module-path-literal
-         (js-string-lit (require-module-path importer-ns r)))
-       (if (pair? bindings)
-         (let ()
+       (if (eq? (module-identity-kind (require-entry-identity r))
+                'typescript-ambient)
+           ""
+           (let ()
+             (define bindings (require-entry-bindings r))
+             (define module-import (require-module-import prog r))
+             (define module-path-literal
+               (js-string-lit (require-module-path importer-ns r)))
+             (if (pair? bindings)
+               (let ()
            (define runtime-imports
              (normalize-js-runtime-imports!
               r
@@ -2413,10 +2426,10 @@
                         (runtime-import-spec r runtime-import))
                       ", ")
                      module-path-literal)))
-         (let ([alias (require-prefix r)])
-           (format "import * as ~a from ~a;"
-                   (js-module-binding-name alias)
-                   module-path-literal))))))
+               (let ([alias (require-prefix r)])
+                 (format "import * as ~a from ~a;"
+                         (js-module-binding-name alias)
+                         module-path-literal))))))))
   (if (null? lines)
     ""
     (string-append (string-join lines "\n") "\n")))
@@ -2687,6 +2700,8 @@
      (cond
        [(eq? e 'nil) "null"]
        [(keyword-symbol? e) (runtime-call "keyword" (list (kw->prop e)))]
+       [(hash-ref (current-js-ambient-global-runtime-names) e #f)
+        => mangle-name]
        [(js-bound? e) (resolved-name e)]
        [(hash-ref JS-VALUE-WRAPPERS e #f) => values]
        [else (mangle-name e)])]
@@ -3483,6 +3498,11 @@
         (define qualified
           (let ([mod-prefix (hash-ref (current-js-symbol-ns) fn-sym #f)])
             (cond
+              [(hash-ref
+                (current-js-ambient-global-runtime-names)
+                fn-sym
+                #f)
+               => mangle-name]
               [(js-bound? fn-sym) mangled]
               [mod-prefix
                (string-append (js-module-binding-name mod-prefix) "." mangled)]

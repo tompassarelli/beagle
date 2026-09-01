@@ -91,6 +91,58 @@
      "a closure without native ESM imports must not materialize the adapter"))))
 
 (test-case
+ "typed ambient provider resolves exactly requested TypeScript globals"
+ (with-isolated-adapter-cache
+  (lambda (project-root _adapter-cache)
+    (write-source!
+     (build-path project-root "package.json")
+     "{\"name\":\"typed-ambient-test\",\"private\":true,\"type\":\"module\"}\n")
+    (define source-path (build-path project-root "ambient.bjs"))
+    (write-source!
+     source-path
+     (string-append
+      "#lang beagle/js\n"
+      "(ns resolver-test.ambient\n"
+      "  (:require-global [\"typescript:lib.dom\" :refer [fetch]]))\n"
+      "(def marker String \"typed\")\n"))
+    (define closure
+      (resolve-production-module-source-closure
+       (list (module-source-input "resolver-test/ambient.bjs" source-path))
+       '()))
+    (define resolutions
+      (module-source-closure-foreign-module-resolutions closure))
+    (check-equal? (hash-count resolutions) 1)
+    (define request (car (hash-keys resolutions)))
+    (check-equal?
+     (foreign-module-request-identity request)
+     (module-identity 'typescript-ambient "typescript:lib.dom"))
+    (check-equal?
+     (foreign-module-request-ambient-value-names request)
+     '(fetch))
+    (define module-source (hash-ref resolutions request))
+    (define interface
+      (module-interface-foreign-interface-v1
+       (module-source-interface module-source)))
+    (check-equal?
+     (map (lambda (entry) (hash-ref entry 'name))
+          (foreign-interface-v1-ambient-values interface))
+     '("fetch"))
+    (check-equal? (foreign-interface-v1-exports interface) '())
+    (check-true
+     (for/or ([input
+               (in-list
+                (hash-ref
+                 (foreign-interface-v1-provenance interface)
+                 'consultedFiles))])
+       (string=?
+        (hash-ref input 'path)
+        "adapter/node_modules/typescript/lib/lib.dom.d.ts")))
+    (define checked (check-module-source-closure closure #:emit? #f))
+    (check-true
+     (overlay-check-result-ok? checked)
+     (format "~a" (overlay-check-result-diagnostics checked))))))
+
+(test-case
  "missing Bun fails before adapter compilation or cache mutation"
  (with-bun-absent
   (lambda (project-root adapter-cache)
@@ -273,6 +325,21 @@
       (file->string wasm-bindgen-fixture)
       "\nexport declare function consumeBytes(request: Uint8Array<ArrayBuffer>): number;\n"
       "export declare function makeSharedBytes(): Uint8Array<SharedArrayBuffer>;\n"))
+    (define array-buffer-augmentation-root
+      (build-path project-root "node_modules" "@types"
+                  "runtime-array-buffer-augmentation"))
+    (make-directory* array-buffer-augmentation-root)
+    (write-source!
+     (build-path array-buffer-augmentation-root "package.json")
+     (string-append
+      "{\"name\":\"@types/runtime-array-buffer-augmentation\","
+      "\"version\":\"1.0.0\",\"types\":\"index.d.ts\"}\n"))
+    (write-source!
+     (build-path array-buffer-augmentation-root "index.d.ts")
+     (string-append
+      "interface ArrayBuffer {\n"
+      "  readonly runtimeArrayBufferAugmentation: true;\n"
+      "}\n"))
     (define source-path
       (build-path project-root "nested" "native-success.bjs"))
     (make-directory* (build-path project-root "nested"))
@@ -289,6 +356,8 @@
       "(js/export (defn runPipeline [] Nil (pipeline \"source\" 1 2 true)))\n"
       "(js/export (defn initialize [module SyncInitInput] Number (initSync module)))\n"
       "(js/export (defn initializeArrayBuffer [module ArrayBuffer] Number (initSync module)))\n"
+      "(js/export (defn initializeAnnotatedArrayBuffer [module ArrayBuffer] Number\n"
+      "  (let [input SyncInitInput module] (initSync input))))\n"
       "(js/export (defn consumeProducedBytes [] Number (consumeBytes (makeBytes))))\n"
       "(js/export (defn consumeConstructedBytes [request (Vec Int)] Number (consumeBytes (new Uint8Array request))))\n"
       "(js/export (defn consumeCopiedBytes [] Number (consumeBytes (new Uint8Array (makeBytes)))))\n"

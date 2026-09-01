@@ -199,11 +199,13 @@
          "require libspec must start with a namespace symbol or native ESM string, got: ~v"
          source)])]
     [(require-global)
-     (unless (plain-symbol? source)
-       (libspec-error
-        "require-global libspec must start with a global symbol, got: ~v"
-        source))
-     (module-identity 'global source)]
+     (cond
+       [(plain-symbol? source) (module-identity 'global source)]
+       [(string? source) (module-identity 'typescript-ambient source)]
+       [else
+        (libspec-error
+         "require-global libspec must start with a global symbol or TypeScript ambient-provider string, got: ~v"
+         source)])]
     [else
      (libspec-error "unknown libspec kind ~a" kind)]))
 
@@ -223,8 +225,14 @@
   (let loop ([rest (cdr items)])
     (cond
       [(null? rest)
-       (canonical-libspec
-        identity alias (validated-import-bindings refer rename ":rename"))]
+       (define bindings
+         (validated-import-bindings refer rename ":rename"))
+       (when (and (eq? (module-identity-kind identity) 'typescript-ambient)
+                  (null? bindings))
+         (libspec-error
+          "require-global TypeScript ambient provider ~v requires an explicit non-empty :refer"
+          (module-identity-value identity)))
+       (canonical-libspec identity alias bindings)]
       [(or (not (plain-symbol? (car rest)))
            (not (memq (car rest) '(:as :refer :rename))))
        (libspec-error

@@ -43,6 +43,7 @@
 (define (signature-type-parameter node)
   (hash 'name (hash-ref node 'name)
         'node (hash-ref node 'id)
+        'declarationOwner (format "fixture:~a" (hash-ref node 'id))
         'constraint (hash-ref node 'constraint)
         'default (hash-ref node 'default)))
 
@@ -495,7 +496,7 @@
 
 (define (br . values) (cons BRACKET-TAG values))
 
-(define (foreign-resolver identity _importer)
+(define (foreign-resolver identity _importer _ambient-names)
   (and (equal? identity (module-identity 'native-esm MODULE-SPECIFIER))
        FOREIGN-SOURCE))
 
@@ -512,7 +513,7 @@
    #:foreign-module-resolver foreign-resolver))
 
 (define (generic-consumer-program libspec annotation)
-  (define (resolver identity _importer)
+  (define (resolver identity _importer _ambient-names)
     (and (equal? identity (module-identity 'native-esm MODULE-SPECIFIER))
          GENERIC-SOURCE))
   (parse-program
