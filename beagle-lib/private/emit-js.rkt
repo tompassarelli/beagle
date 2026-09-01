@@ -890,6 +890,7 @@
 ;; --- context tracking ------------------------------------------------------
 
 (define current-js-context (make-parameter 'stmt))
+(define current-js-generator? (make-parameter #f))
 (define current-js-inline-scope (make-parameter (set)))
 (define current-js-record-fields (make-parameter (hasheq)))
 (define current-js-union-members (make-parameter (hasheq)))
@@ -2489,7 +2490,8 @@
           (if name (format " ~a" name) "")
           (string-join branches "\n")))
 
-(define (emit-js-defn f #:force-async? [force-async? #f])
+(define (emit-js-defn f #:force-async? [force-async? #f]
+                      #:generator? [generator? #f])
   (define params (emit-js-params (defn-form-params f) (defn-form-rest-param f)))
   (define param-rename-env
     (callable-param-rename-env
@@ -2510,9 +2512,13 @@
   (define emitted-body
     (with-param-envs (defn-form-params f)
       (lambda ()
-        (parameterize ([current-rename-env param-rename-env])
+        (parameterize ([current-rename-env param-rename-env]
+                       [current-js-generator? generator?])
           (with-bindings bound
-            (lambda () (emit-body-return (defn-form-body f) "  ")))))
+            (lambda ()
+              (if generator?
+                  (emit-body-stmts (defn-form-body f) "  ")
+                  (emit-body-return (defn-form-body f) "  "))))))
       (defn-form-rest-param f)))
   (define inner
     (string-join (append setup (list emitted-body)) "\n  "))
@@ -2520,10 +2526,13 @@
           (if (exported-binding? (defn-form-name f) (defn-form-private? f))
               "export "
               "")
-          (js-defn-signature f
-                             #:async? async?
-                             #:name (mangle-name (defn-form-name f))
-                             #:params params)
+          (if generator?
+              (format "async function* ~a(~a)"
+                      (mangle-name (defn-form-name f)) params)
+              (js-defn-signature f
+                                 #:async? async?
+                                 #:name (mangle-name (defn-form-name f))
+                                 #:params params))
           inner))
 
 (define (emit-js-async-callable f)
@@ -2574,6 +2583,12 @@
 
     [(async-callable? f)
      (emit-js-async-callable (async-callable-form f))]
+
+    [(jst-async-generator? f)
+     (define callable (jst-async-generator-form f))
+     (unless (defn-form? callable)
+       (error 'beagle-js "js/async-generator requires a defn"))
+     (emit-js-defn callable #:force-async? #t #:generator? #t)]
 
     [(record-form? f)
      (emit-record f)]
@@ -2646,7 +2661,9 @@
   (with-js-source-map-marker
    e
    (lambda ()
-     (parameterize ([current-js-context 'expr])
+     (parameterize ([current-js-context 'expr]
+                    [current-js-generator?
+                     (if (fn-form? e) #f (current-js-generator?))])
        (emit-expr-core e)))))
 
 (define (emit-expr-stmt e)
@@ -3053,14 +3070,20 @@
            (define body-str
              (emit-loop-body-sequence
               body bind-names
-              (lambda (value-str) (format "return ~a;" value-str))))
+              (lambda (value-str)
+                (if (current-js-generator?)
+                    (format "~a; break;" value-str)
+                    (format "return ~a;" value-str)))))
            (define prefix (if has-await "async " ""))
-           (format "(~a() => { ~a while (true) {\n    ~a~a~a\n  } })()"
-                   prefix
-                   (string-join bind-strs " ")
-                   (string-join iteration-setup-strs " ")
-                   (if (null? iteration-setup-strs) "" "\n    ")
-                   body-str))))]
+           (define loop-source
+             (format "~a while (true) {\n    ~a~a~a\n  }"
+                     (string-join bind-strs " ")
+                     (string-join iteration-setup-strs " ")
+                     (if (null? iteration-setup-strs) "" "\n    ")
+                     body-str))
+           (if (current-js-generator?)
+               (format "{ ~a }" loop-source)
+               (format "(~a() => { ~a })()" prefix loop-source)))))]
 
     [(recur-form? e)
      (error 'beagle-js
@@ -4061,6 +4084,36 @@
     [_ (error 'beagle-js "unsupported for clause combination")]))
 
 ;; --- doseq → forEach -------------------------------------------------------
+
+(define (emit-js-for-await e)
+  (define binding (jst-for-await-binding e))
+  (define pre-bound (current-js-bound))
+  (define pre-rename-env (current-rename-env))
+  (define-values (post-bound post-rename-env)
+    (extend-js-binding-context
+     binding "js-for-await" 0 pre-bound pre-rename-env))
+  (define-values (arg setup)
+    (emit-js-binding-parameter
+     binding "$beagle$item"
+     #:constraint-bound pre-bound
+     #:constraint-rename-env pre-rename-env
+     #:install-bound post-bound
+     #:install-rename-env post-rename-env))
+  (define collection-str
+    (parameterize ([current-js-bound pre-bound]
+                   [current-rename-env pre-rename-env])
+      (emit-expr (for-binding-expr binding))))
+  (define body-str
+    (parameterize ([current-js-bound post-bound]
+                   [current-rename-env post-rename-env])
+      (emit-body-stmts (jst-for-await-body e) "  ")))
+  (define setup-str (string-join setup "\n  "))
+  (define inner-body
+    (if (null? setup)
+        body-str
+        (string-append setup-str "\n  " body-str)))
+  (format "for await (const ~a of ~a) {\n  ~a\n}"
+          arg collection-str inner-body))
 
 (define (emit-doseq e)
   (define clauses (doseq-form-clauses e))
@@ -5143,6 +5196,12 @@
 ;; Emit a non-final expression as a statement (no return), inlining where possible.
 (define (emit-stmt-inline e indent)
   (cond
+    [(jst-yield? e)
+     (format "yield ~a;" (emit-expr (jst-yield-expr e)))]
+    [(jst-generator-return? e) "return;"]
+    [(jst-for-await? e) (emit-js-for-await e)]
+    [(and (current-js-generator?) (try-form? e))
+     (emit-js-try-statement e emit-body-stmts)]
     [(let-form? e)
      (define bindings (let-form-bindings e))
      (define body (let-form-body e))

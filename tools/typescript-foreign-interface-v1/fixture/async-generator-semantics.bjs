@@ -1,0 +1,14 @@
+#lang beagle/js
+
+(ns beagle.typescript.async-generator-semantics)
+
+(js/export
+  (js/async-generator
+    (defn stream
+      [values (AsyncIterable String) closed (Vec Bool)]
+      (AsyncIterable String)
+      (try
+        (js/for-await [value String values]
+          (js/yield value))
+        (js/generator-return)
+        (finally (.push closed true))))))

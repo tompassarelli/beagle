@@ -1390,6 +1390,10 @@
 (struct jst-declare-type (name type)                               #:transparent)
 (struct jst-declare-export (name type)                             #:transparent)
 (struct jst-import-meta ()                                        #:transparent)
+(struct jst-async-generator (form)                                 #:transparent)
+(struct jst-yield (expr)                                           #:transparent)
+(struct jst-for-await (binding body)                               #:transparent)
+(struct jst-generator-return ()                                    #:transparent)
 
 ;; Metadata and export markers wrap a definition without changing what it
 ;; defines: any pass dispatching on definition shape must unwrap first, or a
@@ -1398,6 +1402,8 @@
   (cond
     [(with-meta? form) (unwrap-definition-form (with-meta-expr form))]
     [(async-callable? form) (unwrap-definition-form (async-callable-form form))]
+    [(jst-async-generator? form)
+     (unwrap-definition-form (jst-async-generator-form form))]
     [(jst-export? form) (unwrap-definition-form (jst-export-form form))]
     [(jst-export-default? form)
      (unwrap-definition-form (jst-export-default-form form))]
@@ -1763,4 +1769,8 @@
  (struct-out jst-declare-record) (struct-out jst-declare-type)
  (struct-out jst-declare-export)
  (struct-out jst-import-meta)
+ (struct-out jst-async-generator)
+ (struct-out jst-yield)
+ (struct-out jst-for-await)
+ (struct-out jst-generator-return)
  unwrap-definition-form)

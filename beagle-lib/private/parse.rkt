@@ -5121,6 +5121,46 @@
        (jst-import-meta)]
       [_ (parse-list-form* d subs)])))
 
+;; JavaScript async generators are an explicit target boundary. Their body is
+;; still ordinary typed Beagle; only suspension and async iteration are JS-only.
+(register-combiner! 'js/async-generator
+  (lambda (d subs)
+    (match d
+      [(list 'js/async-generator inner-form)
+       (jst-async-generator (parse-expr (or (stx-ref subs 1) inner-form)))]
+      [_ (raise-parse-error 'bad-form
+                            "js/async-generator expects exactly one defn")])) )
+
+(register-combiner! 'js/yield
+  (lambda (d subs)
+    (match d
+      [(list 'js/yield value)
+       (jst-yield (parse-expr (or (stx-ref subs 1) value)))]
+      [_ (raise-parse-error 'bad-form "js/yield expects exactly one value")])) )
+
+(register-combiner! 'js/for-await
+  (lambda (d subs)
+    (match d
+      [(list 'js/for-await bindings-form body ...)
+       (define clauses
+         (parse-for-clauses (or (stx-ref subs 1) bindings-form)))
+       (unless (and (= (length clauses) 1) (for-binding? (car clauses)))
+         (raise-parse-error
+          'bad-form
+          "js/for-await requires exactly one typed binding [name Type async-iterable]"))
+       (jst-for-await (car clauses)
+                      (parse-body (or (stx-tail subs 2) body)))]
+      [_ (raise-parse-error
+          'bad-form
+          "js/for-await requires [name Type async-iterable] and a body")])) )
+
+(register-combiner! 'js/generator-return
+  (lambda (d _subs)
+    (match d
+      [(list 'js/generator-return) (jst-generator-return)]
+      [_ (raise-parse-error 'bad-form
+                            "js/generator-return takes no arguments")])) )
+
 ;; `js/export` migrated to the compile-time combiner registry (see register-combiner!).
 (register-combiner! 'js/export
   (lambda (d subs)
