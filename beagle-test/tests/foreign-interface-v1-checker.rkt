@@ -1293,6 +1293,32 @@
     (foreign-type "n:instance")
     (type-prim 'Any))))
 
+(test-case
+ "foreign unions require complete alternative coverage from Beagle unions"
+  (define interface
+    (make-interface
+     (list (wire-export "NullableValue" "u:nullable" #:space "type"))
+     (list
+      (wire-primitive "u:null" "null")
+      (hash 'id "u:nullable"
+            'kind "union"
+            'members (list "u:null" "u:value"))
+      (wire-object "u:value" #:name "Value"))))
+  (define interface-id (foreign-interface-v1-semantic-id interface))
+  (define value (type-foreign interface-id "u:value"))
+  (define nullable-value (type-foreign interface-id "u:nullable"))
+  (parameterize ([current-foreign-interfaces (hash interface-id interface)])
+    (check-true
+     (foreign-type-compatible-v1
+      nullable-value
+      (type-union (list NIL value)))
+     "equivalent unions must match across foreign and Beagle representations")
+    (check-false
+     (foreign-type-compatible-v1
+      nullable-value
+      (type-union (list value STRING)))
+     "an unmatched foreign union alternative must still reject")))
+
 (test-case "unsupported obligations are lazy and fail exactly on positive use"
   (check-not-exn
    (lambda ()

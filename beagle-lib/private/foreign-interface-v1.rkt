@@ -3776,13 +3776,44 @@
          [(brand) exact?]
          [(unsupported) (raise-node-obligation interface expected)]))]))
 
+(define (foreign-actual-union-alternatives type)
+  (cond
+    [(type-union? type) (type-union-alts type)]
+    [(type-foreign? type)
+     (define-values (interface _node) (foreign-node-ref type))
+     (define normalized
+       (normalize-foreign-view
+        interface
+        (make-foreign-view
+         (type-foreign-node-id type)
+         (foreign-type-bindings interface type))
+        (mutable-set)))
+     (define node
+       (node-at interface (foreign-view-node-id normalized)))
+     (and
+      (string=? (hash-ref node 'kind) "union")
+      (for/list ([member (in-list (hash-ref node 'members))])
+        (foreign-result-type
+         interface member (foreign-view-bindings normalized))))]
+    [else #f]))
+
 (define (foreign-type-compatible-v1 actual expected)
   (cond
     [(type-union? expected)
-     (ormap
-      (lambda (alternative)
-        (foreign-type-compatible-v1 actual alternative))
-      (type-union-alts expected))]
+     (define actual-alternatives
+       (foreign-actual-union-alternatives actual))
+     (if actual-alternatives
+         (parameterize
+             ([current-foreign-type-compatible?
+               foreign-type-compatible-v1])
+           (andmap
+            (lambda (alternative)
+              (type-compatible? alternative expected))
+            actual-alternatives))
+         (ormap
+          (lambda (alternative)
+            (foreign-type-compatible-v1 actual alternative))
+          (type-union-alts expected)))]
     [(type-union? actual)
      (andmap
       (lambda (alternative)
