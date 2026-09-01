@@ -245,4 +245,10 @@ test("async generator methods preserve yield, for-await, return, and finally", a
   expect(await generator.next()).toEqual({ value: "first", done: false });
   await generator.return();
   expect(closed).toEqual([true]);
+
+  const attemptClosed = [];
+  const attempt = module["attempt!"](attemptClosed);
+  expect(await attempt.next()).toEqual({ value: "attempt", done: false });
+  expect(await attempt.next()).toEqual({ value: undefined, done: true });
+  expect(attemptClosed).toEqual([true]);
 });

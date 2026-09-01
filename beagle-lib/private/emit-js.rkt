@@ -2670,6 +2670,62 @@
   (define s (await-async-iife (emit-expr-core e)))
   (if (string-suffix? s ";") s (string-append s ";")))
 
+(define (emit-letfn-content e emit-executable-body indent)
+  (define fns (letfn-form-fns e))
+  (define body (letfn-form-body e))
+  (define fn-names (map letfn-fn-name fns))
+  (define letfn-rename-env
+    (for/fold ([env (current-rename-env)])
+              ([fn (in-list fns)] [fn-name (in-list fn-names)])
+      (rename-env-set-binder
+       env fn fn-name (mangle-name (binder-output-symbol fn fn-name)))))
+  (parameterize ([current-rename-env letfn-rename-env])
+    (with-bindings fn-names
+      (lambda ()
+        (define fn-strs
+          (for/list ([f (in-list fns)])
+            (define name (resolved-binder-name f (letfn-fn-name f)))
+            (define params
+              (emit-js-params
+               (letfn-fn-params f) (letfn-fn-rest-param f)))
+            (define param-rename-env
+              (callable-param-rename-env
+               (letfn-fn-params f) (letfn-fn-rest-param f)))
+            (define setup
+              (emit-js-param-setup
+               (letfn-fn-params f)
+               (letfn-fn-rest-param f)
+               param-rename-env))
+            (define fn-body (letfn-fn-body f))
+            (define fn-async?
+              (or (params-have-constraint-await?
+                   (letfn-fn-params f) (letfn-fn-rest-param f))
+                  (contains-await? fn-body)))
+            (define prefix (if fn-async? "async " ""))
+            (define fn-bound
+              (binding-names-from-params
+               (letfn-fn-params f) (letfn-fn-rest-param f)))
+            (with-param-envs
+             (letfn-fn-params f)
+             (lambda ()
+               ;; A letfn callable is an ordinary nested function boundary. It
+               ;; never inherits async-generator statement authority from the
+               ;; surrounding function.
+               (parameterize ([current-rename-env param-rename-env]
+                              [current-js-generator? #f])
+                 (with-bindings fn-bound
+                   (lambda ()
+                     (format "~afunction ~a(~a) { ~a }"
+                             prefix name params
+                             (string-join
+                              (append setup
+                                      (list (emit-body-return fn-body "")))
+                              " "))))))
+             (letfn-fn-rest-param f))))
+        (format "~a ~a"
+                (string-join fn-strs " ")
+                (emit-executable-body body indent))))))
+
 (define (emit-expr-core e)
   (cond
     [(resolved-ref? e) (resolved-name e)]
@@ -3135,57 +3191,13 @@
      (emit-js-multi-arity-function (fn-multi-arities e))]
 
     [(letfn-form? e)
-     (define fns (letfn-form-fns e))
      (define body (letfn-form-body e))
-     (define fn-names (map letfn-fn-name fns))
-     (define letfn-rename-env
-       (for/fold ([env (current-rename-env)])
-                 ([fn (in-list fns)] [fn-name (in-list fn-names)])
-         (rename-env-set-binder
-          env fn fn-name (mangle-name (binder-output-symbol fn fn-name)))))
      ;; Nested functions own their async status. Their bodies must not make
      ;; the surrounding letfn IIFE async: declaring an async local while the
      ;; letfn body returns a plain value must still return that value directly.
      (define has-await (contains-await? body))
-     (parameterize ([current-rename-env letfn-rename-env])
-       (with-bindings fn-names
-        (lambda ()
-         (define fn-strs
-           (for/list ([f (in-list fns)])
-             (define name (resolved-binder-name f (letfn-fn-name f)))
-             (define params
-               (emit-js-params
-                (letfn-fn-params f) (letfn-fn-rest-param f)))
-             (define param-rename-env
-               (callable-param-rename-env
-                (letfn-fn-params f) (letfn-fn-rest-param f)))
-             (define setup
-               (emit-js-param-setup
-                (letfn-fn-params f)
-                (letfn-fn-rest-param f)
-                param-rename-env))
-             (define fn-body (letfn-fn-body f))
-             (define fn-async?
-               (or (params-have-constraint-await?
-                    (letfn-fn-params f) (letfn-fn-rest-param f))
-                   (contains-await? fn-body)))
-             (define prefix (if fn-async? "async " ""))
-             (define fn-bound (binding-names-from-params (letfn-fn-params f) (letfn-fn-rest-param f)))
-             (with-param-envs
-              (letfn-fn-params f)
-              (lambda ()
-                (parameterize ([current-rename-env param-rename-env])
-                  (with-bindings fn-bound
-                    (lambda ()
-                      (format "~afunction ~a(~a) { ~a }"
-                              prefix name params
-                              (string-join
-                               (append setup
-                                       (list (emit-body-return fn-body "")))
-                               " "))))))
-              (letfn-fn-rest-param f))))
-         (iife (format "~a ~a" (string-join fn-strs " ") (emit-body-return body ""))
-                #:async? has-await))))]
+     (iife (emit-letfn-content e emit-body-return "")
+           #:async? has-await)]
 
     [(static-call? e)
      (define ref (static-call-class+method e))
@@ -4482,6 +4494,18 @@
                #:when (param-constraint p))
            (walk (param-constraint p)))
          (for-each walk (arity-clause-body a)))]
+      [(letfn-form? e)
+       ;; Local functions may close over and reassign bindings owned by the
+       ;; surrounding let. Their parameter constraints and bodies therefore
+       ;; participate in the same mutable-binding inventory as fn literals.
+       (for ([f (in-list (letfn-form-fns e))])
+         (for ([p (in-list
+                   (param-bindings
+                    (letfn-fn-params f) (letfn-fn-rest-param f)))]
+               #:when (param-constraint p))
+           (walk (param-constraint p)))
+         (for-each walk (letfn-fn-body f)))
+       (for-each walk (letfn-form-body e))]
       [(cond-form? e) (for ([c (in-list (cond-form-clauses e))])
                         (walk (cond-clause-test c)) (for-each walk (cond-clause-body c)))]
       [(for-form? e) (for ([c (in-list (for-form-clauses e))])
@@ -5205,6 +5229,14 @@
     [(jst-for-await? e) (emit-js-for-await e)]
     [(and (current-js-generator?) (try-form? e))
      (emit-js-try-statement e emit-body-stmts)]
+    [(and (current-js-generator?) (letfn-form? e))
+     ;; Keep the executable letfn body in the generator itself. The lexical
+     ;; block scopes its local functions without moving yield into an IIFE.
+     (define inner (string-append indent "  "))
+     (format "{\n~a~a\n~a}"
+             inner
+             (emit-letfn-content e emit-body-stmts inner)
+             indent)]
     [(let-form? e)
      (define bindings (let-form-bindings e))
      (define body (let-form-body e))
@@ -5212,8 +5244,7 @@
        (map (lambda (b) (names-from-binding-target (let-binding-name b))) bindings)))
      (define shadows? (for/or ([n (in-list let-names)])
                         (set-member? (current-js-inline-scope) n)))
-     (if shadows?
-       (emit-expr-stmt e)
+     (define (emit-inline-body body-indent)
        (let ()
          (define mutated-syms (collect-let-set!-target-syms bindings body))
          (define-values (bind-strs rep-env-out type-env-out rename-env-out)
@@ -5226,9 +5257,19 @@
                             [current-type-env type-env-out]
                             [current-rename-env rename-env-out])
                (string-append
-                (string-join bind-strs (string-append "\n" indent))
-                "\n" indent
-                (emit-body-stmts body indent)))))))]
+                (string-join bind-strs (string-append "\n" body-indent))
+                "\n" body-indent
+                (emit-body-stmts body body-indent)))))))
+     (cond
+       [(and shadows? (current-js-generator?))
+        ;; A nested authored let that shadows an already-inlined binding needs
+        ;; a real JavaScript lexical block. An IIFE is not an equivalent escape
+        ;; inside an async generator: yield belongs to the generator function
+        ;; itself and is a syntax error inside an ordinary async callback.
+        (define inner (string-append indent "  "))
+        (format "{\n~a~a\n~a}" inner (emit-inline-body inner) indent)]
+       [shadows? (emit-expr-stmt e)]
+       [else (emit-inline-body indent)])]
     [(do-form? e)
      (emit-body-stmts (do-form-body e) indent)]
     [(when-form? e)

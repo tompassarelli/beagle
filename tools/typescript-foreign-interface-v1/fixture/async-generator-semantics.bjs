@@ -18,3 +18,26 @@
             (when false (recur)))
           (js/generator-return))
         (finally (.push closed true))))))
+
+(js/export
+  (js/async-generator
+    (defn attempt! [closed (Vec Bool)] (AsyncIterable String)
+      (let [phase String "session"]
+        (let [phase String "attempt"
+              observed Bool false]
+          (letfn [(current-phase [] String
+                    (do
+                      (set! observed true)
+                      phase))]
+            (try
+              (do
+                (loop [pending Bool true]
+                  (if pending
+                    (do
+                      (js/yield (current-phase))
+                      (recur false))
+                    nil))
+                (when (not observed)
+                  (throw (new Error "attempt was not observed")))
+                (js/generator-return))
+              (finally (.push closed true)))))))))
