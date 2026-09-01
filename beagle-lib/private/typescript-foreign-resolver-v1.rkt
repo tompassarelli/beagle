@@ -280,8 +280,8 @@
 (define (logical-input-path logical project-root typescript-root)
   (define mappings
     (list
-     (cons "adapter/node_modules/typescript/"
-           (build-path typescript-root "node_modules" "typescript"))
+     (cons "adapter/node_modules/"
+           (build-path typescript-root "node_modules"))
      (cons "project/" project-root)
      (cons "adapter/" adapter-root)
      (cons "runtime/" beagle-js-runtime-root)))

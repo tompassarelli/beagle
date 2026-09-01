@@ -466,6 +466,13 @@ export function createContext({ projectRoot, containingFile, moduleSpecifier, am
     strict: true,
     target: ts.ScriptTarget.ESNext,
   };
+  const projectTypeRoots = ts.getEffectiveTypeRoots(compilerOptions, {
+    getCurrentDirectory: () => canonicalProjectRoot,
+  }) ?? [];
+  compilerOptions.typeRoots = [...new Set([
+    ...projectTypeRoots,
+    resolve(TYPESCRIPT_RUNTIME_ROOT, "node_modules/@types"),
+  ])];
   if (BUILTIN_AMBIENT_MODULES.has(moduleSpecifier) || ambientProvider) compilerOptions.types = [];
   logicalCanonical(canonicalProjectRoot, canonicalContainingFile, "containing file");
   const projectLocks = bindProjectLocks(canonicalProjectRoot);
@@ -515,6 +522,9 @@ export function createContext({ projectRoot, containingFile, moduleSpecifier, am
       `${typescriptLibraryMatch[1]}.d.ts`,
     ))
     : null;
+  const exactAmbientModule = (typeChecker) => typeChecker.getAmbientModules().find((symbol) => (
+    symbol.getName().replace(/^"|"$/g, "") === moduleSpecifier
+  ));
   let resolved = typescriptLibraryPath
     ? { resolvedFileName: typescriptLibraryPath }
     : ts.resolveModuleName(
@@ -553,7 +563,9 @@ export function createContext({ projectRoot, containingFile, moduleSpecifier, am
     checker = program.getTypeChecker();
     source = program.getSourceFile(resolved.resolvedFileName);
     if (!source) throw new Error(`resolved declaration is absent from Program: ${resolved.resolvedFileName}`);
-    moduleSymbol = ambientProvider ? null : checker.getSymbolAtLocation(source);
+    moduleSymbol = ambientProvider
+      ? null
+      : checker.getSymbolAtLocation(source) ?? exactAmbientModule(checker);
     if (!ambientProvider && !moduleSymbol) {
       throw new Error(`resolved declaration has no module symbol: ${resolved.resolvedFileName}`);
     }
@@ -574,9 +586,7 @@ export function createContext({ projectRoot, containingFile, moduleSpecifier, am
         .filter(Boolean);
     program = ts.createProgram(typeDirectiveFiles, compilerOptions, host);
     checker = program.getTypeChecker();
-    moduleSymbol = checker.getAmbientModules().find((symbol) => (
-      symbol.getName().replace(/^"|"$/g, "") === moduleSpecifier
-    ));
+    moduleSymbol = exactAmbientModule(checker);
     if (!moduleSymbol) {
       throw new Error(`cannot resolve physical or ambient TypeScript module ${moduleSpecifier} from ${containingFile}`);
     }
@@ -741,10 +751,14 @@ export function createCompilerBridge({
     canonicalTypescriptRuntimeRoot,
     "node_modules/typescript",
   ));
+  const runtimeNodeModulesRoot = canonicalPath(resolve(
+    canonicalTypescriptRuntimeRoot,
+    "node_modules",
+  ));
   const compilerInputDigest = (context, snapshot) => {
-    const typescriptPath = maybeLogicalCanonical(typescriptRoot, snapshot.path);
-    if (typescriptPath) {
-      return { path: `adapter/node_modules/typescript/${typescriptPath}`, sha256: snapshot.sha256 };
+    const runtimeDependencyPath = maybeLogicalCanonical(runtimeNodeModulesRoot, snapshot.path);
+    if (runtimeDependencyPath) {
+      return { path: `adapter/node_modules/${runtimeDependencyPath}`, sha256: snapshot.sha256 };
     }
     const projectPath = maybeLogicalCanonical(context.projectRoot, snapshot.path);
     if (projectPath) return { path: `project/${projectPath}`, sha256: snapshot.sha256 };

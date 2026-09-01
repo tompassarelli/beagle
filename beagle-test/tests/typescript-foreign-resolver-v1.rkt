@@ -509,6 +509,7 @@
       "  (:require [\"@fixture/native\" :refer [acceptFlag loadBuffer loadText makeBytes notify pipeline schedule stringTransformer value]]\n"
       "            [\"@fixture/wasm-bindgen-init\" :refer [consumeBytes SyncInitInput initSync]])\n"
       "  (:require-global [\"typescript:lib.es5\" :refer [Error]]))\n"
+      "(require '[\"bun\" :refer [file]])\n"
       "(js/export (def answer String value))\n"
       "(js/export (defn relay [flag Bool] Nil (acceptFlag flag)))\n"
       "(js/export (defn transform [value String] String (stringTransformer value)))\n"
@@ -531,6 +532,9 @@
       "     (.then (loadText) (fn [value String] (Promise ArrayBuffer) (loadBuffer)))])))\n"
       "(js/export (defn loadDynamicThen [] Any\n"
       "  (.then (loadBuffer) (fn [value ArrayBuffer] Any value))))\n"
+      "(js/export (defn loadBunFilesTogether [] Any\n"
+      "  (.all Promise [(.arrayBuffer (file \"fixture.wasm\"))\n"
+      "                 (.text (file \"fixture.txt\"))])))\n"
       "(js/export (defn run [] Nil (schedule (fn [] Nil (notify)))))\n"))
 
     (define closure
@@ -547,7 +551,13 @@
     (define resolutions
       (hash-values
        (module-source-closure-foreign-module-resolutions closure)))
-    (check-equal? (length resolutions) 3)
+    (check-equal? (length resolutions) 4)
+    (define resolution-interfaces
+      (for/hash ([source (in-list resolutions)])
+        (define interface
+          (module-interface-foreign-interface-v1
+           (module-source-interface source)))
+        (values (foreign-interface-v1-semantic-id interface) interface)))
     (define (foreign-source-for module-specifier)
       (for/first
           ([source (in-list resolutions)]
@@ -567,6 +577,13 @@
     (check-pred module-source? wasm-source)
     (define error-source (foreign-source-for "typescript:lib.es5"))
     (check-pred module-source? error-source)
+    (define bun-source (foreign-source-for "bun"))
+    (check-pred module-source? bun-source)
+    (check-pred
+     interface-binding?
+     (module-interface-binding-ref
+      (module-source-interface bun-source)
+      'file))
     (define error-interface
       (module-interface-foreign-interface-v1
        (module-source-interface error-source)))
@@ -778,7 +795,7 @@
                       (string=? (jst-selector-name (jst-call-key expression))
                                 "all")))
         inferred))
-    (check-equal? (length promise-all-results) 3)
+    (check-equal? (length promise-all-results) 4)
     (define promise-reject-result
       (for/first ([(expression inferred)
                    (in-hash (program-type-table checked-program))]
@@ -792,10 +809,24 @@
      (and (type-app? promise-reject-result)
           (eq? (type-app-ctor promise-reject-result) 'Promise)
           (= (length (type-app-args promise-reject-result)) 1)
-          (let ([payload (car (type-app-args promise-reject-result))])
-            (and (type-foreign? payload)
-                 (string=? (type-foreign-node-id payload)
-                           promise-reject-default-id))))
+          (let* ([payload (car (type-app-args promise-reject-result))]
+                 [payload-interface
+                  (and
+                   (type-foreign? payload)
+                   (hash-ref
+                    resolution-interfaces
+                    (type-foreign-interface-id payload)
+                    #f))]
+                 [payload-node
+                  (and
+                   payload-interface
+                   (hash-ref
+                    (foreign-interface-v1-nodes payload-interface)
+                    (type-foreign-node-id payload)
+                    #f))])
+            (and payload-node
+                 (string=? (hash-ref payload-node 'kind) "primitive")
+                 (string=? (hash-ref payload-node 'name) "never"))))
      (and promise-reject-result (type->string promise-reject-result)))
     (for ([promise-all-result (in-list promise-all-results)])
       (check-true
@@ -808,10 +839,7 @@
       (define promise-payload (car (type-app-args promise-all-result)))
       (define indexed-payload
         (parameterize
-            ([current-foreign-interfaces
-              (hash
-               (foreign-interface-v1-semantic-id foreign-interface)
-               foreign-interface)])
+            ([current-foreign-interfaces resolution-interfaces])
           (foreign-index-type-v1 promise-payload (type-prim 'Int))))
       (check-true (type-union? indexed-payload)
                   (type->string indexed-payload))
@@ -841,6 +869,9 @@
     (check-true
      (string-contains? emitted "from \"@fixture/wasm-bindgen-init\";")
      "emission must preserve the exact wasm-bindgen ESM specifier")
+    (check-true
+     (string-contains? emitted "from \"bun\";")
+     "emission must preserve the exact Bun ESM specifier")
     (check-false
      (string-contains? emitted "foreign-interface:")
      "validated type identity must never become wrapper source")
