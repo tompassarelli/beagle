@@ -5056,6 +5056,7 @@
 ;; Inlines let/do/when/when-let/if-let/if to avoid unnecessary IIFEs.
 (define (emit-return-position e indent)
   (cond
+    [(jst-generator-return? e) "return;"]
     [(let-form? e)
      (define bindings (let-form-bindings e))
      (define body (let-form-body e))

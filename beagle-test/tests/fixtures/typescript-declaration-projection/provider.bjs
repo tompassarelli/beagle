@@ -4,6 +4,9 @@
 
 (defalias PublicLabel String)
 
+(defscalar PublicName String)
+(defscalar PublicCount Int :where (>= 0))
+
 (defrecord Draft
   [id PublicLabel
    tags (Vec String)])

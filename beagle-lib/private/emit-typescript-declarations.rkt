@@ -270,6 +270,13 @@
     [details
      (error 'beagle-dts "unsupported union interface details: ~v" details)]))
 
+(define (scalar-backing declaration)
+  (match (interface-type-declaration-details declaration)
+    [(list 'backing backing 'predicates _)
+     backing]
+    [details
+     (error 'beagle-dts "unsupported scalar interface details: ~v" details)]))
+
 (define (emit-type-declaration interface render-type declaration)
   (define name (interface-type-declaration-name declaration))
   (define rendered-name
@@ -290,6 +297,13 @@
               (interface-type-declaration-details declaration)))]
     [(record)
      (emit-record-declaration interface render-type name)]
+    [(scalar)
+     ;; JS erases Beagle scalar wrappers to their primitive representation.
+     ;; The declaration projection therefore exposes that exact wire shape;
+     ;; runtime predicates remain enforced by the emitted scalar constructor.
+     (format "export type ~a = ~a;"
+             rendered-name
+             (render-type (type-prim (scalar-backing declaration))))]
     [(js-wire-record)
      (emit-wire-record-declaration
       render-type
@@ -396,10 +410,17 @@
                       (sort
                        (hash-keys (module-interface-type-declarations interface))
                        symbol<?))])
-      (emit-type-declaration
-       interface
-       render-type
-       (hash-ref (module-interface-type-declarations interface) name))))
+      (with-handlers
+          ([exn:fail?
+            (lambda (failure)
+              (error 'beagle-dts
+                     "type declaration ~a: ~a"
+                     name
+                     (exn-message failure)))])
+        (emit-type-declaration
+         interface
+         render-type
+         (hash-ref (module-interface-type-declarations interface) name)))))
   (define value-declarations
     (for/list ([local-name
                 (in-list
@@ -412,10 +433,17 @@
         (error 'beagle-dts
                "public ESM export ~a has no checked interface binding"
                local-name))
-      (emit-value-declaration
-       render-type
-       (hash-ref (module-interface-public-esm-exports interface) local-name)
-       binding)))
+      (with-handlers
+          ([exn:fail?
+            (lambda (failure)
+              (error 'beagle-dts
+                     "value declaration ~a: ~a"
+                     local-name
+                     (exn-message failure)))])
+        (emit-value-declaration
+         render-type
+         (hash-ref (module-interface-public-esm-exports interface) local-name)
+         binding))))
   (define sections
     (filter (lambda (section) (not (null? section)))
             (list type-declarations value-declarations)))

@@ -229,9 +229,10 @@ test("async generator methods preserve yield, for-await, return, and finally", a
       [values (AsyncIterable String) closed (Vec Bool)]
       (AsyncIterable String)
       (try
-        (js/for-await [value String values]
-          (js/yield value))
-        (js/generator-return)
+        (do
+          (js/for-await [value String values]
+            (js/yield value))
+          (js/generator-return))
         (finally (.push closed true))))))
 `);
   const built = Bun.spawnSync([

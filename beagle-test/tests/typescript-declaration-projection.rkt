@@ -94,6 +94,10 @@
   (check-true (string-contains? provider-declarations
                                 "export type Result = Accepted | Rejected;"))
   (check-true (string-contains? provider-declarations
+                                "export type PublicName = string;"))
+  (check-true (string-contains? provider-declarations
+                                "export type PublicCount = number;"))
+  (check-true (string-contains? provider-declarations
                                 "export interface PublicAccepted {\n  status: \"accepted\";\n  note?: string;\n}"))
   (check-true (string-contains? provider-declarations
                                 "export interface PublicRejected {\n  status: \"rejected\";\n  reason: string;\n}"))

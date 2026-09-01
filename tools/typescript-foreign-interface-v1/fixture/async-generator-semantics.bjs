@@ -8,7 +8,8 @@
       [values (AsyncIterable String) closed (Vec Bool)]
       (AsyncIterable String)
       (try
-        (js/for-await [value String values]
-          (js/yield value))
-        (js/generator-return)
+        (do
+          (js/for-await [value String values]
+            (js/yield value))
+          (js/generator-return))
         (finally (.push closed true))))))
