@@ -29,6 +29,7 @@
 (def match-counter Any (atom 0))
 (def logical-counter Any (atom 0))
 (def constrained-binding-counter Any (atom 0))
+(def lexical-shadow-counter Any (atom 0))
 (def loop-try-counter Any (atom 0))
 (def current-namespace Any (atom "beagle.user"))
 (def bound-vars Any (atom {}))           ; name(string) -> true : in-scope binding
@@ -94,6 +95,15 @@
             [acc Any
              n String] Any
             (assoc acc n true)) m names))
+
+(defn with-inline-scope!
+  [names Any
+   thunk Any] Any
+  (let [saved (deref inline-scope)]
+    (reset! inline-scope (add-names saved names))
+    (let [result (thunk)]
+      (reset! inline-scope saved)
+      result)))
 
 (defn with-bound!
   [names Any
@@ -161,6 +171,11 @@
     (swap! constrained-binding-counter inc)
     n))
 
+(defn next-lexical-shadow-id! [] Int
+  (let [n (deref lexical-shadow-counter)]
+    (swap! lexical-shadow-counter inc)
+    n))
+
 (defn with-pattern-default-env!
   [bound Any
    types Any
@@ -200,13 +215,17 @@
         (str/replace
           (str/replace
             (str/replace
-              (str/replace s "-" "_")
-              "?" "_p")
-            "!" "_bang")
-          "=" "_eq")
-        ">" "_gt")
-      "<" "_lt")
-    "%" "_pct"))
+              (str/replace
+                (str/replace
+                  (str/replace s "-" "_")
+                  "?" "_p")
+                "!" "_bang")
+              "=" "_eq")
+            ">" "_gt")
+          "<" "_lt")
+        "%" "_pct")
+      "*" "_star")
+    "+" "_plus"))
 
 (defn mangle-chars [s String] String
   (mangle-punctuation (str/replace s "_" "__")))
@@ -238,6 +257,12 @@
     (or (qualified-reference=? form "js" "declare-record")
         (qualified-reference=? form "js" "declare-type")
         (qualified-reference=? form "js" "declare-export"))))
+
+(defn forward-declaration-form? [form Any] Bool
+  (and (= (get form "node") "call")
+       (= (get (get form "fn") "node") "ref")
+       (= (get (get form "fn") "name") "declare")
+       (not (qualified-reference? (get form "fn")))))
 
 (defn qualified-reference-same-binding?
   [left Any
@@ -461,6 +486,7 @@
    "/" "((_a, _b) => _a / _b)"
    "mod" "((_a, _b) => _a % _b)"
    "str" "((..._xs) => \"\".concat(..._xs))"
+   "flush" "(() => null)"
    "identity" "((_x) => _x)"
    "nil?" "((_x) => _x == null)"
    "some?" "((_x) => _x != null)"
@@ -474,6 +500,8 @@
    "not" "((_x) => !_x)"
    "string?" "((_x) => typeof _x === 'string')"
    "number?" "((_x) => typeof _x === 'number')"
+   "int?" "((_x) => Number.isInteger(_x))"
+   "double?" "((_x) => typeof _x === 'number')"
    "keyword?" "((_x) => typeof _x === 'string')"
    "fn?" "((_x) => typeof _x === 'function')"
    "integer?" "((_x) => Number.isInteger(_x))"
@@ -497,7 +525,26 @@
    "any?" "((_x) => true)"
    "quot" "((_a, _b) => Math.trunc(_a / _b))"
    "rem" "((_a, _b) => _a % _b)"
-   "run!" "((_f, _c) => (_c.forEach(_f), null))"})
+   "run!" "((_f, _c) => (_c.forEach(_f), null))"
+   "concat" "((..._xs) => [].concat(..._xs))"
+   "vector" "((..._xs) => _xs)"
+   "min" "((..._xs) => Math.min(..._xs))"})
+
+(def JS-RUNTIME-VALUE-WRAPPERS Any
+  {"keys" {"rendered" "$$bc$keys"
+            "imports" ["keys"]}
+   "assoc" {"rendered" "((_m, _k, _v) => $$bc$assoc_value(_m, _k, _v))"
+             "imports" ["assoc_value"]}
+   "conj" {"rendered" "((_c, ..._xs) => $$bc$conj_value(_c, ..._xs))"
+            "imports" ["conj_value"]}
+   "into" {"rendered" "((_to, _from) => $$bc$into_value(_to, _from))"
+            "imports" ["into_value"]}
+   "assoc-in" {"rendered" "((_m, _path, _v) => $$bc$assoc_in(_m, _path, _v))"
+               "imports" ["assoc_in"]}
+   "update" {"rendered" "((_m, _k, _f) => $$bc$assoc_value(_m, _k, _f($$bc$get(_m, _k))))"
+             "imports" ["assoc_value" "get"]}
+   "dissoc" {"rendered" "((_m, ..._ks) => $$bc$dissoc_value(_m, ..._ks))"
+             "imports" ["dissoc_value"]}})
 
 ;; ast-json guards optional slots with (and x (serialize x)); an absent slot
 ;; arrives as JSON false, not null.
@@ -1308,8 +1355,27 @@
       (cond
         (= name "nil") "null"
         (bound? name) (resolved-name name)
+        (contains? JS-RUNTIME-VALUE-WRAPPERS name)
+          (get (get JS-RUNTIME-VALUE-WRAPPERS name) "rendered")
         (contains? JS-VALUE-WRAPPERS name) (get JS-VALUE-WRAPPERS name)
         :else (mangle-name name)))))
+
+(defn runtime-value-imports [body String] Any
+  (reduce
+    (fn
+      [uses Any
+       spec Any] Any
+      (if (str/includes? body (get spec "rendered"))
+        (reduce
+          (fn
+            [next Any
+             name String] Any
+            (assoc next name true))
+          uses
+          (get spec "imports"))
+        uses))
+    {}
+    (vals JS-RUNTIME-VALUE-WRAPPERS)))
 
 (defn emit-call-fn-name [ref Any] String
   (if (qualified-reference? ref)
@@ -1349,6 +1415,7 @@
       (= fn-sym "prn") (str "console.log(" (emit-args-list args) ")")
       (= fn-sym "print") (if (= n 1) (str "process.stdout.write(" a0 ")")
                            (str "process.stdout.write(\"\".concat(" (emit-args-list args) "))"))
+      (= fn-sym "flush") (if (= n 0) "null" nil)
       (= fn-sym "newline") (if (= n 0) "console.log()" nil)
       (= fn-sym "nil?") (if (= n 1) (str "(" a0 " == null)") nil)
       (= fn-sym "some?") (if (= n 1) (str "(" a0 " != null)") nil)
@@ -1418,6 +1485,8 @@
       (= fn-sym "not=") (if (= n 2) (str "(" a0 " !== " a1 ")") nil)
       (= fn-sym "string?") (if (= n 1) (str "(typeof " a0 " === 'string')") nil)
       (= fn-sym "number?") (if (= n 1) (str "(typeof " a0 " === 'number')") nil)
+      (= fn-sym "int?") (if (= n 1) (str "Number.isInteger(" a0 ")") nil)
+      (= fn-sym "double?") (if (= n 1) (str "(typeof " a0 " === 'number')") nil)
       (= fn-sym "keyword?") (if (= n 1) (str "(typeof " a0 " === 'string')") nil)
       (= fn-sym "fn?") (if (= n 1) (str "(typeof " a0 " === 'function')") nil)
       (= fn-sym "throw")
@@ -1751,9 +1820,13 @@
                                [next Any
                                 name String] Any
                                (assoc next name
-                                 (if constrained-sequence?
-                                   (str "$beagle$constrained$binding$" id "$" (mangle-name name))
-                                   (mangle-name name))))
+                                 (cond
+                                   constrained-sequence?
+                                     (str "$beagle$constrained$binding$" id "$" (mangle-name name))
+                                   (contains? bound name)
+                                     (str "$beagle$shadow$" (next-lexical-shadow-id!) "$"
+                                       (mangle-name name))
+                                   :else (mangle-name name))))
                              renames names)
               mutable? (> (count (filterv
                                    (fn [name String] Bool
@@ -1956,17 +2029,15 @@
         (= node "let")
           (let [bindings (get e "bindings")
                 body (get e "body")
-                lnames (let-names-of bindings)]
-            (if (shadows-inline? lnames)
-              (emit-expr-stmt! e)
-              (let [info (emit-let-bind-info! bindings body)
-                    bind-strs (get info "strs")]
-                (with-emission-env! (get info "bound") (get info "types") (get info "renames")
+                lnames (let-names-of bindings)
+                info (emit-let-bind-info! bindings body)
+                bind-strs (get info "strs")]
+            (with-emission-env! (get info "bound") (get info "types") (get info "renames")
+              (fn [] Any
+                (with-inline-scope! lnames
                   (fn [] Any
-                    (let [saved (deref inline-scope)]
-                      (reset! inline-scope (add-names saved lnames))
-                      (let [r (str (str/join (str "\n" indent) bind-strs) "\n" indent (emit-body-stmts body indent))]
-                        (reset! inline-scope saved) r)))))))
+                    (str "{\n" inner (str/join (str "\n" inner) bind-strs)
+                      "\n" inner (emit-body-stmts body inner) "\n" indent "}"))))))
         (= node "do") (emit-body-stmts (get e "body") indent)
         (= node "when")
           (str "if (" (emit-expr*! (get e "cond")) ") {\n" inner (emit-body-stmts (get e "body") inner) "\n" indent "}")
@@ -2348,16 +2419,18 @@
       (add-types outer-types (param-type-entries (get e "params") (get e "rest")))
       renames
       (fn [] Any
-          (if (and (= 0 (count setup))
-                (= 1 (count body))
-                (not (stmt-inline? (nth body 0))))
-            (let [body-str (emit-expr*! (nth body 0))]
-              (if (leading-brace? body-str)
-                (str prefix "(" params ") => (" body-str ")")
-                (str prefix "(" params ") => " body-str)))
-            (str prefix "(" params ") => { "
-              (str/join " " (into setup [(emit-body-return* body "")]))
-              " }"))))))
+        (with-inline-scope! bound
+          (fn [] Any
+            (if (and (= 0 (count setup))
+                  (= 1 (count body))
+                  (not (stmt-inline? (nth body 0))))
+              (let [body-str (emit-expr*! (nth body 0))]
+                (if (leading-brace? body-str)
+                  (str prefix "(" params ") => (" body-str ")")
+                  (str prefix "(" params ") => " body-str)))
+              (str prefix "(" params ") => { "
+                (str/join " " (into setup [(emit-body-return* body "")]))
+                " }"))))))))
 
 (defn emit-eq-pairs! [args Any] String
   (let [n (count args)
@@ -2508,7 +2581,10 @@
                 info (emit-let-bind-info! bindings body)
                 bind-strs (get info "strs")]
             (with-emission-env! (get info "bound") (get info "types") (get info "renames")
-              (fn [] Any (iife (str (str/join " " bind-strs) " " (emit-body-return* body "")) has-await))))
+              (fn [] Any
+                (with-inline-scope! (let-names-of bindings)
+                  (fn [] Any
+                    (iife (str (str/join " " bind-strs) " " (emit-body-return* body "")) has-await))))))
         (= node "loop")
           (let [bindings (get e "bindings")
                 body (get e "body")
@@ -2717,7 +2793,10 @@
                                                            (add-types pre-types
                                                              (param-type-entries (get f "params") (get f "rest")))
                                                            renames
-                                                           (fn [] Any (emit-body-return* (get f "body") "")))]
+                                                           (fn [] Any
+                                                             (with-inline-scope! fb
+                                                               (fn [] Any
+                                                                 (emit-body-return* (get f "body") "")))))]
                                       (str (if fa? "async " "") "function " (mangle-name (get f "name"))
                                              "(" (emit-js-params! (get f "params") (get f "rest")) ") { "
                                              (str/join " " (into setup [emitted-body]))
@@ -2767,8 +2846,10 @@
                  (add-types outer-types (param-type-entries (get f "params") (get f "rest")))
                  renames
                  (fn [] Any
-                   (str/join "\n  "
-                     (into setup [(emit-body-return* (get f "body") "  ")])))) "\n}"))
+                   (with-inline-scope! bound
+                     (fn [] Any
+                       (str/join "\n  "
+                         (into setup [(emit-body-return* (get f "body") "  ")])))))) "\n}"))
       (= node "defn-multi")
         (let [name (mangle-name (get f "name"))
               arities (get f "arities")
@@ -2813,7 +2894,10 @@
                                                     post-bound post-types post-renames))
                                      allb (into fixed rest-setup)
                                      body (with-emission-env! post-bound post-types post-renames
-                                            (fn [] Any (emit-body-return* (get a "body") "    ")))
+                                            (fn [] Any
+                                              (with-inline-scope! abound
+                                                (fn [] Any
+                                                  (emit-body-return* (get a "body") "    ")))))
                                      inner (if (= 0 (count allb)) body
                                              (str (str/join "\n    " allb) "\n    " body))]
                                  (if (absent? rest?)
@@ -2829,6 +2913,7 @@
       (= node "defprotocol") (throw (ex-info "protocol-form is not supported for JS target" {}))
       (= node "extend-type") (throw (ex-info "extend-type is not supported for JS target" {}))
       (declaration-only-form? f) ""
+      (forward-declaration-form? f) ""
       (and (= node "static-call") (qualified-reference=? f "js" "export"))
         (emit-public-esm-form! (nth (get f "args") 0))
       ;; Top-level effect-position forms: route ctrl-flow through the statement
@@ -3004,6 +3089,7 @@
   (reset! match-counter 0)
   (reset! logical-counter 0)
   (reset! constrained-binding-counter 0)
+  (reset! lexical-shadow-counter 0)
   (reset! loop-try-counter 0)
   (reset! current-namespace (get prog "namespace"))
   (reset! type-env {})
@@ -3032,8 +3118,15 @@
                    (or (= (get f "node") "def") (= (get f "node") "defonce"))) forms)))
     (let [body (str/join "\n\n" (mapv (fn [f Any] String (reset! ctx "stmt") (emit-form! f)) forms))
           header (emit-module-header prog)
+          all-runtime-uses (reduce
+            (fn
+              [uses Any
+               name String] Any
+              (assoc uses name true))
+            (deref runtime-call-uses)
+            (keys (runtime-value-imports body)))
           demanded-runtime-bindings (mapv (fn [name String] String (str name " as $$bc$" name))
-              (sort (keys (deref runtime-call-uses))))
+              (sort (keys all-runtime-uses)))
           runtime-bindings (into
                              (if (some? (str/index-of body "$$bc$equiv"))
                                ["equivV as $$bc$equiv"] [])
@@ -3090,6 +3183,7 @@
   (reset! match-counter 0)
   (reset! logical-counter 0)
   (reset! constrained-binding-counter 0)
+  (reset! lexical-shadow-counter 0)
   (reset! loop-try-counter 0)
   (reset! current-namespace "beagle.user")
   (reset! bound-vars {})
@@ -3112,6 +3206,8 @@
   (expect! "mangle: hyphen" (= (mangle-str "make-product") "make_product"))
   (expect! "mangle: predicate" (= (mangle-str "cheap?") "cheap_p"))
   (expect! "mangle: bang" (= (mangle-str "swap!") "swap_bang"))
+  (expect! "mangle: star" (= (mangle-str "scan-datum*!") "scan_datum_star_bang"))
+  (expect! "mangle: plus" (= (mangle-str "params+rest") "params_plusrest"))
   (expect! "mangle: reserved private" (= (mangle-str "private") "private$"))
   (expect! "mangle: underscore doubles" (= (mangle-str "a_b") "a__b"))
   (expect! "mangle-prop: authored underscore preserved" (= (mangle-prop "wall_s") "wall_s"))
@@ -3358,6 +3454,18 @@
     (do (reset! bound-vars {"name" true}) (let [r (= (emit-ref-name "name") "name")] (reset! bound-vars {}) r)))
   (expect! "unbound 'name' -> value wrapper"
     (do (reset! bound-vars {}) (= (emit-ref-name "name") "((_x) => String(_x))")))
+  (expect! "unbound 'assoc' -> demanded runtime value"
+    (do
+      (reset! bound-vars {})
+      (let [rendered (emit-ref-name "assoc")]
+        (and (= rendered "((_m, _k, _v) => $$bc$assoc_value(_m, _k, _v))")
+             (= true (get (runtime-value-imports rendered) "assoc_value"))))))
+  (expect! "remaining compiler core values lower without bare identifiers"
+    (and (= (emit-ref-name "concat") "((..._xs) => [].concat(..._xs))")
+         (= (emit-ref-name "vector") "((..._xs) => _xs)")
+         (= (emit-ref-name "min") "((..._xs) => Math.min(..._xs))")
+         (= (emit-ref-name "keys") "$$bc$keys")
+         (= true (get (runtime-value-imports "$$bc$keys") "keys"))))
   (expect! "require: dotted npm subpath remains exact"
     (= (emit-require-line
          "fixture.app"
@@ -3418,6 +3526,25 @@
        ["const $beagle$binding$0 = value();"
         "let x = $beagle$binding$0[0];"
         "let y = $beagle$binding$0[1];"]))
+  (expect! "let initializer resolves an outer callable before installing its same-named binder"
+    (do
+      (reset! bound-vars {"target-stdlib" true})
+      (reset! lexical-shadow-counter 0)
+      (let [info (emit-let-bind-info!
+                   [{"name" "target-stdlib"
+                     "ann" {"kind" "prim" "name" "Any"}
+                     "constraint" nil
+                     "value" {"node" "call"
+                              "fn" {"node" "ref" "name" "target-stdlib"}
+                              "args" [{"node" "literal" "kind" "string" "value" "js"}]}}]
+                   [])
+            ok (and
+                 (= (get info "strs")
+                   ["const $beagle$shadow$0$target_stdlib = target_stdlib(\"js\");"])
+                 (= (get (get info "renames") "target-stdlib")
+                   "$beagle$shadow$0$target_stdlib"))]
+        (reset! bound-vars {})
+        ok)))
   (expect! "destructured loop keeps recur arity at one aggregate slot"
     (let [emitted (emit-expr!
                     {"node" "loop"

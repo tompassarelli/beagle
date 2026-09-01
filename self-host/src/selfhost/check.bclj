@@ -1098,6 +1098,8 @@
    "true"     (make-prim "Bool")
    "false"    (make-prim "Bool")
    "int?"     (make-fn [ANY] nil (make-prim "Bool"))
+   "double?"  (make-fn [ANY] nil (make-prim "Bool"))
+   "flush"    (make-fn [] nil (make-prim "Nil"))
    "nil?"     (make-fn [ANY] nil (make-prim "Bool"))
    "some?"    (make-fn [ANY] nil (make-prim "Bool"))
    "string?"  (make-fn [ANY] nil (make-prim "Bool"))

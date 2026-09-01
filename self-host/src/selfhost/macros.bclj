@@ -201,7 +201,7 @@
           (str "beagle: macro " name
                ": kind must be 'safe or 'defmacro (escape-hatch 'unsafe kind has been removed — all template macros are now type-checked end-to-end)\n"))
         nil)
-      (let [amp-pos Int (or (clojure.core/first (keep-indexed (fn
+      (let [amp-pos Int (or (first (keep-indexed (fn
                                                                 [i Int
                                                                  x String] Any
                                                                 (if (= x "&") i nil)) params)) -1)
@@ -280,6 +280,7 @@
 (defn macro-display [value Any] String
   (let [datum (macro-datum value)]
     (cond
+      (ast/reader-float-datum? datum) (get datum "sourceText")
       (macro-string? datum) (nth datum 1)
       (string? datum) datum
       :else (str datum))))
@@ -520,7 +521,7 @@
 (defn macro-env-lookup!
   [env Any
    name String] Any
-  (if (clojure.core/contains? env name)
+  (if (contains? env name)
     (get env name)
     (macro-eval-fail! (str "unbound: " name))))
 
@@ -868,24 +869,40 @@
 (defn macro-number-fold!
   [name String
    args Any] Any
-  (let [numbers (mapv macro-datum args)]
+  (let [datums (mapv macro-datum args)
+        numbers (mapv ast/reader-number-value datums)
+        float-result? (> (count (filterv ast/reader-float-datum? datums)) 0)
+        wrap (fn [value Number] Any
+               (if float-result?
+                 (ast/make-reader-float-datum value (str value))
+                 value))]
     (cond
-    (= name "+") (reduce + 0 numbers)
-    (= name "*") (reduce * 1 numbers)
+    (= name "+") (wrap (reduce + 0 numbers))
+    (= name "*") (wrap (reduce * 1 numbers))
     (= name "-")
       (cond
         (= (count numbers) 0)
           (macro-eval-fail! "- expected at least one argument")
         (= (count numbers) 1)
           (let [arg Number (nth numbers 0)]
-            (- 0 arg))
-        :else (reduce - (nth numbers 0) (subvec numbers 1)))
+            (wrap (- 0 arg)))
+        :else (wrap (reduce - (nth numbers 0) (subvec numbers 1))))
     :else (macro-eval-fail! (str "unknown numeric function: " name)))))
+
+(defn macro-int!
+  [value Any
+   who String] Int
+  (let [datum (macro-datum value)]
+    (if (and (number? datum) (int? datum))
+      datum
+      (macro-eval-fail!
+        (str who " expected an integer, got: " (macro-display datum))))))
 
 (defn macro-ordered?
   [name String
    args Any] Bool
-  (loop [items Any (mapv macro-datum args)]
+  (loop [items Any (mapv (fn [arg Any] Number
+                           (ast/reader-number-value (macro-datum arg))) args)]
     (if (< (count items) 2)
       true
       (let [a (nth items 0)
@@ -1182,12 +1199,12 @@
       (macro-number-fold! name args)
     (= name "quot")
       (do (macro-require-arity! name args 2)
-          (quot (macro-datum (nth args 0))
-                (macro-datum (nth args 1))))
+          (quot (macro-int! (nth args 0) name)
+                (macro-int! (nth args 1) name)))
     (= name "mod")
       (do (macro-require-arity! name args 2)
-          (mod (macro-datum (nth args 0))
-               (macro-datum (nth args 1))))
+          (mod (macro-int! (nth args 0) name)
+               (macro-int! (nth args 1) name)))
     (= name "syntax-name")
       (do (macro-require-arity! name args 1)
           (macro-syntax-name! (nth args 0)))

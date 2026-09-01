@@ -20,7 +20,14 @@
 //   collision  { t:'c', h, bucket:[[k,v],...] } keys sharing a 32-bit hash
 // A hamtMap wrapper is { _bg:'hamtMap', root: node|null, count }.
 
-import { hash as bcHash, equiv as bcEquiv } from './core.js';
+import {
+  hash as bcHash,
+  equiv as bcEquiv,
+  persistent_assoc as bcPersistentAssoc,
+  persistent_conj as bcPersistentConj,
+  persistent_dissoc as bcPersistentDissoc,
+  property_value as bcPropertyValue,
+} from './core.js';
 
 const NOT_FOUND = Symbol('not-found');
 
@@ -173,8 +180,26 @@ function nodeReduce(node, f, acc) {
 
 // --- public, tree-shakeable map API ------------------------------------------
 
+function hamtMapConj(m, entry) {
+  if (!Array.isArray(entry) || entry.length !== 2) {
+    throw new TypeError("map conj expects key/value entries");
+  }
+  return hamtMapAssoc(m, entry[0], entry[1]);
+}
+
+function hamtMapValue(root, count) {
+  return {
+    _bg: 'hamtMap',
+    root,
+    count,
+    [bcPersistentAssoc]: hamtMapAssoc,
+    [bcPersistentDissoc]: hamtMapDissoc,
+    [bcPersistentConj]: hamtMapConj,
+  };
+}
+
 export function hamtMap(entries) {
-  let m = { _bg: 'hamtMap', root: null, count: 0 };
+  let m = hamtMapValue(null, 0);
   if (entries) for (const [k, v] of entries) m = hamtMapAssoc(m, k, v);
   return m;
 }
@@ -185,7 +210,9 @@ export function hamtMap(entries) {
 // Makes the emitter's native->hamt coercion safe when a loop/recur var is
 // statically native (seed {}) but already a hamt at runtime after assoc.
 export function asHamtMap(x) {
-  return (x && x._bg === 'hamtMap') ? x : hamtMap(Object.entries(x));
+  return (x && x._bg === 'hamtMap')
+    ? x
+    : hamtMap(Object.entries(x).map(([key, value]) => [bcPropertyValue(key), value]));
 }
 
 export function hamtMapGet(m, k, notFound = null) {
@@ -199,12 +226,12 @@ export function hamtMapHas(m, k) {
 
 export function hamtMapAssoc(m, k, v) {
   const { node, added } = nodeAssoc(m.root, k, v, bcHash(k) >>> 0, 0);
-  return { _bg: 'hamtMap', root: node, count: m.count + added };
+  return hamtMapValue(node, m.count + added);
 }
 
 export function hamtMapDissoc(m, k) {
   const { node, removed } = nodeDissoc(m.root, k, bcHash(k) >>> 0, 0);
-  return removed ? { _bg: 'hamtMap', root: node, count: m.count - removed } : m;
+  return removed ? hamtMapValue(node, m.count - removed) : m;
 }
 
 export function hamtMapCount(m) { return m.count; }
@@ -222,20 +249,29 @@ export function hamtMapReduce(m, f, init) { return nodeReduce(m.root, f, init); 
 // seq yields elements). Membership and dedup are by $$bc.equiv exactly like map
 // keys — so #{[1 2] [1 2]} collapses to one element, which a native JS Set cannot.
 
+function hamtSetValue(root, count) {
+  return {
+    _bg: 'hamtSet',
+    root,
+    count,
+    [bcPersistentConj]: hamtSetAdd,
+  };
+}
+
 export function hamtSet(values) {
-  let s = { _bg: 'hamtSet', root: null, count: 0 };
+  let s = hamtSetValue(null, 0);
   if (values) for (const x of values) s = hamtSetAdd(s, x);
   return s;
 }
 
 export function hamtSetAdd(s, x) {
   const { node, added } = nodeAssoc(s.root, x, x, bcHash(x) >>> 0, 0);
-  return added ? { _bg: 'hamtSet', root: node, count: s.count + added } : s;
+  return added ? hamtSetValue(node, s.count + added) : s;
 }
 
 export function hamtSetDisjoin(s, x) {
   const { node, removed } = nodeDissoc(s.root, x, bcHash(x) >>> 0, 0);
-  return removed ? { _bg: 'hamtSet', root: node, count: s.count - removed } : s;
+  return removed ? hamtSetValue(node, s.count - removed) : s;
 }
 
 export function hamtSetHas(s, x) {

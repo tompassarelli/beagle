@@ -18,6 +18,7 @@
   (logical-prefix lexical-directory physical-directory)
   #:transparent)
 (struct module-source-input (source-id physical-path) #:transparent)
+(struct retargeted-module-source-input module-source-input (target) #:transparent)
 (struct module-source-snapshot
   (source-id physical-path bytes target-override source target explicit?)
   #:transparent)
@@ -247,10 +248,14 @@
   (define declared-target (stxs-target declared-stxs source-id))
   (define physical-extension (source-extension (path-string physical)))
   (define target-override
-    (and (not (eq? declared-target expected-target))
-         (equal? physical-extension ".bgl")
-         (eq? declared-target 'core)
-         expected-target))
+    (cond
+      [(retargeted-module-source-input? input)
+       (retargeted-module-source-input-target input)]
+      [else
+       (and (not (eq? declared-target expected-target))
+            (equal? physical-extension ".bgl")
+            (eq? declared-target 'core)
+            expected-target)]))
   (define stxs
     (if target-override
         (retarget-beagle-syntax declared-stxs target-override)
@@ -639,6 +644,7 @@
 (provide
  (struct-out module-source-root-v0)
  (struct-out module-source-input)
+ (struct-out retargeted-module-source-input)
  (struct-out module-source-snapshot)
  (struct-out foreign-module-request)
  (struct-out module-source-closure)

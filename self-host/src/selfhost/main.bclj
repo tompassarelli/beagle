@@ -1130,7 +1130,7 @@
           (recur (+ i 1) false target target-seen? roots sources
             (conj positionals arg)))))))
 
-(defn -main [& (args (Vec String))] Nil
+(defn -main [& (args (List String))] Nil
   (let [cmd (if (> (count args) 0) (nth args 0) "")]
     (cond
       (or (= cmd "ast") (= cmd "check") (= cmd "emit"))

@@ -19,6 +19,8 @@
          "module-overlay-check.rkt"
          "module-source-root.rkt"
          "module-source-root-cli.rkt"
+         (only-in "module-interface.rkt"
+                  current-js-implicit-public-exports?)
          "typescript-foreign-resolver-v1.rkt"
          "canonical-value-v1.rkt"
          "error-format.rkt"
@@ -54,8 +56,8 @@
 (define (source-map-source-id path)
   (path->string (file-name-from-path (string->path path))))
 
-(define (write-js-artifacts prog path out-path source)
-  (define source-content (file->string path))
+(define (write-js-artifacts prog path source-content-path out-path source)
+  (define source-content (file->string source-content-path))
   (define map-path
     (string->path (string-append (path->string out-path) ".map")))
   (define map-name (path->string (file-name-from-path map-path)))
@@ -97,6 +99,7 @@
 
 (define (emit-checked-program prog path out-dir in-place? export-plan
                               #:warning-count [warning-count 0]
+                              #:source-content-path [source-content-path path]
                               #:artifact-sink
                               [artifact-sink (lambda (_path _target _source)
                                                (void))])
@@ -143,7 +146,7 @@
 
   (if (eq? target 'js)
       (begin
-        (write-js-artifacts prog path out-path source)
+        (write-js-artifacts prog path source-content-path out-path source)
         (materialize-js-runtime-requires! prog out-dir))
       (with-output-to-file out-path #:exists 'replace
         (lambda () (display source))))
@@ -254,7 +257,7 @@
     (define out-path (build-path (or out-dir ".") (string-append base (extension-for-target target))))
     (when out-dir (make-directory* out-dir))
     (if (eq? target 'js)
-        (write-js-artifacts prog path out-path source)
+        (write-js-artifacts prog path path out-path source)
         (with-output-to-file out-path #:exists 'replace
           (lambda () (display source))))
     (eprintf "  ~a -> ~a\n" path (path->string out-path))
@@ -335,8 +338,14 @@
            (parse-program (read-beagle-syntax f) #:source-path f)]))))
   (programs->export-plan (filter values programs)))
 
+(define (retargeted-source-id path target-override)
+  (define target-record (target-by-id target-override))
+  (unless target-record
+    (error 'beagle-build-all "unsupported hosted target: ~a" target-override))
+  (regexp-replace BEAGLE-FILE-RX path (target-source-ext target-record)))
+
 (define (build-text-overlay files roots out-dir json? in-place? shadow-output
-                            check-profile)
+                            check-profile [target-override #f])
   (define captured '())
   (define source->file (make-hash))
   (define source->profile-path (make-hash))
@@ -359,9 +368,16 @@
         (eprintf "  ~a: ~a\n" path (exn-message error))))
   (define explicit-inputs
     (for/list ([path (in-list files)])
-      (define source-id (module-source-logical-id-for-path roots path))
+      (define declared-source-id
+        (module-source-logical-id-for-path roots path))
+      (define source-id
+        (if target-override
+            (retargeted-source-id declared-source-id target-override)
+            declared-source-id))
       (hash-set! source->file source-id path)
-      (module-source-input source-id path)))
+      (if target-override
+          (retargeted-module-source-input source-id path target-override)
+          (module-source-input source-id path))))
   (define closure
     (with-handlers
         ([exn:fail?
@@ -431,6 +447,7 @@
             (emit-checked-program
              (checked-overlay-module-program module)
              profile-path out-dir in-place? export-plan
+             #:source-content-path path
              #:artifact-sink
              (lambda (_path target source)
                (hash-set!
@@ -595,13 +612,16 @@
 
   (parameterize
       ([current-check-profile check-profile]
+       [current-js-implicit-public-exports?
+        (and target-override (eq? target-override 'js))]
        [current-nix-module-omit-attrs
         (if project (nix-project-omit-module-attrs project) '())])
     (cond
-      [(and (not build-edn?) (not target-override) (not warn?))
+      [(and (not build-edn?) (not warn?))
        (define-values (overlay-built overlay-errors)
          (build-text-overlay
-          files roots out-dir json? in-place? shadow-output check-profile))
+          files roots out-dir json? in-place? shadow-output check-profile
+          target-override))
        (set! built overlay-built)
        (set! errors overlay-errors)]
       [else

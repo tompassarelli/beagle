@@ -24,6 +24,12 @@
 (define INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE? #t)
 (define ANY (type-prim 'Any))
 
+;; A retargeted compiler bootstrap keeps Beagle/clj's ordinary public
+;; definitions as the JavaScript module surface.  Authored Beagle/js remains
+;; explicit-by-default through js/export; only the staging caller enables this
+;; parameter for an exact retargeted source closure.
+(define current-js-implicit-public-exports? (make-parameter #f))
+
 (struct interface-constraint (expression synchronous? provider) #:transparent)
 (struct interface-binding
   (name kind type raises constraints synchronous?
@@ -529,11 +535,13 @@
 ;; a missing namespace-object member. `js/export-default` publishes only the
 ;; module's `default` slot, never the definition's own name.
 (define (js-published? raw-form)
-  (let loop ([form raw-form])
-    (cond
-      [(jst-export? form) #t]
-      [(with-meta? form) (loop (with-meta-expr form))]
-      [else #f])))
+  (or
+   (current-js-implicit-public-exports?)
+   (let loop ([form raw-form])
+     (cond
+       [(jst-export? form) #t]
+       [(with-meta? form) (loop (with-meta-expr form))]
+       [else #f]))))
 
 (define (public-esm-exports-for prog ast-bindings bindings)
   (if (eq? (program-target prog) 'js)
@@ -2298,6 +2306,7 @@
 (provide
  INTERFACE-SCHEMA-VERSION
  INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE?
+ current-js-implicit-public-exports?
  qualify-provider-local-type-references
  type->canonical-datum
  constraint->canonical-datum

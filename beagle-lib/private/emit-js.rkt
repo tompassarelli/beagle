@@ -55,11 +55,17 @@
   (define source-table (current-js-source-map-src-table))
   (define location (and markers source-table (hash-ref source-table node #f)))
   (if (and location (loc-blamable? location))
-      (let ([marker-id (hash-count markers)])
-        (hash-set! markers marker-id location)
-        (string-append (string #\nul) "beagle-src:" (number->string marker-id)
-                       (string #\nul)
-                       (render)))
+      (let ([rendered (render)])
+        ;; An erased form has no generated position to map. A marker-only
+        ;; string would make module assembly retain a form/newline that the
+        ;; ordinary emitter removed, violating annotation byte transparency.
+        (if (string=? rendered "")
+            ""
+            (let ([marker-id (hash-count markers)])
+              (hash-set! markers marker-id location)
+              (string-append (string #\nul) "beagle-src:" (number->string marker-id)
+                             (string #\nul)
+                             rendered))))
       (render)))
 
 (define (js-defn-signature form #:async? async? #:name name #:params params)
@@ -85,6 +91,18 @@
 (define constrained-binding-counter (make-parameter (box 0)))
 (define (next-constrained-binding-id!)
   (define b (constrained-binding-counter))
+  (define n (unbox b))
+  (set-box! b (add1 n))
+  n)
+
+;; JavaScript declarations shadow across their entire lexical block, while a
+;; Beagle let binder enters scope only after its initializer. Give every local
+;; that shadows an already-bound source name a module-unique emitted name so
+;; `let [target (target ...)]` keeps calling the outer `target` rather than
+;; falling into the new declaration's temporal dead zone.
+(define lexical-shadow-counter (make-parameter (box 0)))
+(define (next-lexical-shadow-id!)
+  (define b (lexical-shadow-counter))
   (define n (unbox b))
   (set-box! b (add1 n))
   n)
@@ -215,6 +233,7 @@
     [(print) (format "process.stdout.write(~a)" (runtime-call "print_str" args))]
     [(pr) (format "process.stdout.write(~a)" (runtime-call "pr_str" args))]
     [(prn) (format "console.log(~a)" (runtime-call "pr_str" args))]
+    [(flush) (if (= n 0) "null" #f)]
     [(nil?) (if (= n 1) (format "(~a == null)" (emit-expr (car args))) #f)]
     [(some?) (if (= n 1) (format "(~a != null)" (emit-expr (car args))) #f)]
     [(true?) (if (= n 1) (format "(~a === true)" (emit-expr (car args))) #f)]
@@ -373,6 +392,10 @@
     [(boolean) (if (= n 1) (emit-truthy-expr (car args)) #f)]
     [(string?) (if (= n 1) (format "(typeof ~a === 'string')" (emit-expr (car args))) #f)]
     [(number?) (if (= n 1) (format "(typeof ~a === 'number')" (emit-expr (car args))) #f)]
+    [(int?) (if (= n 1) (format "Number.isInteger(~a)" (emit-expr (car args))) #f)]
+    ;; JavaScript Number has no runtime Int/Double class split. Source numeric
+    ;; kind is retained independently by the self-host reader until AST parse.
+    [(double?) (if (= n 1) (format "(typeof ~a === 'number')" (emit-expr (car args))) #f)]
     [(keyword?) (if (= n 1) (runtime-call "keyword_p" args) #f)]
     [(fn?) (if (= n 1) (format "(typeof ~a === 'function')" (emit-expr (car args))) #f)]
     [(and) (emit-logical-expr 'and args)]
@@ -441,24 +464,29 @@
                                               (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args))))]
                [(or (= n 2) (= n 3)) (runtime-call "get" args)]
                [else #f]))]
-    [(update) (if (= n 3)
+    [(update) (if (>= n 3)
                   (begin
+                    (mark-needs-v-if-hamtish! (car args))
                     (use-runtime!)
-                    (format "(() => { const _m = ~a, _k = $$bc$property_key(~a); return { ..._m, [_k]: ~a(_m[_k]) }; })()"
+                    (format "(() => { const _m = ~a, _k = ~a; return $$bc$assoc_value(_m, _k, ~a($$bc$get(_m, _k)~a)); })()"
                             (emit-expr (car args))
                             (emit-expr (cadr args))
-                            (emit-expr (caddr args))))
+                            (emit-expr (caddr args))
+                            (if (> n 3)
+                                (string-append ", " (string-join (map emit-expr (cdddr args)) ", "))
+                                "")))
                   #f)]
     [(merge) (if (>= n 1)
               (format "Object.assign({}, ~a)" (string-join (map emit-expr args) ", "))
               #f)]
     [(dissoc) (cond
-                [(not (= n 2)) #f]
+                [(< n 1) #f]
                 [(eq? (classify-rep (car args)) 'hmap)
-                 (hamt-call "hamtMapDissoc" (emit-expr (car args)) (emit-expr (cadr args)))]
-                [else (format "(() => { const _r = {...~a}; delete _r[~a]; return _r; })()"
-                              (emit-expr (car args))
-                              (emit-property-key (cadr args)))])]
+                 (for/fold ([acc (emit-expr (car args))]) ([key (in-list (cdr args))])
+                   (hamt-call "hamtMapDissoc" acc (emit-expr key)))]
+                [else
+                 (mark-needs-v-if-hamtish! (car args))
+                 (runtime-call "dissoc_value" args)])]
     [(subvec) (cond
                 [(= n 2) (format "~a.slice(~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
                 [(= n 3) (format "~a.slice(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args)))]
@@ -1433,16 +1461,12 @@
 (define (js-bound? sym)
   (set-member? (current-js-bound) sym))
 
-;; A `let`/return-position-let with a repeated (shadowed) binding name — legal,
-;; idiomatic Clojure (`(let [x 1 x (+ x 1)] x)`) — lowers each binding to a flat
-;; `const`/`let` statement in ONE JS block; declaring the same identifier twice
-;; in one block is a JS SyntaxError even though the source type-checks clean.
-;; `current-rename-env` maps a shadowed source symbol to the freshened JS
-;; identifier actually declared for its latest binding (see
-;; `emit-let-bindings`), and every var-ref / binding-target site resolves a
-;; name through it before falling back to the ordinary `mangle-name`. Mirrors
-;; `loop`'s `_recur_N` freshening for the same reason: distinct JS identifiers
-;; per rebinding, one flat block.
+;; A Beagle let binder enters scope after its initializer; JavaScript const/let
+;; instead shadows across the whole lexical block. Repeated bindings in one
+;; sequence also lower to declarations in one JS block. `current-rename-env`
+;; therefore maps each source binder that would collide to the compiler-owned
+;; identifier actually declared for it, and every var-ref / binding-target site
+;; resolves through that environment before falling back to `mangle-name`.
 (define current-rename-env (make-parameter (hash)))
 (define current-binder-types (make-parameter #f))
 
@@ -2033,6 +2057,7 @@
                  [match-counter (box 0)]
                  [logical-counter (box 0)]
                  [constrained-binding-counter (box 0)]
+                 [lexical-shadow-counter (box 0)]
                  [catch-counter (box 0)]
                  [loop-try-counter (box 0)]
                  [current-js-record-fields (build-record-field-table prog)]
@@ -2488,7 +2513,10 @@
          (arity-clause-params a)
          (lambda ()
            (parameterize ([current-rename-env arity-rename-env]
-                          [current-js-async? async?])
+                          [current-js-async? async?]
+                          [current-js-inline-scope
+                           (set-union (current-js-inline-scope)
+                                      (list->set arity-bound))])
              (with-bindings arity-bound
                (lambda ()
                  (emit-body-return (arity-clause-body a) "    ")))))
@@ -2530,7 +2558,10 @@
       (lambda ()
         (parameterize ([current-rename-env param-rename-env]
                        [current-js-generator? generator?]
-                       [current-js-async? async?])
+                       [current-js-async? async?]
+                       [current-js-inline-scope
+                        (set-union (current-js-inline-scope)
+                                   (list->set bound))])
           (with-bindings bound
             (lambda ()
               (if generator?
@@ -2667,6 +2698,10 @@
          (jst-declare-type? f)
          (jst-declare-export? f)) ""]
 
+    ;; Clojure forward declarations have no runtime work. JavaScript function
+    ;; declarations are hoisted, so an authored `(declare f ...)` erases.
+    [(and (call-form? f) (eq? (call-form-fn f) 'declare)) ""]
+
     ;; Top-level effect-position forms: route ctrl-flow (if/cond/when/let/do)
     ;; through the statement lowering; emit-stmt-inline falls back to
     ;; emit-expr-stmt for plain expressions, so non-ctrl-flow output is unchanged.
@@ -2730,7 +2765,10 @@
                ;; surrounding function.
                (parameterize ([current-rename-env param-rename-env]
                               [current-js-generator? #f]
-                              [current-js-async? fn-async?])
+                              [current-js-async? fn-async?]
+                              [current-js-inline-scope
+                               (set-union (current-js-inline-scope)
+                                          (list->set fn-bound))])
                  (with-bindings fn-bound
                    (lambda ()
                      (format "~afunction ~a(~a) { ~a }"
@@ -2961,7 +2999,10 @@
      (with-bindings let-names
        (lambda ()
          (parameterize ([current-rep-env rep-env-out] [current-type-env type-env-out]
-                        [current-rename-env rename-env-out])
+                        [current-rename-env rename-env-out]
+                        [current-js-inline-scope
+                         (set-union (current-js-inline-scope)
+                                    (list->set let-names))])
            (iife (format "~a ~a" (string-join bind-strs " ") (emit-body-return body ""))
                   #:async? has-await))))]
 
@@ -3187,7 +3228,10 @@
       (fn-form-params e)
       (lambda ()
        (parameterize ([current-rename-env param-rename-env]
-                      [current-js-async? async?])
+                      [current-js-async? async?]
+                      [current-js-inline-scope
+                       (set-union (current-js-inline-scope)
+                                  (list->set bound))])
          (with-bindings bound
            (lambda ()
              (if (and (null? setup)
@@ -4647,13 +4691,12 @@
   ;; declaration is constrained, hidden authored slots prevent a same-named
   ;; outer predicate from being captured by the new JS local's TDZ.
   (define constrained-sequence? (bindings-have-constraints? bindings))
-  (define-values (strs _bound rep-env type-env rename-env _seen)
+  (define-values (strs _bound rep-env type-env rename-env)
     (for/fold ([strs '()]
                [bound (current-js-bound)]
                [rep-env (current-rep-env)]
                [type-env (current-type-env)]
-               [rename-env (current-rename-env)]
-               [seen (hash)])
+               [rename-env (current-rename-env)])
               ([b (in-list bindings)]
                [i (in-naturals)])
       (define val-str (await-async-iife
@@ -4665,27 +4708,25 @@
       (define constrained-id
         (and constrained-sequence? (next-constrained-binding-id!)))
       (define new-names (names-from-binding-target (let-binding-name b)))
-      ;; Freshen any name this SAME let-sequence already declared: 1st
-      ;; occurrence keeps its plain mangled name (also overrides any stale
-      ;; mapping inherited from an outer scope's rename-env — a fresh nested
-      ;; `let` binding the same source name is a fresh JS scope, not a clash),
-      ;; every later occurrence gets a `_shadowN` suffix so the block declares
-      ;; distinct identifiers.
-      (define-values (rename-env* seen*)
-        (for/fold ([re rename-env] [sn seen]) ([nm (in-list new-names)])
-          (define n (hash-ref sn nm 0))
+      ;; A Beagle binder is absent from its own initializer. JavaScript's const
+      ;; is instead in the temporal dead zone for the whole block, so any name
+      ;; already present in the pre-binding environment must be freshened. This
+      ;; also covers repeated bindings in the same sequential let because
+      ;; `bound` grows after each declaration.
+      (define rename-env*
+        (for/fold ([re rename-env]) ([nm (in-list new-names)])
           (define js-name
             (cond
               [constrained-sequence?
                (format "$beagle$constrained$binding$~a$~a"
                        constrained-id (mangle-name nm))]
-              [(zero? n)
+              [(not (set-member? bound nm))
                (mangle-name (binder-output-symbol b nm))]
               [else
-               (format "~a_shadow~a"
-                       (mangle-name (binder-output-symbol b nm)) n)]))
-          (values (rename-env-set-binder re b nm js-name)
-                  (hash-set sn nm (add1 n)))))
+               (format "$beagle$shadow$~a$~a"
+                       (next-lexical-shadow-id!)
+                       (mangle-name (binder-output-symbol b nm)))]))
+          (rename-env-set-binder re b nm js-name)))
       (define mutable? (for/or ([nm (in-list new-names)]) (and (memq nm mutated-syms) #t)))
       (define stmts (parameterize ([current-rename-env rename-env*])
                       (emit-let-binding-stmts
@@ -4713,8 +4754,7 @@
                   (hash-set projected-rep-env name rep)
                   projected-rep-env)
               (if bty (hash-set projected-type-env name bty) projected-type-env)
-              rename-env*
-              seen*)))
+              rename-env*)))
   (values strs rep-env type-env rename-env))
 
 ;; Render try/catch/finally as statements while letting the caller choose how
@@ -5292,10 +5332,10 @@
         ;; a real JavaScript lexical block. An IIFE is not an equivalent escape
         ;; inside an async generator: yield belongs to the generator function
         ;; itself and is a syntax error inside an ordinary async callback.
-        (define inner (string-append indent "  "))
-        (format "{\n~a~a\n~a}" inner (emit-inline-body inner) indent)]
-       [shadows? (emit-expr-stmt e)]
-       [else (emit-inline-body indent)])]
+       (define inner (string-append indent "  "))
+       (format "{\n~a~a\n~a}" inner (emit-inline-body inner) indent)]
+      [shadows? (emit-expr-stmt e)]
+      [else (emit-inline-body indent)])]
     [(do-form? e)
      (emit-body-stmts (do-form-body e) indent)]
     [(when-form? e)

@@ -1181,6 +1181,37 @@
      "((_x) => _x)"
      '(defn f [(xs (Vec Int))] Any (filter identity xs)))
 
+   (check-js-contains "assoc as value -> runtime wrapper"
+     "((_m, _k, _v) => $$bc$assoc_value(_m, _k, _v))"
+     `(def cache Any (atom ,(mt)))
+     '(defn f! [] Any (swap! cache assoc "ready" true)))
+
+   (check-js-contains "conj as value -> runtime wrapper"
+     "((_c, ..._xs) => $$bc$conj_value(_c, ..._xs))"
+     `(def values Any (atom ,(br)))
+     '(defn f! [] Any (swap! values conj 1)))
+
+   (check-js-contains "dissoc as value -> property-key wrapper"
+     "delete _r[$$bc$property_key(_k)]"
+     `(def cache Any (atom ,(mt "ready" #t)))
+     '(defn f! [] Any (swap! cache dissoc "ready")))
+
+   (check-js-contains "concat as value -> variadic wrapper"
+     "((..._xs) => [].concat(..._xs))"
+     `(defn f [(xss (Vec Any))] Any (apply concat xss)))
+
+   (check-js-contains "vector as value -> variadic wrapper"
+     "((..._xs) => _xs)"
+     `(defn f [(xs (Vec Any))] Any (map-indexed vector xs)))
+
+   (check-js-contains "min as value -> variadic wrapper"
+     "((..._xs) => Math.min(..._xs))"
+     `(defn f [(xs (Vec Int))] Any (reduce min xs)))
+
+   (check-js-contains "keys as value -> runtime binding"
+     ".map($$bc$keys)"
+     `(defn f [(xs (Vec Any))] Any (mapv keys xs)))
+
    (check-js-contains "inc in call position still inlines"
      "(x + 1)"
      '(defn f [(x Int)] Int (+ x 1)))
@@ -1208,6 +1239,26 @@
                                       (let [identity Int 42] identity)))))
      (check-false (string-contains? result "(_x) => _x")
                   "let-bound identity should not get wrapper"))
+
+   (test-case "let initializer resolves an outer callable before installing its same-named binder"
+     (define result
+       (js-emit
+        (list '(ns test.app) '(define-target js)
+              '(defn target-stdlib [(target String)] Any target)
+              '(defn build [(target String)] Any
+                 (let [base Any (target-stdlib target)
+                       target-stdlib Any base]
+                   target-stdlib)))))
+     (check-true (string-contains? result "const base = target_stdlib(target);")
+                 (format "initializer should call the outer function, got:\n~a" result))
+     (check-true
+      (string-contains? result
+                        "const $beagle$shadow$0$target_stdlib = base;")
+      (format "same-named local should own a fresh JavaScript binding, got:\n~a"
+              result))
+     (check-true
+      (string-contains? result "return $beagle$shadow$0$target_stdlib;")
+      (format "body should resolve to the installed fresh binding, got:\n~a" result)))
 
    ;; --- Mangle: > and < in identifiers ----------------------------------------
 

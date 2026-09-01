@@ -1,0 +1,11 @@
+{
+  "name": "beagle",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./core.js": "./beagle/core.js",
+    "./hamt.js": "./beagle/hamt.js",
+    "./exception-dispatch.js": "./beagle/exception-dispatch.js",
+    "./exception-info.js": "./beagle/exception-info.js"
+  }
+}
