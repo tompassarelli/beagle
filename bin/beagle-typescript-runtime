@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+adapter="$root/tools/typescript-foreign-interface-v1"
+manifest="$adapter/package.json"
+lock="$adapter/bun.lock"
+
+command -v bun >/dev/null || {
+  printf '%s\n' 'beagle-typescript-runtime: Bun is unavailable' >&2
+  exit 1
+}
+command -v sha256sum >/dev/null || {
+  printf '%s\n' 'beagle-typescript-runtime: sha256sum is unavailable' >&2
+  exit 1
+}
+
+manifest_digest="$(sha256sum "$manifest")"
+manifest_digest="${manifest_digest%% *}"
+lock_digest="$(sha256sum "$lock")"
+lock_digest="${lock_digest%% *}"
+runtime_key="$(printf 'beagle-typescript-runtime-v1\n%s\n%s\n' \
+  "$manifest_digest" "$lock_digest" | sha256sum)"
+runtime_key="${runtime_key%% *}"
+
+cache_base="${XDG_CACHE_HOME:-${HOME:?HOME is required}/.cache}/beagle/typescript-foreign-interface-v1/runtime-v1"
+mkdir -p "$cache_base"
+cache_base="$(realpath "$cache_base")"
+runtime_root="$cache_base/$runtime_key"
+
+valid_runtime() {
+  local candidate="$1"
+  [[ -f "$candidate/node_modules/typescript/lib/typescript.js" ]] &&
+    cmp -s "$manifest" "$candidate/package.json" &&
+    cmp -s "$lock" "$candidate/bun.lock"
+}
+
+if valid_runtime "$runtime_root"; then
+  printf '%s\n' "$runtime_root"
+  exit 0
+fi
+if [[ -e "$runtime_root" ]]; then
+  printf 'beagle-typescript-runtime: invalid content at %s\n' "$runtime_root" >&2
+  exit 1
+fi
+
+staging="$(mktemp -d "$cache_base/.assemble.XXXXXX")"
+cleanup() {
+  if [[ -n "${staging:-}" && -d "$staging" ]]; then
+    rm -rf -- "$staging"
+  fi
+}
+trap cleanup EXIT
+
+cp -- "$manifest" "$lock" "$staging/"
+bun install --frozen-lockfile --ignore-scripts --cwd "$staging" >&2
+valid_runtime "$staging" || {
+  printf '%s\n' 'beagle-typescript-runtime: frozen Bun assembly is incomplete' >&2
+  exit 1
+}
+
+mv --no-target-directory --no-clobber "$staging" "$runtime_root"
+if [[ ! -d "$staging" ]]; then
+  staging=""
+fi
+valid_runtime "$runtime_root" || {
+  printf 'beagle-typescript-runtime: concurrent assembly left invalid content at %s\n' \
+    "$runtime_root" >&2
+  exit 1
+}
+printf '%s\n' "$runtime_root"

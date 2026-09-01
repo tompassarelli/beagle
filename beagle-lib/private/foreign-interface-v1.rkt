@@ -1930,14 +1930,28 @@
            (normalize-foreign-view interface target active)
            view))]))
 
+(define (foreign-binding-canonical-type type)
+  (if (not (type-foreign? type))
+      type
+      (let-values ([(interface node) (foreign-node-ref type)])
+        (or
+         (and (null? (type-foreign-substitutions type))
+              (string=? (hash-ref node 'kind) "primitive")
+              (primitive->beagle (hash-ref node 'name)))
+         type))))
+
 (define (foreign-binding-value-compatible? actual expected)
   (and (not (type-has-any? actual))
        (not (type-has-any? expected))
-       (if (or (type-foreign? actual) (type-foreign? expected))
-           (and (type-foreign? actual)
-                (type-foreign? expected)
-                (equal? actual expected))
-           (type-invariant-equal? actual expected))))
+       (let ([canonical-actual (foreign-binding-canonical-type actual)]
+             [canonical-expected (foreign-binding-canonical-type expected)])
+         (if (or (type-foreign? canonical-actual)
+                 (type-foreign? canonical-expected))
+             (and (type-foreign? canonical-actual)
+                  (type-foreign? canonical-expected)
+                  (equal? canonical-actual canonical-expected))
+             (type-invariant-equal?
+              canonical-actual canonical-expected)))))
 
 ;; One declaration can enter a closed Beagle module through more than one
 ;; TypeScript package graph.  Its content-bound declaration identity plus the

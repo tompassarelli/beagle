@@ -3,6 +3,8 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 adapter="$root/tools/typescript-foreign-interface-v1"
+typescript_runtime_root="${BEAGLE_TYPESCRIPT_RUNTIME_ROOT:-$adapter}"
+typescript_runtime_root="$(realpath "$typescript_runtime_root")"
 source_file=""
 project_root=""
 namespace=""
@@ -74,13 +76,15 @@ fi
 
 if [[ "$output_mode" == json ]]; then
   exec bun "$adapter/src/import-source.mjs" \
-    "$compiled" "$adapter" "$root/beagle-lib/lib/beagle" \
+    "$compiled" "$adapter" "$typescript_runtime_root" \
+    "$root/beagle-lib/lib/beagle" \
     "$project_root" "$source_file" "$namespace" json "${module_mappings[@]}"
 fi
 
 raw="$scratch/imported.bjs"
 bun "$adapter/src/import-source.mjs" \
-  "$compiled" "$adapter" "$root/beagle-lib/lib/beagle" \
+  "$compiled" "$adapter" "$typescript_runtime_root" \
+  "$root/beagle-lib/lib/beagle" \
   "$project_root" "$source_file" "$namespace" source "${module_mappings[@]}" \
   >"$raw"
 "$root/bin/beagle-fmt" --write "$raw" >/dev/null

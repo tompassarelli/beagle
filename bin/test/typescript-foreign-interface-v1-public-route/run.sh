@@ -94,7 +94,8 @@ mapfile -t compiled_adapters < <(
 [[ "${#compiled_adapters[@]}" -eq 1 ]] ||
     fail "expected one isolated compiled adapter, found ${#compiled_adapters[@]}"
 bun "$adapter/src/run.mjs" \
-    "${compiled_adapters[0]}" "$adapter" "$root/beagle-lib/lib/beagle" \
+    "${compiled_adapters[0]}" "$adapter" "$adapter" \
+    "$root/beagle-lib/lib/beagle" \
     "$project" "$consumer" "@fixture/foreign-interface-v1" beagle \
     >"$scratch/foreign-interface.json"
 

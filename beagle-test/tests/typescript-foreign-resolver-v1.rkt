@@ -150,8 +150,7 @@
      (string-append
       "#lang beagle/js\n"
       "(ns resolver-test.generic-class\n"
-      "  (:require [\"@fixture/generic-class\" :refer [GenericBox]]))\n"
-      "(def constructor GenericBox GenericBox)\n"))
+      "  (:require [\"@fixture/generic-class\" :refer [GenericBox]]))\n"))
 
     (define closure
       (resolve-production-module-source-closure
@@ -249,7 +248,10 @@
       "export declare function pipeline(...streams: [string, ...number[], boolean]): void;\n"
       "export declare function schedule(body: () => void): void;\n"
       "export type Transformer<T> = (value: T) => T;\n"
-      "export declare const stringTransformer: Transformer<string>;\n"))
+      "export declare const stringTransformer: Transformer<string>;\n"
+      "export declare const Bytes: Uint8ArrayConstructor;\n"
+      "export declare function makeNumbers(): ArrayLike<number>;\n"
+      "export declare function makeBytes(): Uint8Array<ArrayBuffer>;\n"))
     ;; If the production "beagle" condition is lost, this conflicting default
     ;; declaration makes the coherent String check fail instead of passing by
     ;; coincidence.
@@ -267,8 +269,12 @@
       "\"beagle\":\"./index.ts\","
       "\"types\":\"./index.ts\","
       "\"default\":\"./index.js\"}}}\n"))
-    (copy-file wasm-bindgen-fixture
-               (build-path wasm-package-root "index.ts"))
+    (write-source!
+     (build-path wasm-package-root "index.ts")
+     (string-append
+      (file->string wasm-bindgen-fixture)
+      "\nexport declare function consumeBytes(request: Uint8Array<ArrayBuffer>): number;\n"
+      "export declare function makeSharedBytes(): Uint8Array<SharedArrayBuffer>;\n"))
     (define source-path
       (build-path project-root "nested" "native-success.bjs"))
     (make-directory* (build-path project-root "nested"))
@@ -277,14 +283,16 @@
      (string-append
       "#lang beagle/js\n"
       "(ns resolver-test.native-success\n"
-      "  (:require [\"@fixture/native\" :refer [acceptFlag notify pipeline schedule stringTransformer value]]\n"
-      "            [\"@fixture/wasm-bindgen-init\" :refer [SyncInitInput initSync]]))\n"
+      "  (:require [\"@fixture/native\" :refer [acceptFlag Bytes makeBytes makeNumbers notify pipeline schedule stringTransformer value]]\n"
+      "            [\"@fixture/wasm-bindgen-init\" :refer [consumeBytes SyncInitInput initSync]]))\n"
       "(js/export (def answer String value))\n"
       "(js/export (defn relay [flag Bool] Nil (acceptFlag flag)))\n"
       "(js/export (defn transform [value String] String (stringTransformer value)))\n"
       "(js/export (defn runPipeline [] Nil (pipeline \"source\" 1 2 true)))\n"
       "(js/export (defn initialize [module SyncInitInput] Number (initSync module)))\n"
       "(js/export (defn initializeArrayBuffer [module ArrayBuffer] Number (initSync module)))\n"
+      "(js/export (defn consumeProducedBytes [] Number (consumeBytes (makeBytes))))\n"
+      "(js/export (defn consumeConstructedBytes [] Number (consumeBytes (new Bytes (makeNumbers)))))\n"
       "(js/export (defn run [] Nil (schedule (fn [] Nil (notify)))))\n"))
 
     (define closure
@@ -360,15 +368,56 @@
     (define wasm-interface
       (module-interface-foreign-interface-v1
        (module-source-interface wasm-source)))
+    (define wasm-nodes
+      (hash-ref (foreign-interface-v1->jsexpr wasm-interface) 'nodes))
     (check-true
      (for/or ([node
-               (in-list
-                (hash-ref
-                 (foreign-interface-v1->jsexpr wasm-interface)
-                 'nodes))])
+               (in-list wasm-nodes)])
        (and (string=? (hash-ref node 'kind) "primitive")
             (string=? (hash-ref node 'name) "js-array-buffer")))
      "the pinned TypeScript runtime ArrayBuffer must carry an explicit ordinary facet")
+    (define (find-wasm-node kind name)
+      (for/first ([node (in-list wasm-nodes)]
+                  #:when
+                  (and (string=? (hash-ref node 'kind) kind)
+                       (string=? (hash-ref node 'name "") name)))
+        node))
+    (define uint8-array-node (find-wasm-node "object" "Uint8Array"))
+    (define array-buffer-node
+      (find-wasm-node "primitive" "js-array-buffer"))
+    (define shared-array-buffer-node
+      (find-wasm-node "object" "SharedArrayBuffer"))
+    (check-pred hash? uint8-array-node)
+    (check-pred hash? array-buffer-node)
+    (check-pred hash? shared-array-buffer-node)
+    (define wasm-interface-id
+      (foreign-interface-v1-semantic-id wasm-interface))
+    (define uint8-array-id (hash-ref uint8-array-node 'id))
+    (define backing-parameter-id
+      (hash-ref (car (hash-ref uint8-array-node 'typeParameters)) 'node))
+    (define (uint8-array-with backing)
+      (type-foreign/instantiated
+       wasm-interface-id
+       uint8-array-id
+       (list (cons backing-parameter-id backing))))
+    (define imported-array-buffer
+      (type-foreign wasm-interface-id (hash-ref array-buffer-node 'id)))
+    (define imported-shared-array-buffer
+      (type-foreign
+       wasm-interface-id (hash-ref shared-array-buffer-node 'id)))
+    (parameterize
+        ([current-foreign-interfaces
+          (hash wasm-interface-id wasm-interface)])
+      (check-true
+       (foreign-type-compatible-v1
+        (uint8-array-with (type-prim 'ArrayBuffer))
+        (uint8-array-with imported-array-buffer))
+       "ordinary and imported ArrayBuffer facets must denote one exact backing")
+      (check-false
+       (foreign-type-compatible-v1
+        (uint8-array-with imported-shared-array-buffer)
+        (uint8-array-with imported-array-buffer))
+       "SharedArrayBuffer-backed Uint8Array must remain incompatible with ArrayBuffer"))
 
     (define provenance
       (foreign-interface-v1-provenance foreign-interface))

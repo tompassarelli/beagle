@@ -43,15 +43,31 @@
 (define adapter-lock (build-path adapter-root "bun.lock"))
 (define beagle-js-runtime-root
   (build-path repository-root "beagle-lib" "lib" "beagle"))
-(define typescript-runtime
-  (build-path
-   adapter-root "node_modules" "typescript" "lib" "typescript.js"))
 (define build-one-cli
   (build-path repository-root "beagle-lib" "private" "build-one-cli.rkt"))
 
 (define ADAPTER-SOURCE-ID
   "tools/typescript-foreign-interface-v1/src/adapter.bjs")
 (define PRODUCTION-CONDITIONS '("beagle"))
+
+(define (typescript-runtime-root)
+  (define configured (getenv "BEAGLE_TYPESCRIPT_RUNTIME_ROOT"))
+  (define candidate
+    (if configured
+        (let ([path (string->path configured)])
+          (unless (absolute-path? path)
+            (error
+             'typescript-foreign-resolver-v1
+             "BEAGLE_TYPESCRIPT_RUNTIME_ROOT must be an absolute path, got ~a"
+             configured))
+          path)
+        adapter-root))
+  (unless (directory-exists? candidate)
+    (error
+     'typescript-foreign-resolver-v1
+     "TypeScript runtime root is unavailable at ~a; assemble it with bin/beagle-typescript-runtime"
+     candidate))
+  (simplify-path (path->complete-path candidate) #t))
 
 ;; Location is execution policy, never artifact identity: the cache accepts
 ;; only bytes compiled and hashed in this module.  Keeping that location
@@ -256,9 +272,11 @@
   (or (string-prefix? specifier "#")
       (string=? specifier "bun:test")))
 
-(define (logical-input-path logical project-root)
+(define (logical-input-path logical project-root typescript-root)
   (define mappings
     (list
+     (cons "adapter/node_modules/typescript/"
+           (build-path typescript-root "node_modules" "typescript"))
      (cons "project/" project-root)
      (cons "adapter/" adapter-root)
      (cons "runtime/" beagle-js-runtime-root)))
@@ -271,9 +289,10 @@
        (cdr mapping)
        (substring logical (string-length (car mapping))))))))
 
-(define (digest-file-current? digest-file project-root)
+(define (digest-file-current? digest-file project-root typescript-root)
   (define logical (hash-ref digest-file 'path))
-  (define physical (logical-input-path logical project-root))
+  (define physical
+    (logical-input-path logical project-root typescript-root))
   (or
    ;; Builtin declarations are byte literals owned by the snapshotted
    ;; TypeScript bridge.  Its physical source is another consulted input, so
@@ -285,7 +304,8 @@
     (string=? (hash-ref digest-file 'sha256)
               (sha256-hex (file->bytes physical))))))
 
-(define (cached-foreign-interface cache-path artifact producer project-root)
+(define (cached-foreign-interface cache-path artifact producer project-root
+                                  typescript-root)
   (and
    (file-exists? cache-path)
    (let* ([graph-bytes (file->bytes cache-path)]
@@ -312,7 +332,8 @@
                      (hash-ref normalized-provenance 'lockfile)))])
         (and
          (andmap
-          (lambda (input) (digest-file-current? input project-root))
+          (lambda (input)
+            (digest-file-current? input project-root typescript-root))
           inputs)
          interface))))))
 
@@ -624,7 +645,7 @@
    (write-content-addressed-adapter!
     source-bytes generated-bytes toolchain-identity))))
 
-(define (load-compiled-adapter)
+(define (load-compiled-adapter typescript-root)
   (for ([entry
          (in-list
           (list
@@ -639,8 +660,9 @@
      'typescript-foreign-resolver-v1 (car entry) (cdr entry)))
   (required-file
    'typescript-foreign-resolver-v1
-   "pinned TypeScript runtime (run `bun install --frozen-lockfile` only while assembling the Beagle package)"
-   typescript-runtime)
+   "pinned TypeScript runtime (set BEAGLE_TYPESCRIPT_RUNTIME_ROOT to the output of bin/beagle-typescript-runtime)"
+   (build-path
+    typescript-root "node_modules" "typescript" "lib" "typescript.js"))
   (define source-bytes (file->bytes adapter-source))
   (or (validated-packaged-adapter source-bytes)
       (compile-checkout-adapter source-bytes)))
@@ -674,7 +696,8 @@
    'artifactId expected-identity
    'toolchain (compiled-typescript-adapter-v1-toolchain-identity artifact)))
 
-(define (resolve-with-adapter force-artifact force-bun identity importer)
+(define (resolve-with-adapter force-artifact force-bun typescript-root
+                              identity importer)
   (let/ec return
   (unless (and (module-identity? identity)
                (eq? (module-identity-kind identity) 'native-esm)
@@ -701,7 +724,7 @@
   (define cached
     (and artifact
          (cached-foreign-interface
-          cache-path artifact producer project-root)))
+          cache-path artifact producer project-root typescript-root)))
   (when cached
     (return (foreign-interface-v1->module-source cached)))
   ;; Preserve the no-Bun boundary: on a true miss, establish the required
@@ -718,6 +741,7 @@
        (path->string adapter-runner)
        (path->string (compiled-typescript-adapter-v1-path artifact))
        (path->string adapter-root)
+       (path->string typescript-root)
        (path->string beagle-js-runtime-root)
        (path->string project-root)
        (path->string importer-path)
@@ -736,7 +760,8 @@
      (list (hash-ref provenance 'package)
            (hash-ref provenance 'lockfile))))
   (unless (andmap
-           (lambda (input) (digest-file-current? input project-root))
+           (lambda (input)
+             (digest-file-current? input project-root typescript-root))
            inputs)
     (error
      'typescript-foreign-resolver-v1
@@ -747,13 +772,14 @@
   (foreign-interface-v1->module-source interface)))
 
 (define (make-typescript-foreign-module-resolver-v1)
+  (define typescript-root (typescript-runtime-root))
   (define bun
     (delay
       (or (find-executable-path "bun")
           (error
            'typescript-foreign-resolver-v1
            "Bun is unavailable; TypeScript foreign resolution requires the frozen Beagle Bun runtime and performs no installation or network fallback"))))
-  (define artifact (delay (load-compiled-adapter)))
+  (define artifact (delay (load-compiled-adapter typescript-root)))
   (define resolutions (make-hash))
   (lambda (identity importer)
     (define importer-path
@@ -772,6 +798,7 @@
        (resolve-with-adapter
         (lambda () (force artifact))
         (lambda () (force bun))
+        typescript-root
         identity importer-path)))))
 
 ;; One admitted production constructor replaces repeated caller-local policy:

@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const [
   compiledPath,
   adapterRoot,
+  typescriptRuntimeRoot,
   runtimeRoot,
   projectRoot,
   sourceFile,
@@ -13,8 +14,8 @@ const [
   ...mappingArguments
 ] = process.argv.slice(2);
 
-if (!compiledPath || !adapterRoot || !runtimeRoot || !projectRoot || !sourceFile || !namespace) {
-  throw new Error("usage: bun src/import-source.mjs COMPILED-IMPORTER ADAPTER-ROOT BEAGLE-RUNTIME-ROOT PROJECT-ROOT SOURCE-FILE NAMESPACE [source|json] [SPECIFIER=NAMESPACE ...]");
+if (!compiledPath || !adapterRoot || !typescriptRuntimeRoot || !runtimeRoot || !projectRoot || !sourceFile || !namespace) {
+  throw new Error("usage: bun src/import-source.mjs COMPILED-IMPORTER ADAPTER-ROOT TYPESCRIPT-RUNTIME-ROOT BEAGLE-RUNTIME-ROOT PROJECT-ROOT SOURCE-FILE NAMESPACE [source|json] [SPECIFIER=NAMESPACE ...]");
 }
 if (outputMode !== "source" && outputMode !== "json") {
   throw new Error(`unknown TypeScript source importer output mode: ${outputMode}`);
@@ -36,7 +37,7 @@ const runnerBytes = readFileSync(runnerPath);
 const bridgePath = realpathSync(resolve(dirname(runnerPath), "typescript-api.mjs"));
 const bridgeBytes = readFileSync(bridgePath);
 const bridgePreamble = Buffer.from(
-  `const __BEAGLE_TYPESCRIPT_API_SOURCE_URL__ = ${JSON.stringify(pathToFileURL(bridgePath).href)};\n`,
+  `const __BEAGLE_TYPESCRIPT_API_SOURCE_URL__ = ${JSON.stringify(pathToFileURL(bridgePath).href)};\nconst __BEAGLE_TYPESCRIPT_RUNTIME_ROOT__ = ${JSON.stringify(typescriptRuntimeRoot)};\n`,
 );
 const bridgeModule = Buffer.concat([bridgePreamble, bridgeBytes]);
 const bridgeUrl = URL.createObjectURL(new Blob([bridgeModule], { type: "text/javascript" }));
@@ -55,7 +56,12 @@ const producerInputs = bindProducerInputs({
   runnerName: "src/import-source.mjs",
 });
 const compiledAdapter = bindCompiledAdapter(compiledPath);
-const bridge = createSourceCompilerBridge({ adapterRoot, compiledAdapter, producerInputs });
+const bridge = createSourceCompilerBridge({
+  adapterRoot,
+  compiledAdapter,
+  producerInputs,
+  typescriptRuntimeRoot,
+});
 const context = createSourceContext({ projectRoot, sourceFile });
 const importerModule = await compiledAdapter.load(runtimeRoot);
 const importSource = sourceImporterBuilder(importerModule);

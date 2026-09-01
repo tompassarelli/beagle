@@ -10,7 +10,15 @@ const BRIDGE_SOURCE_URL = typeof __BEAGLE_TYPESCRIPT_API_SOURCE_URL__ === "strin
   : import.meta.url;
 const BRIDGE_SOURCE_PATH = realpathSync(fileURLToPath(BRIDGE_SOURCE_URL));
 const BRIDGE_ROOT = realpathSync(resolve(dirname(BRIDGE_SOURCE_PATH), ".."));
-const TYPESCRIPT_SOURCE_PATH = realpathSync(resolve(BRIDGE_ROOT, "node_modules/typescript/lib/typescript.js"));
+const TYPESCRIPT_RUNTIME_ROOT = realpathSync(
+  typeof __BEAGLE_TYPESCRIPT_RUNTIME_ROOT__ === "string"
+    ? __BEAGLE_TYPESCRIPT_RUNTIME_ROOT__
+    : BRIDGE_ROOT,
+);
+const TYPESCRIPT_SOURCE_PATH = realpathSync(resolve(
+  TYPESCRIPT_RUNTIME_ROOT,
+  "node_modules/typescript/lib/typescript.js",
+));
 const PROJECT_LOCKFILES = ["bun.lock", "bun.lockb", "package-lock.json", "pnpm-lock.yaml", "yarn.lock"];
 const BEAGLE_RUNTIME_MODULE = /^beagle\/([A-Za-z0-9._-]+\.js)$/;
 const TYPESCRIPT_RUNTIME_PRIMITIVES = new Map([
@@ -632,16 +640,24 @@ export function createCompilerBridge({
   compiledAdapter,
   producerInputs = null,
   adapterSourceName = "src/adapter.bjs",
+  typescriptRuntimeRoot = TYPESCRIPT_RUNTIME_ROOT,
 }) {
   const root = canonicalPath(adapterRoot);
   if (root !== BRIDGE_ROOT) {
     throw new Error(`Compiler API bridge authority root mismatch: ${root} (expected ${BRIDGE_ROOT})`);
   }
+  const canonicalTypescriptRuntimeRoot = canonicalPath(typescriptRuntimeRoot);
+  if (canonicalTypescriptRuntimeRoot !== TYPESCRIPT_RUNTIME_ROOT) {
+    throw new Error(`TypeScript runtime authority root mismatch: ${canonicalTypescriptRuntimeRoot} (expected ${TYPESCRIPT_RUNTIME_ROOT})`);
+  }
   const own = (name) => resolve(root, name);
   const adapterSource = bindFileBytes(own(adapterSourceName), "typed adapter source");
   const adapterLock = bindFileBytes(own("bun.lock"), "adapter lockfile");
   const producer = producerInputs ?? bindProducerInputs({ adapterRoot: root });
-  const typescriptRoot = canonicalPath(own("node_modules/typescript"));
+  const typescriptRoot = canonicalPath(resolve(
+    canonicalTypescriptRuntimeRoot,
+    "node_modules/typescript",
+  ));
   const compilerInputDigest = (context, snapshot) => {
     const typescriptPath = maybeLogicalCanonical(typescriptRoot, snapshot.path);
     if (typescriptPath) {
@@ -921,7 +937,11 @@ export function createCompilerBridge({
         },
         typescript: {
           version: ts.version,
-          path: logicalCanonical(root, typescriptSource.path, "TypeScript compiler"),
+          path: logicalCanonical(
+            canonicalTypescriptRuntimeRoot,
+            typescriptSource.path,
+            "TypeScript compiler",
+          ),
           sha256: typescriptSource.sha256,
         },
         compilerOptions: {
@@ -1099,7 +1119,11 @@ export function createCompilerBridge({
         },
         typescript: {
           version: ts.version,
-          path: logicalCanonical(root, typescriptSource.path, "TypeScript compiler"),
+          path: logicalCanonical(
+            canonicalTypescriptRuntimeRoot,
+            typescriptSource.path,
+            "TypeScript compiler",
+          ),
           sha256: typescriptSource.sha256,
         },
         source: compilerInputDigest(context, context.reads.record(context.source.fileName)),
