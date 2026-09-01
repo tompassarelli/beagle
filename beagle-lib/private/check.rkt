@@ -7140,7 +7140,7 @@
           inferred-call-type]
          [else raw-type]))
      (cond
-       [(type-foreign? fn-type)
+       [(foreign-call-contract-v1? fn-type)
         (define arguments (call-form-args e))
         (define-values (argument-evidence argument-types)
           (infer-foreign-arguments arguments env))
@@ -7310,7 +7310,7 @@
 
 (define (infer-jst-call-contract raw-contract selector receiver-type args env e)
   (cond
-    [(type-foreign? raw-contract)
+    [(foreign-call-contract-v1? raw-contract)
      (define-values (argument-evidence argument-types)
        (infer-foreign-arguments args env))
      (foreign-call-v1 raw-contract argument-evidence argument-types)]

@@ -559,6 +559,53 @@
    (foreign-call-v1 (foreign-type "n:overloaded") (list 7) (list INT))
    FLOAT))
 
+(test-case "callable foreign unions require every alternative to accept the call"
+  (define interface
+    (make-interface
+     (list
+      (wire-export "LeftCallable" "callable:left")
+      (wire-export "NumericCallable" "callable:numeric")
+      (wire-export "RightCallable" "callable:right"))
+     (list
+      (wire-function
+       "callable:left"
+       (wire-signature
+        (list (wire-parameter "value" "callable:string"))
+        "callable:string"))
+      (wire-function
+       "callable:numeric"
+       (wire-signature
+        (list (wire-parameter "value" "callable:number"))
+        "callable:number"))
+      (wire-primitive "callable:number" "number")
+      (wire-function
+       "callable:right"
+       (wire-signature
+        (list (wire-parameter "value" "callable:string"))
+        "callable:number"))
+      (wire-primitive "callable:string" "string"))))
+  (define interface-id (foreign-interface-v1-semantic-id interface))
+  (define (callable node-id) (type-foreign interface-id node-id))
+  (parameterize ([current-foreign-interfaces (hash interface-id interface)])
+    (check-equal?
+     (foreign-call-v1
+      (type-union
+       (list (callable "callable:left") (callable "callable:right")))
+      (list "value")
+      (list STRING))
+     (type-union (list STRING FLOAT)))
+    (check-foreign-error/in
+     interface-id
+     'overload-mismatch
+     "callable:numeric"
+     (lambda ()
+       (foreign-call-v1
+        (type-union
+         (list (callable "callable:left") (callable "callable:numeric")))
+        (list "value")
+        (list STRING))))
+    (void)))
+
 (test-foreign-query INTERFACE
  "repeated generic variables reject incompatible evidence"
   (check-equal?

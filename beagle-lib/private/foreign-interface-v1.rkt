@@ -4128,8 +4128,30 @@
    (hash-ref (car selected) 'return)
    (cdr selected)))
 
+(define (foreign-call-contract-v1? type)
+  (cond
+    [(type-foreign? type) #t]
+    [(type-union? type)
+     (and
+      (pair? (type-union-alts type))
+      (andmap foreign-call-contract-v1? (type-union-alts type)))]
+    [else #f]))
+
+(define (foreign-call-alternatives type)
+  (if (type-union? type)
+      (append-map foreign-call-alternatives (type-union-alts type))
+      (list type)))
+
 (define (foreign-call-v1 type expressions actuals)
-  (foreign-invoke-v1 type expressions actuals 'call))
+  (unless (foreign-call-contract-v1? type)
+    (raise-argument-error 'foreign-call-v1 "foreign call contract" type))
+  (define results
+    (for/list ([alternative (in-list (foreign-call-alternatives type))])
+      (foreign-invoke-v1 alternative expressions actuals 'call)))
+  (define unique-results (remove-duplicates results equal?))
+  (if (null? (cdr unique-results))
+      (car unique-results)
+      (type-union unique-results)))
 
 (define (foreign-construct-v1 type expressions actuals)
   (foreign-invoke-v1 type expressions actuals 'construct))
@@ -4451,6 +4473,7 @@
  foreign-type-compatible-v1
  foreign-ambient-value-types-v1
  foreign-native-member-type-v1
+ foreign-call-contract-v1?
  foreign-call-v1
  foreign-construct-v1
  foreign-member-type-v1
