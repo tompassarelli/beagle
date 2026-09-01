@@ -148,11 +148,15 @@
 
 (define STRING-NODE (wire-primitive "n:string" "string"))
 (define NUMBER-NODE (wire-primitive "n:number" "number"))
+(define NEVER-NODE (wire-primitive "n:never" "never"))
 (define DYNAMIC-NODE (wire-primitive "n:dynamic" "foreign-dynamic"))
 (define UNKNOWN-NODE (wire-primitive "n:unknown" "unknown"))
 
 (define CONSTRAINED-T
-  (wire-type-parameter "n:t-constrained" "T" #:constraint "n:string"))
+  (wire-type-parameter
+   "n:t-constrained" "T"
+   #:constraint "n:string"
+   #:default "n:never"))
 (define DEFAULTED-T
   (wire-type-parameter "n:t-defaulted" "T" #:default "n:number"))
 (define DEPENDENT-T
@@ -279,6 +283,7 @@
     DYNAMIC-NODE
     INSTANCE-NODE
     MAKE-BRAND-NODE
+    NEVER-NODE
     NUMBER-NODE
     OVERLOADED-NODE
     READONLY-NODE
@@ -595,6 +600,11 @@
 
 (test-foreign-query INTERFACE
  "generic constraints and defaults determine exact results"
+  (define never (foreign-type "n:never"))
+  (check-equal?
+   (foreign-call-v1
+    (foreign-type "n:constrained") (list #f) (list never))
+   never)
   (check-equal?
    (foreign-call-v1
     (foreign-type "n:constrained") (list "value") (list STRING))
@@ -638,6 +648,7 @@
        #:properties
        (list
         (wire-property "clearOnShutdown" "m:boolean" #:optional #t)
+        (wire-property "onData" "m:on-data" #:optional #t)
         (wire-property "onReady" "m:optional-on-ready" #:optional #t)
         (wire-property "title" "m:string")
         (wire-property "width" "m:percent" #:optional #t)))
@@ -647,6 +658,12 @@
         (list (wire-parameter "config" "m:config-ref"))
         "m:boolean"))
       (wire-reference "m:config-ref" "Config" "m:config" '())
+      (wire-function
+       "m:on-data"
+       (wire-signature
+        (list (wire-parameter "value" "m:string")
+              (wire-parameter "index" "m:number"))
+        "m:void"))
       (wire-function "m:on-ready" (wire-signature '() "m:void"))
       (wire-primitive "m:number" "number")
       (hash 'id "m:optional-on-ready" 'kind "union"
@@ -689,6 +706,16 @@
      (accepted
       (map-literal
        (cons
+        ':onData
+        (foreign-expression-evidence-v1
+         'callback
+         (type-fn (list STRING) #f NIL)))
+       (cons ':title "North")))
+     BOOL)
+    (check-equal?
+     (accepted
+      (map-literal
+       (cons
         ':onReady
         (foreign-expression-evidence-v1
          'callback
@@ -711,8 +738,105 @@
      (map-literal (cons ':title "North") (cons ':unknown 'false)))
     (rejected (map-literal (cons ':clearOnShutdown 'false)))
     (rejected (map-literal (cons ':title 'false)))
+    (rejected
+     (map-literal
+      (cons
+       ':onData
+       (foreign-expression-evidence-v1
+        'callback
+        (type-fn (list STRING FLOAT BOOL) #f NIL)))
+      (cons ':title "North")))
     (rejected (map-literal (cons ':title "North") (cons ':width "wide")))
     (rejected (map-literal (cons ':title 'untyped-title)))
+    (void)))
+
+(test-case "keyword map literals satisfy closed structural intersections"
+  (define signature-stdio-t
+    (wire-type-parameter
+     "i:signature-stdio-t" "Stdio"
+     #:constraint "i:writable"
+     #:default "i:pipe"))
+  (define spawn-stdio-t
+    (wire-type-parameter
+     "i:spawn-stdio-t" "In"
+     #:constraint "i:writable"
+     #:default "i:pipe"))
+  (define intersection-interface
+    (make-interface
+     (list (wire-export "spawn" "i:spawn"))
+     (list
+      (wire-array "i:commands" "i:string")
+      (wire-object
+       "i:command-options"
+       #:properties (list (wire-property "cmd" "i:commands")))
+      (hash 'id "i:options" 'kind "intersection"
+            'members
+            (list "i:command-options" "i:spawn-options-reference"))
+      (wire-function
+       "i:spawn"
+       (wire-signature
+        (list (wire-parameter "options" "i:options"))
+        "i:boolean"
+        #:type-parameters (list signature-stdio-t)))
+      (wire-reference
+       "i:spawn-options-reference"
+       "SpawnOptions"
+       "i:spawn-options"
+       (list "i:signature-stdio-t"))
+      (wire-object
+       "i:spawn-options"
+       #:type-parameters (list spawn-stdio-t)
+       #:properties
+       (list
+        (wire-property "stderr" "i:string" #:optional #t)
+        (wire-property "stdin" "i:spawn-stdio-t" #:optional #t)
+        (wire-property "stdout" "i:string" #:optional #t)))
+      (wire-primitive "i:boolean" "boolean")
+      (hash 'id "i:inherit" 'kind "literal"
+            'valueType "string" 'value "inherit")
+      (hash 'id "i:pipe" 'kind "literal"
+            'valueType "string" 'value "pipe")
+      (wire-primitive "i:string" "string")
+      signature-stdio-t
+      spawn-stdio-t
+      (hash 'id "i:writable" 'kind "union"
+            'members (list "i:inherit" "i:pipe")))))
+  (define interface-id
+    (foreign-interface-v1-semantic-id intersection-interface))
+  (define spawn (type-foreign interface-id "i:spawn"))
+  (define keyword-map-with-any-values
+    (type-app 'Map (list (type-prim 'Keyword) (type-prim 'Any))))
+  (define commands
+    (foreign-expression-evidence-v1
+     'commands
+     (type-app 'Vec (list (type-prim 'String)))))
+  (define (invoke . pairs)
+    (foreign-call-v1
+     spawn
+     (list (map-form pairs))
+     (list keyword-map-with-any-values)))
+  (parameterize
+      ([current-foreign-interfaces
+        (hash interface-id intersection-interface)])
+    (check-equal? (invoke (cons ':cmd commands)) BOOL)
+    (check-equal?
+     (invoke
+      (cons ':cmd commands)
+      (cons ':stderr "inherit")
+      (cons ':stdin "pipe")
+      (cons ':stdout "pipe"))
+     BOOL)
+    (check-foreign-error/in
+     interface-id
+     'overload-mismatch
+     "i:spawn"
+     (lambda () (invoke (cons ':stdin "pipe"))))
+    (check-foreign-error/in
+     interface-id
+     'overload-mismatch
+     "i:spawn"
+     (lambda ()
+       (invoke (cons ':cmd commands) (cons ':unknown "value"))))
     (void)))
 
 (test-case "TypeScript built-in Promise references project to native Promise"
@@ -749,8 +873,14 @@
   (define interface-id
     (foreign-interface-v1-semantic-id promise-interface))
   (define native-promise (type-app 'Promise (list STRING)))
+  (define foreign-promise
+    (type-foreign interface-id "p:promise-string"))
   (parameterize
       ([current-foreign-interfaces (hash interface-id promise-interface)])
+    (check-true
+     (foreign-type-compatible-v1
+      foreign-promise
+      (type-union (list foreign-promise FLOAT))))
     (check-equal?
      (foreign-call-v1
       (type-foreign interface-id "p:produce")
@@ -1224,7 +1354,7 @@
 (test-case "projection contains zero Beagle Any bindings"
   (check-equal?
    (foreign-interface-v1-stats INTERFACE)
-   (hash 'nodeCount 21
+   (hash 'nodeCount 22
          'exportCount 14
          'obligationCount 1
          'anyCount 0

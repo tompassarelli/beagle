@@ -92,7 +92,7 @@
      "a closure without native ESM imports must not materialize the adapter"))))
 
 (test-case
- "typed ambient provider resolves exactly requested TypeScript globals"
+ "typed ambient provider resolves requested values and class instance types"
  (with-isolated-adapter-cache
   (lambda (project-root _adapter-cache)
     (write-source!
@@ -104,8 +104,9 @@
      (string-append
       "#lang beagle/js\n"
       "(ns resolver-test.ambient\n"
-      "  (:require-global [\"typescript:lib.dom\" :refer [fetch]]))\n"
-      "(def marker String \"typed\")\n"))
+      "  (:require-global [\"typescript:lib.dom\" :refer [Response fetch]]))\n"
+      "(def marker String \"typed\")\n"
+      "(def response Response (new Response marker))\n"))
     (define closure
       (resolve-production-module-source-closure
        (list (module-source-input "resolver-test/ambient.bjs" source-path))
@@ -119,7 +120,7 @@
      (module-identity 'typescript-ambient "typescript:lib.dom"))
     (check-equal?
      (foreign-module-request-ambient-value-names request)
-     '(fetch))
+     '(Response fetch))
     (define module-source (hash-ref resolutions request))
     (define interface
       (module-interface-foreign-interface-v1
@@ -127,8 +128,15 @@
     (check-equal?
      (map (lambda (entry) (hash-ref entry 'name))
           (foreign-interface-v1-ambient-values interface))
-     '("fetch"))
+     '("Response" "fetch"))
     (check-equal? (foreign-interface-v1-exports interface) '())
+    (define response-type
+      (hash-ref (module-interface-type-exports
+                 (module-source-interface module-source))
+                'Response))
+    (check-equal? (interface-type-export-kind response-type) 'foreign)
+    (check-true
+     (type-foreign? (interface-type-export-expansion response-type)))
     (check-true
      (for/or ([input
                (in-list
