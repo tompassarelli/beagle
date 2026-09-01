@@ -2109,56 +2109,27 @@
           (range from to))))
 
 (defn occurrence! [db Any coordinate Any] Any
-  (some #(when (= coordinate (t/operationoccurrence-coordinate %)) %)
-        (occurrences! db)))
-
-(defn- relation-proposition? [predicate Any value Any] Any
-  (and (t/triple? value)
-       (t/occurrence-coordinate? (t/triple-t1 value))
-       (= predicate (t/triple-t2 value))
-       (t/occurrence-coordinate? (t/triple-t3 value))))
+  (term-store/occurrence-at-coordinate (database-store! db) coordinate))
 
 (defn supersession-triples! [db Any] Any
-  (filterv #(relation-proposition? :kernel/supersedes %)
-           (term-store/live-propositions (database-store! db))))
+  (term-store/supersession-triples (database-store! db)))
 
 (defn withdrawals! [db Any] Any
   (term-store/withdrawals (database-store! db)))
 
-(defn- suppressed-occurrences! [db Any] Any
-  (into #{}
-        (map t/triple-t3)
-        (supersession-triples! db)))
-
 (defn live-occurrences! [db Any] Any
-  (let [suppressed (suppressed-occurrences! db)]
-    (filterv #(not (contains? suppressed
-                              (t/operationoccurrence-coordinate %)))
-             (term-store/live-occurrences (database-store! db)))))
+  (term-store/effective-live-occurrences (database-store! db)))
 
 (defn live-propositions! [db Any] Any
-  (mapv t/operationoccurrence-proposition (live-occurrences! db)))
+  (term-store/effective-live-propositions (database-store! db)))
+
+(defn live-proposition-count! [db Any] Int
+  (term-store/effective-live-proposition-count (database-store! db)))
 
 (defn matching-live-propositions!
   [db Any t1 Any t2 Any t3 Any maximum Any] Any
-  (let [store t/TermStore (deref (database-store! db))
-        suppressed Any (suppressed-occurrences! db)]
-    (if (empty? suppressed)
-      (term-store/matching-live-propositions
-       store t1 t2 t3 maximum)
-      (let [matching Any
-            (filterv
-             (fn [occurrence t/OperationOccurrence] Bool
-               (not (contains?
-                     suppressed
-                     (t/operationoccurrence-coordinate occurrence))))
-             (term-store/matching-live-occurrences
-              store t1 t2 t3 nil))
-            propositions Any
-            (mapv t/operationoccurrence-proposition matching)]
-        (if maximum
-          (vec (take maximum propositions))
-          propositions)))))
+  (term-store/matching-effective-propositions
+   (deref (database-store! db)) t1 t2 t3 maximum))
 
 (defn- validate-base! [db Any base Any] Any
   (when base
@@ -2463,20 +2434,22 @@
   [db Any target Any options Any] Any
   (locking (:lock db)
     (let [event (occurrence! db target)
-          effective (into #{} (map t/operationoccurrence-coordinate)
-                          (live-occurrences! db))]
+          effective? (term-store/effective-live-occurrence?
+                      (database-store! db) target)]
       (cond
         (nil? event) {:reject :unknown-occurrence :occurrence target}
         (not (t/assertion-occurrence? event))
         {:reject :not-assertion-occurrence :occurrence target}
-        (not (contains? effective target))
+        (not effective?)
         {:reject :occurrence-not-live :occurrence target}
         :else
         (let [proposition (t/operationoccurrence-proposition event)
-              matching (filterv #(= proposition
-                                    (t/operationoccurrence-proposition %))
-                                (term-store/live-occurrences
-                                 (database-store! db)))
+              matching (term-store/matching-live-occurrences
+                        (deref (database-store! db))
+                        (t/triple-t1 proposition)
+                        (t/triple-t2 proposition)
+                        (t/triple-t3 proposition)
+                        nil)
               current (some-> matching peek
                               t/operationoccurrence-coordinate)]
           (if (not= target current)
@@ -2488,8 +2461,8 @@
   "Assert REPLACEMENT while relating its new occurrence to exact TARGET."
   [db Any target Any replacement Any options Any] Any
   (locking (:lock db)
-    (if-not (some #{target} (map t/operationoccurrence-coordinate
-                                 (live-occurrences! db)))
+    (if-not (term-store/effective-live-occurrence?
+             (database-store! db) target)
       {:reject :occurrence-not-live :occurrence target}
       (assert! db replacement (assoc options :supersedes target)))))
 
@@ -2535,9 +2508,9 @@
        :proposition proposition})))
 
 (defn current-lease! [db Any resource Any] Any
-  (some->> (live-occurrences! db)
+  (some->> (term-store/matching-effective-occurrences
+            (deref (database-store! db)) resource :kernel/lease nil nil)
            (keep lease-record)
-           (filter #(= resource (:resource %)))
            last))
 
 (defn acquire-lease! [db Any resource Any holder Any ttl-ms Int now-ms Int] Any

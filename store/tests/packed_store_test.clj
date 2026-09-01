@@ -125,6 +125,9 @@
              (<= (:active-overlay-positions rollover-after-retract) 1)
              (<= (:tail-rows rollover-after-retract)
                  (:tail-row-limit rollover-after-retract))))
+(check! "packed live count matches the materialized effective view"
+        (= (count (database/live-propositions! rollover-db))
+           (database/live-proposition-count! rollover-db)))
 
 ;; Three prefix rows and three tail rows each form one two-column partial match
 ;; for SPO, POS, and OSP respectively.
@@ -368,6 +371,9 @@
 (check! "indexed matching excludes superseded occurrences before limiting"
         (and (= [replacement-proposition] effective-matches)
              (= [replacement-proposition] bounded-effective-matches)))
+(check! "effective live count excludes superseded prefix occurrences"
+        (= (count (database/live-propositions! matching-db))
+           (database/live-proposition-count! matching-db)))
 
 ;; A STORELOG revision is its decoded transaction sequence, not its record
 ;; count. Deflated records with sequence gaps must bind a checkpoint to the

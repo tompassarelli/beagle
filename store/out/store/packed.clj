@@ -242,7 +242,7 @@
   :else (fail! :invalid-packed-checkpoint "packed Store operation action code is invalid")))
 
 (defn- prefix-count [prefix section]
-  (if (nil? prefix) 0 (let [manifest (packedprefix-manifest prefix)]
+  (if (nil? prefix) 0 (let [^CheckpointManifest manifest (packedprefix-manifest prefix)]
   (cond
   (= section :atoms) (checkpointmanifest-atom-count manifest)
   (= section :triples) (checkpointmanifest-triple-count manifest)
@@ -412,7 +412,7 @@
   (loop [remaining sections
    offset page-bytes
    placed []]
-  (if (empty? remaining) placed (let [current (first remaining)
+  (if (empty? remaining) placed (let [^Section current (first remaining)
    aligned (align-page offset)
    bytes (section-bytes current)]
   (recur (next remaining) (+ aligned (alength bytes)) (conj placed (->Section (section-id current) (section-width current) aligned bytes)))))))
@@ -451,7 +451,7 @@
 (defn- write-page-file! [^String path header sections]
   (with-open [file (RandomAccessFile. path "rw")] (.setLength file 0) (.write file header 0 (alength header)) (loop [remaining sections
    position page-bytes]
-  (if (empty? remaining) nil (let [entry (first remaining)
+  (if (empty? remaining) nil (let [^Section entry (first remaining)
    offset (section-offset entry)
    bytes (section-bytes entry)]
   (zero-fill! file (- offset position))
@@ -536,7 +536,7 @@
   nil)
 
 (defn- write-manifest-last! [^String path ^CheckpointManifest manifest]
-  (let [temporary (str path ".tmp")
+  (let [^String temporary (str path ".tmp")
    bytes (manifest-bytes! manifest)]
   (with-open [file (RandomAccessFile. temporary "rw")] (.setLength file 0) (.write file bytes 0 (alength bytes)) (.force (.getChannel file) true))
   (atomic-move! temporary path)))
@@ -561,14 +561,14 @@
    sections (place-sections [(section atom-offsets-section 8 (:offsets atom-data)) (section atom-payload-section 0 (:payload atom-data)) (section atom-lookup-section 12 (:lookup atom-data)) (section triple-t1-section 4 (int-column! (:t1 triple-data))) (section triple-t2-section 4 (int-column! (:t2 triple-data))) (section triple-t3-section 4 (int-column! (:t3 triple-data))) (section transaction-sequence-section 8 (long-column (:tx-seq history))) (section transaction-first-operation-section 8 (long-column (:tx-first history))) (section transaction-operation-count-section 4 (int-column! (:tx-count history))) (section operation-sequence-section 8 (long-column (:op-seq history))) (section operation-ordinal-section 4 (int-column! (:op-ordinal history))) (section operation-action-section 1 (:op-action history)) (section operation-triple-section 4 (int-column! (:op-triple history))) (section withdrawal-target-section 8 (:withdrawals active)) (section active-handle-section 4 (int-column! (:handles active))) (section active-offset-section 8 (long-column (:offsets active))) (section active-count-section 4 (int-column! (:counts active))) (section active-run-section 8 (long-column (:runs active))) (section spo-section 16 (index-bytes! prefix tail :spo)) (section pos-section 16 (index-bytes! prefix tail :pos)) (section osp-section 16 (index-bytes! prefix tail :osp))])
    header (page-header sections atoms triples transactions operations (t/termstoredump-next-sequence tail) (:active-count active) (:run-count active))
    revision (checkpointsource-revision source)
-   stem (format "checkpoint-%019d" revision)
-   temporary (str directory "/." stem ".pages.tmp")
+   ^String stem (format "checkpoint-%019d" revision)
+   ^String temporary (str directory "/." stem ".pages.tmp")
    mapped-bytes (write-page-file! temporary header sections)
-   page-sha (sha256-file temporary)
-   component (str stem "-" (subs page-sha 0 16) page-suffix)
-   final-page (str directory "/" component)
-   manifest-path (str directory "/" stem manifest-suffix)
-   manifest (->CheckpointManifest manifest-path component (checkpointsource-space-id source) revision (t/termstoredump-next-sequence tail) schema-id (checkpointsource-log-valid-bytes source) (checkpointsource-log-prefix-sha256 source) page-sha atoms triples transactions operations (:active-count active) (:run-count active) mapped-bytes)]
+   ^String page-sha (sha256-file temporary)
+   ^String component (str stem "-" (subs page-sha 0 16) page-suffix)
+   ^String final-page (str directory "/" component)
+   ^String manifest-path (str directory "/" stem manifest-suffix)
+   ^CheckpointManifest manifest (->CheckpointManifest manifest-path component (checkpointsource-space-id source) revision (t/termstoredump-next-sequence tail) schema-id (checkpointsource-log-valid-bytes source) (checkpointsource-log-prefix-sha256 source) page-sha atoms triples transactions operations (:active-count active) (:run-count active) mapped-bytes)]
   (atomic-move! temporary final-page)
   (write-manifest-last! manifest-path manifest)
   (prune-checkpoints! directory)
@@ -601,7 +601,7 @@
   (= expected (String. bytes StandardCharsets/UTF_8)))
 
 (defn- manifest-filename-revision! [^String path]
-  (let [name (.getName (File. path))
+  (let [^String name (.getName (File. path))
    matched (re-matches #"checkpoint-([0-9]{19})\.manifest" name)]
   (if (nil? matched) (fail! :invalid-packed-manifest "packed Store manifest filename is invalid") (try
   (Long/parseLong (nth matched 1))
@@ -634,11 +634,11 @@
    active-count (read-i64! buffer "active count")
    active-runs (read-i64! buffer "active run count")
    mapped-bytes (read-i64! buffer "mapped byte count")
-   prefix-sha (hex (read-fixed! buffer digest-bytes "log prefix checksum"))
-   page-sha (hex (read-fixed! buffer digest-bytes "page checksum"))
-   space (read-text! buffer "SpaceId")
-   schema (read-text! buffer "schema")
-   component (read-text! buffer "component")]
+   ^String prefix-sha (hex (read-fixed! buffer digest-bytes "log prefix checksum"))
+   ^String page-sha (hex (read-fixed! buffer digest-bytes "page checksum"))
+   ^String space (read-text! buffer "SpaceId")
+   ^String schema (read-text! buffer "schema")
+   ^String component (read-text! buffer "component")]
   (if (not (= 0 (.remaining buffer))) (fail! :invalid-packed-manifest "packed Store manifest has trailing bytes") nil)
   (if (not (= filename-revision revision)) (fail! :invalid-packed-manifest "packed Store manifest filename revision does not match its body") nil)
   (if (not (and (= version format-version) (and (= page-size page-bytes) (and (= schema schema-id) (and (>= revision 0) (and (= next-sequence (+ revision 1)) (and (>= valid-bytes 0) (and (>= atoms 0) (and (>= triples 0) (and (>= transactions 0) (and (>= operations 0) (and (>= active-count 0) (and (>= active-runs 0) (>= mapped-bytes page-bytes)))))))))))))) (fail! :invalid-packed-manifest "packed Store manifest fields are inconsistent") nil)
@@ -663,7 +663,7 @@
   (loop [remaining (seq manifests)
    paths #{}
    components #{}]
-  (if (nil? remaining) {:paths paths :components components} (let [manifest (first remaining)]
+  (if (nil? remaining) {:paths paths :components components} (let [^CheckpointManifest manifest (first remaining)]
   (recur (next remaining) (conj paths (checkpointmanifest-path manifest)) (conj components (checkpointmanifest-component manifest)))))))
 
 (defn- prune-checkpoints! [^String directory]
@@ -775,11 +775,11 @@
   :else nil))
 
 (defn ^PackedPrefix open-checkpoint! [^String manifest-path ^CheckpointSource source]
-  (let [manifest (read-manifest! manifest-path)]
+  (let [^CheckpointManifest manifest (read-manifest! manifest-path)]
   (validate-source! manifest source)
   (let [directory (.getParentFile (File. manifest-path))
-   component (checkpointmanifest-component manifest)
-   page-file (str directory "/" component)]
+   ^String component (checkpointmanifest-component manifest)
+   ^String page-file (str directory "/" component)]
   (if (not (.isFile (File. page-file))) (fail! :packed-component-missing "packed Store manifest component is missing") nil)
   (if (not (= (checkpointmanifest-page-sha256 manifest) (sha256-file page-file))) (fail! :invalid-packed-checkpoint "packed Store page checksum does not match its manifest") nil)
   (let [table (read-page-table! page-file manifest)]
@@ -937,6 +937,9 @@
 
 (defn active-handle-count [^PackedPrefix prefix]
   (checkpointmanifest-active-count (packedprefix-manifest prefix)))
+
+(defn active-run-count [^PackedPrefix prefix]
+  (checkpointmanifest-active-run-count (packedprefix-manifest prefix)))
 
 (defn active-handle-at! [^PackedPrefix prefix position]
   (if (and (>= position 0) (< position (active-handle-count prefix))) (section-int prefix active-handle-section position) (fail! :invalid-packed-position "packed Store active handle position is out of range")))

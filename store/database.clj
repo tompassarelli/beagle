@@ -25,21 +25,21 @@
    parent (.getParentFile source-file)]
   (if parent (clojure.core/load-file (.getPath (File. parent "writer_authority.clj"))) (throw (ex-info "database source has no parent directory" {:source (.getPath source-file)}))))
 
-(def triple-log-magic (.getBytes "STORELOG" StandardCharsets/UTF_8))
+(def ^:private triple-log-magic (.getBytes "STORELOG" StandardCharsets/UTF_8))
 
-(def triple-log-version 1)
+(def ^:private triple-log-version 1)
 
-(def triple-log-flags 0)
+(def ^:private triple-log-flags 0)
 
-(def deflate-flag 1)
+(def ^:private deflate-flag 1)
 
-(def continuation-flag 2)
+(def ^:private continuation-flag 2)
 
-(def max-term-depth 256)
+(def ^:private max-term-depth 256)
 
-(def ^String canonical-validator "store/canonical-validator-v1")
+(def ^:private ^String canonical-validator "store/canonical-validator-v1")
 
-(def ^String canonical-shape-schema-id "store/CommitOperationV1")
+(def ^:private ^String canonical-shape-schema-id "store/CommitOperationV1")
 
 (defn- default-commit-metadata [producer profile]
   {:producer producer :shape-schema-id canonical-shape-schema-id :profile profile :validation-attestation {:validator canonical-validator :result :pending :attestation canonical-validator}})
@@ -292,7 +292,7 @@
   (fail! :unsupported-log-version "Store transaction log version or flags are unsupported" {:path path :version version :flags flags})))
   (if (or (zero? space-length) (> space-length Integer/MAX_VALUE)) (do
   (fail! :corrupt-triple-log "Store transaction log SpaceId length is invalid" {:path path :length space-length})))
-  (let [space-id (strict-utf8-string! (read-file-exact! input space-length digest) "SpaceId")]
+  (let [^String space-id (strict-utf8-string! (read-file-exact! input space-length digest) "SpaceId")]
   {:space-id space-id :deflate? (pos? (bit-and deflate-flag flags)) :continuation? (pos? (bit-and continuation-flag flags)) :header-bytes (.getFilePointer input)}))
   (catch Throwable error
     (if (instance? clojure.lang.ExceptionInfo error) (throw error) (fail! :corrupt-triple-log "Store transaction log header is truncated" {:path path :cause (.getMessage error)})))))
@@ -398,7 +398,7 @@
   (if (not (.isFile file)) (do
   (fail! :triple-log-missing "Store transaction log source is missing" {:path (.getPath file)})))
   (with-open [input (RandomAccessFile. file "r")] (let [header (read-triple-log-header! input (.getPath file) false nil)
-   expected-space (packed/checkpointsource-space-id source)]
+   ^String expected-space (packed/checkpointsource-space-id source)]
   (if (not (= expected-space (:space-id header))) (do
   (fail! :packed-source-mismatch "packed checkpoint SpaceId does not match STORELOG header" {:path (.getPath file) :expected expected-space :actual (:space-id header)})))
   (read-triple-log-records! input (.getPath file) header (packed/checkpointsource-log-valid-bytes source))))))
@@ -460,20 +460,20 @@
   (let [revision (packed/checkpointmanifest-revision manifest)
    expected-valid-bytes (packed/checkpointmanifest-log-valid-bytes manifest)
    source (triple-log-prefix-source-at! canonical revision expected-valid-bytes)
-   space-id (:space-id source)
+   ^String space-id (:space-id source)
    sequence (:sequence source)
    valid-bytes (:valid-bytes source)
-   fingerprint (:fingerprint source)]
+   ^String fingerprint (:fingerprint source)]
   (if (not (= sequence revision)) (do
   (fail! :packed-source-mismatch "packed checkpoint revision is not a STORELOG boundary" {:manifest (packed/checkpointmanifest-path manifest) :revision revision :storelog-sequence sequence})))
   (packed/checkpoint-source! space-id revision valid-bytes fingerprint)))
 
 (defn- checkpoint-source-for-revision! [^String canonical revision]
   (let [source (triple-log-prefix-source! canonical revision)
-   space-id (:space-id source)
+   ^String space-id (:space-id source)
    sequence (:sequence source)
    valid-bytes (:valid-bytes source)
-   fingerprint (:fingerprint source)]
+   ^String fingerprint (:fingerprint source)]
   (if (not (= sequence revision)) (do
   (fail! :packed-source-mismatch "live Store revision is not a STORELOG boundary" {:revision revision :storelog-sequence sequence})))
   (packed/checkpoint-source! space-id revision valid-bytes fingerprint)))
@@ -481,13 +481,13 @@
 (defn- truncate-log! [path length]
   (with-open [file (java.io.RandomAccessFile. (str path) "rw")] (.setLength file length) (.force (.getChannel file) true)))
 
-(def ^String fork-marker-suffix ".fork")
+(def ^:private ^String fork-marker-suffix ".fork")
 
-(def ^String fork-pending-suffix ".fork-new")
+(def ^:private ^String fork-pending-suffix ".fork-new")
 
-(def ^String reseal-marker-suffix ".reseal")
+(def ^:private ^String reseal-marker-suffix ".reseal")
 
-(def ^String reseal-pending-suffix ".reseal-new")
+(def ^:private ^String reseal-pending-suffix ".reseal-new")
 
 (defn- fork-marker-path [store]
   (str store fork-marker-suffix))
@@ -523,13 +523,13 @@
   ([path expected-space]
     (open-database! path expected-space {}))
   ([path expected-space {:keys [repair-torn? tail-row-limit tail-byte-limit] :or {repair-torn? false tail-row-limit term-store/default-tail-row-limit tail-byte-limit term-store/default-tail-byte-limit}}]
-    (let [canonical (.getPath (.getCanonicalFile (java.io.File. (str path))))
+    (let [^String canonical (.getPath (.getCanonicalFile (java.io.File. (str path))))
    _ (require-no-pending-fork! canonical)
    selected (checkpoint/select-boot! (packed-checkpoint-directory canonical) (fn [manifest] (checkpoint-source-for-manifest! canonical manifest)) tail-row-limit tail-byte-limit)
    packed-context (:context selected)
    source-record (:source-record selected)
    parsed (if packed-context (read-triple-log-suffix! canonical source-record) (read-triple-log! canonical))
-   space-id (:space-id parsed)
+   ^String space-id (:space-id parsed)
    context (or packed-context (term-store/new-term-store-with-tail-limits space-id tail-row-limit tail-byte-limit))]
   (if (and expected-space (not= expected-space space-id)) (do
   (fail! :space-mismatch "Store transaction log belongs to a different SpaceId" {:expected expected-space :actual space-id :path canonical})))
@@ -568,7 +568,7 @@
 (defn- branch-control-path [store]
   (str store ".branch-control"))
 
-(def ^String branch-watch-format "store-watch/v1")
+(def ^:private ^String branch-watch-format "store-watch/v1")
 
 (defn- branch-watch-path [store branch-name]
   (str store ".watches/" (branch/require-branch-name! branch-name)))
@@ -905,7 +905,7 @@
   (writer-authority/release! previous))
   (fail! :writer-authority-held "a writer holds this store; fork runs offline only" {:path path :lock (writer-authority/authority-path path)}))))) [] paths))
 
-(def retention-root-kinds {:pin "pins" :checkpoint "checkpoints" :session "sessions"})
+(def ^:private retention-root-kinds {:pin "pins" :checkpoint "checkpoints" :session "sessions"})
 
 (defn- require-retention-root-kind! [kind]
   (let [directory (get retention-root-kinds kind)]
@@ -1233,34 +1233,25 @@
   (t/operation-occurrence (nth slots 0) (nth slots 1) (nth slots 2)))) (range from to))))
 
 (defn occurrence! [db coordinate]
-  (some (fn [%1] (if (= coordinate (t/operationoccurrence-coordinate %1)) (do
-  %1))) (occurrences! db)))
-
-(defn- relation-proposition? [predicate value]
-  (and (t/triple? value) (t/occurrence-coordinate? (t/triple-t1 value)) (= predicate (t/triple-t2 value)) (t/occurrence-coordinate? (t/triple-t3 value))))
+  (term-store/occurrence-at-coordinate (database-store! db) coordinate))
 
 (defn supersession-triples! [db]
-  (filterv (fn [%1] (relation-proposition? :kernel/supersedes %1)) (term-store/live-propositions (database-store! db))))
+  (term-store/supersession-triples (database-store! db)))
 
 (defn withdrawals! [db]
   (term-store/withdrawals (database-store! db)))
 
-(defn- suppressed-occurrences! [db]
-  (into #{} (map t/triple-t3) (supersession-triples! db)))
-
 (defn live-occurrences! [db]
-  (let [suppressed (suppressed-occurrences! db)]
-  (filterv (fn [%1] (not (contains? suppressed (t/operationoccurrence-coordinate %1)))) (term-store/live-occurrences (database-store! db)))))
+  (term-store/effective-live-occurrences (database-store! db)))
 
 (defn live-propositions! [db]
-  (mapv t/operationoccurrence-proposition (live-occurrences! db)))
+  (term-store/effective-live-propositions (database-store! db)))
+
+(defn live-proposition-count! [db]
+  (term-store/effective-live-proposition-count (database-store! db)))
 
 (defn matching-live-propositions! [db t1 t2 t3 maximum]
-  (let [store (deref (database-store! db))
-   suppressed (suppressed-occurrences! db)]
-  (if (empty? suppressed) (term-store/matching-live-propositions store t1 t2 t3 maximum) (let [matching (filterv (fn [occurrence] (not (contains? suppressed (t/operationoccurrence-coordinate occurrence)))) (term-store/matching-live-occurrences store t1 t2 t3 nil))
-   propositions (mapv t/operationoccurrence-proposition matching)]
-  (if maximum (vec (take maximum propositions)) propositions)))))
+  (term-store/matching-effective-propositions (deref (database-store! db)) t1 t2 t3 maximum))
 
 (defn- validate-base! [db base]
   (if base (do
@@ -1270,7 +1261,7 @@
   (fail! :space-mismatch "OCC base belongs to a different SpaceId" {:base base :space-id (database-space db)})))))
   base)
 
-(def occurrence-metadata-order [:kernel/recorded-at :kernel/asserted-by :kernel/source-record :kernel/supersedes])
+(def ^:private occurrence-metadata-order [:kernel/recorded-at :kernel/asserted-by :kernel/source-record :kernel/supersedes])
 
 (defn- canonical-term! [value]
   (cond
@@ -1420,18 +1411,18 @@
 
 (defn withdraw-occurrence! [db target options]
   (locking (:lock db) (let [event (occurrence! db target)
-   effective (into #{} (map t/operationoccurrence-coordinate) (live-occurrences! db))]
+   effective? (term-store/effective-live-occurrence? (database-store! db) target)]
   (cond
   (nil? event) {:reject :unknown-occurrence :occurrence target}
   (not (t/assertion-occurrence? event)) {:reject :not-assertion-occurrence :occurrence target}
-  (not (contains? effective target)) {:reject :occurrence-not-live :occurrence target}
+  (not effective?) {:reject :occurrence-not-live :occurrence target}
   :else (let [proposition (t/operationoccurrence-proposition event)
-   matching (filterv (fn [%1] (= proposition (t/operationoccurrence-proposition %1))) (term-store/live-occurrences (database-store! db)))
+   matching (term-store/matching-live-occurrences (deref (database-store! db)) (t/triple-t1 proposition) (t/triple-t2 proposition) (t/triple-t3 proposition) nil)
    current (some-> matching peek t/operationoccurrence-coordinate)]
   (if (not= target current) {:reject :withdrawal-target-not-current :occurrence target :current current} (retract! db proposition options)))))))
 
 (defn supersede! [db target replacement options]
-  (locking (:lock db) (if (some #{target} (map t/operationoccurrence-coordinate (live-occurrences! db))) (assert! db replacement (assoc options :supersedes target)) {:reject :occurrence-not-live :occurrence target})))
+  (locking (:lock db) (if (term-store/effective-live-occurrence? (database-store! db) target) (assert! db replacement (assoc options :supersedes target)) {:reject :occurrence-not-live :occurrence target})))
 
 (defn view-select! [db view target options]
   (locking (:lock db) (validate-occurrence-reference! db target :target) (let [selection (t/triple view :kernel/selects target)]
@@ -1459,7 +1450,7 @@
   {:resource (t/triple-t1 proposition) :holder (t/triple-t1 value) :expires-ms (t/triple-t3 value) :occurrence (t/operationoccurrence-coordinate event) :proposition proposition}))))
 
 (defn current-lease! [db resource]
-  (some->> (live-occurrences! db) (keep lease-record) (filter (fn [%1] (= resource (:resource %1)))) last))
+  (some->> (term-store/matching-effective-occurrences (deref (database-store! db)) resource :kernel/lease nil nil) (keep lease-record) last))
 
 (defn acquire-lease! [db resource holder ttl-ms now-ms]
   (locking (:lock db) (if (not (and (t/term? resource) (t/term? holder) (integer? ttl-ms) (pos? ttl-ms) (integer? now-ms))) (do

@@ -1391,6 +1391,9 @@
 (defn active-handle-count [prefix PackedPrefix] Int
   (checkpointmanifest-active-count (packedprefix-manifest prefix)))
 
+(defn active-run-count [prefix PackedPrefix] Int
+  (checkpointmanifest-active-run-count (packedprefix-manifest prefix)))
+
 (defn active-handle-at!
   [prefix PackedPrefix
    position Int] Int

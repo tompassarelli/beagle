@@ -1885,7 +1885,7 @@
         {:keys [hits misses bytes evictions]} @query-result-cache
         cache (rpc/rpc-record! :rpc/result-cache
                                 [hits misses bytes evictions])]
-    (rpc/rpc-status! state (count (database/live-propositions! db))
+    (rpc/rpc-status! state (database/live-proposition-count! db)
                       @runtime-engine cache)))
 
 (defn- request-body-bytes [request]

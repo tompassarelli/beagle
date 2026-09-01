@@ -238,7 +238,10 @@
                  (= 0 (t/rpcresponse-served-version response))
                  (= wire/rpc-unit (payload response)))))
 
-  (let [response (request! port space :rpc/status wire/rpc-unit)
+  (let [response (with-redefs [database/live-propositions!
+                               (fn [_]
+                                 (throw (ex-info "status materialized the graph" {})))]
+                   (request! port space :rpc/status wire/rpc-unit))
         [state live-count engine cache] (fields (payload response) :rpc/status 4)
         [hits misses bytes evictions] (fields cache :rpc/result-cache 4)]
     (check! "rpc/status is a typed packet"
@@ -603,8 +606,14 @@
                        [subject (wire/rpc-query-constant! :value) value])
           values-payload (wire/rpc-query-request! values-plan wire/query-current)
           before-lease (request! port space :rpc/query values-payload)
-          acquired (request! port space :rpc/lease-acquire
-                             (wire/rpc-lease-acquire! :resource "holder" 60000))
+          acquired (with-redefs [database/live-occurrences!
+                                 (fn [_]
+                                   (throw (ex-info "lease walked database history" {})))
+                                 term-store/live-occurrences
+                                 (fn [_]
+                                   (throw (ex-info "lease walked Store history" {})))]
+                     (request! port space :rpc/lease-acquire
+                               (wire/rpc-lease-acquire! :resource "holder" 60000)))
           [fence _] (fields (payload acquired) :lease/grant 2)
           after-acquire (request! port space :rpc/query values-payload)
           checked (request! port space :rpc/lease-check fence)

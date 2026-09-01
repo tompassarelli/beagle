@@ -500,15 +500,15 @@
 (declare find-active-bucket-position)
 
 (defn- collect-new-term-demand! [store term seen]
-  (if (or (contains? seen term) (some? (known-term-handle store term))) (->TailDemand seen 0 0) (if (t/triple? term) (let [first-demand (collect-new-term-demand! store (t/triple-t1 term) seen)
-   second-demand (collect-new-term-demand! store (t/triple-t2 term) (taildemand-seen first-demand))
-   third-demand (collect-new-term-demand! store (t/triple-t3 term) (taildemand-seen second-demand))]
+  (if (or (contains? seen term) (some? (known-term-handle store term))) (->TailDemand seen 0 0) (if (t/triple? term) (let [^TailDemand first-demand (collect-new-term-demand! store (t/triple-t1 term) seen)
+   ^TailDemand second-demand (collect-new-term-demand! store (t/triple-t2 term) (taildemand-seen first-demand))
+   ^TailDemand third-demand (collect-new-term-demand! store (t/triple-t3 term) (taildemand-seen second-demand))]
   (->TailDemand (conj (taildemand-seen third-demand) term) (+ 6 (+ (taildemand-rows first-demand) (+ (taildemand-rows second-demand) (taildemand-rows third-demand)))) (+ triple-tail-bytes (+ (taildemand-bytes first-demand) (+ (taildemand-bytes second-demand) (taildemand-bytes third-demand)))))) (->TailDemand (conj seen term) 2 (+ slot-entry-tail-bytes (+ atom-tail-overhead-bytes (packed/term-byte-count! term)))))))
 
 (defn- transaction-tail-demand! [store operations]
-  (let [terms (loop [position 0
-   demand (->TailDemand #{} 0 0)]
-  (if (>= position (count operations)) demand (let [next (collect-new-term-demand! store (t/commitoperation-proposition (nth operations position)) (taildemand-seen demand))]
+  (let [^TailDemand terms (loop [position 0
+   ^TailDemand demand (->TailDemand #{} 0 0)]
+  (if (>= position (count operations)) demand (let [^TailDemand next (collect-new-term-demand! store (t/commitoperation-proposition (nth operations position)) (taildemand-seen demand))]
   (recur (inc position) (->TailDemand (taildemand-seen next) (+ (taildemand-rows demand) (taildemand-rows next)) (+ (taildemand-bytes demand) (taildemand-bytes next)))))))
    overlay (loop [position 0
    seen #{}
@@ -532,7 +532,7 @@
 
 (defn intern-term! [ctx term]
   (let [store (deref ctx)
-   demand (collect-new-term-demand! store term #{})
+   ^TailDemand demand (collect-new-term-demand! store term #{})
    _ (ensure-tail-room! store (taildemand-rows demand) (taildemand-bytes demand))
    handle (intern-handle! ctx term)]
   (resolve-handle (deref ctx) handle)))
@@ -621,6 +621,19 @@
    prefix-seen (:seen prefix-result)]
   (reduce (fn [handles bucket] (let [handle (t/activebucket-triple-handle bucket)]
   (if (or (contains? prefix-seen handle) (not (active-handle? store handle))) handles (conj handles handle)))) prefix-handles (store-active-buckets store))))
+
+(defn live-occurrence-count [ctx]
+  (let [store (deref ctx)
+   prefix (store-prefix store)
+   prefix-total (if (nil? prefix) 0 (packed/active-run-count prefix))
+   buckets (store-active-buckets store)]
+  (loop [position 0
+   total prefix-total]
+  (if (>= position (count buckets)) total (let [bucket (nth buckets position)
+   handle (t/activebucket-triple-handle bucket)
+   packed-count (if (nil? prefix) 0 (packed/active-position-count prefix handle))
+   current-count (+ (t/activebucket-prefix-count bucket) (count (active-tail-positions store position)))]
+  (recur (+ position 1) (+ total (- current-count packed-count))))))))
 
 (defn- ^Boolean triple-row-matches? [row t1 t2 t3]
   (and (or (nil? t1) (= t1 (t/triplerow-t1 row))) (and (or (nil? t2) (= t2 (t/triplerow-t2 row))) (or (nil? t3) (= t3 (t/triplerow-t3 row))))))
@@ -920,12 +933,18 @@
 
 (defn- exact-occurrence-position [store coordinate]
   (if (not (t/occurrence-coordinate? coordinate)) -1 (let [transaction (t/triple-t1 coordinate)
-   space (t/triple-t1 transaction)
+   ^String space (t/triple-t1 transaction)
    sequence (t/triple-t3 transaction)
    ordinal (t/triple-t3 coordinate)
    position (first-transaction-after store (dec sequence))]
   (if (or (not (= space (t/termstore-space-id store))) (>= position (total-transaction-count store))) -1 (let [row (transaction-row-at store position)]
   (if (and (= sequence (t/transactionrow-sequence row)) (< ordinal (t/transactionrow-operation-count row))) (+ (t/transactionrow-first-operation row) ordinal) -1))))))
+
+(defn occurrence-at-coordinate [ctx coordinate]
+  (let [store (deref ctx)
+   position (exact-occurrence-position store coordinate)]
+  (if (>= position 0) (do
+  (operation-occurrence-at store position)))))
 
 (defn operation-candidate-positions [store lower-exclusive upper-inclusive coordinate proposition postings]
   (let [bounds (operation-range-bounds store lower-exclusive upper-inclusive)
@@ -1012,12 +1031,27 @@
 (defn effective-live-propositions [ctx]
   (mapv t/operationoccurrence-proposition (effective-live-occurrences ctx)))
 
-(defn matching-effective-propositions [store t1 t2 t3 maximum]
+(defn ^Boolean effective-live-occurrence? [ctx coordinate]
+  (let [store (deref ctx)
+   position (exact-occurrence-position store coordinate)]
+  (and (>= position 0) (and (operation-live? store position (operation-row-at store position)) (not (contains? (suppressed-occurrence-coordinates store) coordinate))))))
+
+(defn effective-live-proposition-count [ctx]
+  (let [store (deref ctx)
+   suppressed (suppressed-occurrence-coordinates store)
+   suppressed-live (reduce (fn [total coordinate] (let [position (exact-occurrence-position store coordinate)]
+  (if (and (>= position 0) (operation-live? store position (operation-row-at store position))) (+ total 1) total))) 0 suppressed)]
+  (- (live-occurrence-count ctx) suppressed-live)))
+
+(defn matching-effective-occurrences [store t1 t2 t3 maximum]
   (let [suppressed (suppressed-occurrence-coordinates store)]
   (loop [remaining (matching-live-occurrences store t1 t2 t3 nil)
-   propositions []]
-  (if (or (empty? remaining) (and (some? maximum) (>= (count propositions) maximum))) propositions (let [occurrence (first remaining)]
-  (recur (rest remaining) (if (contains? suppressed (t/operationoccurrence-coordinate occurrence)) propositions (conj propositions (t/operationoccurrence-proposition occurrence)))))))))
+   occurrences []]
+  (if (or (empty? remaining) (and (some? maximum) (>= (count occurrences) maximum))) occurrences (let [occurrence (first remaining)]
+  (recur (rest remaining) (if (contains? suppressed (t/operationoccurrence-coordinate occurrence)) occurrences (conj occurrences occurrence))))))))
+
+(defn matching-effective-propositions [store t1 t2 t3 maximum]
+  (mapv t/operationoccurrence-proposition (matching-effective-occurrences store t1 t2 t3 maximum)))
 
 (defn dump-term-store [ctx]
   (let [store (deref ctx)
@@ -1187,7 +1221,7 @@
    rows (t/termstoredump-triples data)
    transactions (t/termstoredump-transactions data)
    operations (t/termstoredump-operations data)
-   dump-space (t/termstoredump-space-id data)
+   ^String dump-space (t/termstoredump-space-id data)
    next-sequence-value (t/termstoredump-next-sequence data)]
   (if (not (and (valid-space-id? dump-space) (and (>= next-sequence-value 1) (and (canonical-term-rows? atoms rows) (valid-history-rows? transactions operations (count rows) next-sequence-value))))) (term-store-load-error :invalid-term-store-dump "store: invalid TermStore dump") (if (not (= (space-id ctx) dump-space)) (term-store-load-error :space-mismatch "store: TermStore dump belongs to a different space") (let [loaded (t/->TermStore dump-space (atom next-sequence-value) (atom atoms) (atom rows) (atom transactions) (atom operations) (atom empty-ids) (atom empty-active-buckets) (atom empty-active-cells) (atom false) (atom (build-atom-term-slots! atoms (term-slots-width-for (count atoms)) 0)) (atom (build-triple-term-slots! rows (term-slots-width-for (count rows)) 0)) (atom (build-triple-query-slots! rows (term-slots-width-for (count rows)) 0 triple-index-t1)) (atom (build-triple-query-slots! rows (term-slots-width-for (count rows)) 0 triple-index-t12)) (atom (build-triple-query-slots! rows (term-slots-width-for (count rows)) 0 triple-index-t2)) (atom (build-triple-query-slots! rows (term-slots-width-for (count rows)) 0 triple-index-t3)) (atom (slots/fresh-slots initial-slots)) nil default-tail-row-limit default-tail-byte-limit (atom 0) (atom 0))]
   (reset! ctx (rebuild-operation-state! loaded))
@@ -1203,7 +1237,7 @@
   (if (or (some? (store-prefix store)) (and (valid-space-id? (t/termstore-space-id store)) (and (>= next-sequence-value 1) (and (canonical-term-rows? atoms rows) (valid-history-rows? transactions operations (count rows) next-sequence-value))))) ctx (throw (ex-info "store: invalid TermStore dump" {:type :invalid-term-store-dump})))))
 
 (defn load-term-store! [ctx data]
-  (let [result (load-term-store-result! ctx data)]
+  (let [^TermStoreLoadResult result (load-term-store-result! ctx data)]
   (if (termstoreloadresult-ok result) ctx (let [code (termstoreloadresult-code result)
    message (termstoreloadresult-message result)]
   (throw (ex-info (if message message "store: TermStore load failed") {:type (if code code :invalid-term-store-dump)}))))))

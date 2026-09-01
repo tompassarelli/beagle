@@ -1059,6 +1059,28 @@
                   (conj handles handle))))
             prefix-handles (store-active-buckets store))))
 
+;; The packed manifest already owns the prefix live-run cardinality. Only
+;; handles changed in the bounded boxed tail need adjustment, so operational
+;; status never walks or resolves the whole operation history.
+(defn live-occurrence-count [ctx (Atom t/TermStore)] Int
+  (let [store t/TermStore (deref ctx)
+        prefix Any (store-prefix store)
+        prefix-total Int (if (nil? prefix) 0 (packed/active-run-count prefix))
+        buckets (Vec t/ActiveBucket) (store-active-buckets store)]
+    (loop [position Int 0
+           total Int prefix-total]
+      (if (>= position (count buckets))
+        total
+        (let [bucket t/ActiveBucket (nth buckets position)
+              handle Int (t/activebucket-triple-handle bucket)
+              packed-count Int (if (nil? prefix)
+                                 0
+                                 (packed/active-position-count prefix handle))
+              current-count Int (+ (t/activebucket-prefix-count bucket)
+                                   (count (active-tail-positions store position)))]
+          (recur (+ position 1)
+                 (+ total (- current-count packed-count))))))))
+
 (defn- triple-row-matches?
   [row t/TripleRow
    t1 Int?
@@ -1725,6 +1747,14 @@
             (+ (t/transactionrow-first-operation row) ordinal)
             -1))))))
 
+(defn occurrence-at-coordinate
+  [ctx (Atom t/TermStore)
+   coordinate Any] t/OperationOccurrence?
+  (let [store t/TermStore (deref ctx)
+        position Int (exact-occurrence-position store coordinate)]
+    (when (>= position 0)
+      (operation-occurrence-at store position))))
+
 (defn operation-candidate-positions
   [store t/TermStore
    lower-exclusive Int
@@ -1902,27 +1932,60 @@
   (mapv t/operationoccurrence-proposition
         (effective-live-occurrences ctx)))
 
+(defn effective-live-occurrence?
+  [ctx (Atom t/TermStore)
+   coordinate Any] Bool
+  (let [store t/TermStore (deref ctx)
+        position Int (exact-occurrence-position store coordinate)]
+    (and (>= position 0)
+         (and (operation-live? store position (operation-row-at store position))
+              (not (contains? (suppressed-occurrence-coordinates store)
+                              coordinate))))))
+
+(defn effective-live-proposition-count [ctx (Atom t/TermStore)] Int
+  (let [store t/TermStore (deref ctx)
+        suppressed Any (suppressed-occurrence-coordinates store)
+        suppressed-live Int (reduce (fn
+                                      [total Int
+                                       coordinate Any] Int
+                                      (let [position Int (exact-occurrence-position store coordinate)]
+                    (if (and (>= position 0)
+                             (operation-live?
+                              store position (operation-row-at store position)))
+                      (+ total 1)
+                      total)))
+                0 suppressed)]
+    (- (live-occurrence-count ctx) suppressed-live)))
+
+(defn matching-effective-occurrences
+  [store t/TermStore
+   t1 Any
+   t2 Any
+   t3 Any
+   maximum Int?] (Vec t/OperationOccurrence)
+  (let [suppressed Any (suppressed-occurrence-coordinates store)]
+    (loop [remaining (Vec t/OperationOccurrence) (matching-live-occurrences store t1 t2 t3 nil)
+           occurrences (Vec t/OperationOccurrence) []]
+      (if (or (empty? remaining)
+              (and (some? maximum)
+                   (>= (count occurrences) maximum)))
+        occurrences
+        (let [occurrence t/OperationOccurrence (first remaining)]
+          (recur
+           (rest remaining)
+           (if (contains? suppressed
+                          (t/operationoccurrence-coordinate occurrence))
+             occurrences
+             (conj occurrences occurrence))))))))
+
 (defn matching-effective-propositions
   [store t/TermStore
    t1 Any
    t2 Any
    t3 Any
    maximum Int?] (Vec t/Triple)
-  (let [suppressed Any (suppressed-occurrence-coordinates store)]
-    (loop [remaining (Vec t/OperationOccurrence) (matching-live-occurrences store t1 t2 t3 nil)
-           propositions (Vec t/Triple) []]
-      (if (or (empty? remaining)
-              (and (some? maximum)
-                   (>= (count propositions) maximum)))
-        propositions
-        (let [occurrence t/OperationOccurrence (first remaining)]
-          (recur
-           (rest remaining)
-           (if (contains? suppressed
-                          (t/operationoccurrence-coordinate occurrence))
-             propositions
-             (conj propositions
-                   (t/operationoccurrence-proposition occurrence)))))))))
+  (mapv t/operationoccurrence-proposition
+        (matching-effective-occurrences store t1 t2 t3 maximum)))
 
 (defn dump-term-store [ctx (Atom t/TermStore)] t/TermStoreDump
   (let [store t/TermStore (deref ctx)
