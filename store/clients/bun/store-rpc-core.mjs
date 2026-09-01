@@ -16,6 +16,8 @@ const MAX_PAGE_LIMIT = 4096;
 const I64_MIN = -(1n << 63n);
 const I64_MAX = (1n << 63n) - 1n;
 const U32_MAX = (1n << 32n) - 1n;
+const REQUEST_NAMESPACE_MAX = (1n << 31n) - 1n;
+const REQUEST_SEQUENCE_BITS = 32n;
 const I64 = /^(?:0|-[1-9][0-9]*|[1-9][0-9]*)$/;
 const FLOAT64 = /^[0-9a-f]{16}$/;
 const OPERATIONS = new Set([
@@ -90,6 +92,35 @@ export class StoreRpcError extends Error {
 
 function fail(message, code) {
   throw new StoreProtocolError(message, code);
+}
+
+function requestNamespace() {
+  const pid = globalThis.process?.pid;
+  if (pid !== undefined) {
+    if (!Number.isSafeInteger(pid) || pid < 1 || BigInt(pid) > REQUEST_NAMESPACE_MAX) {
+      fail('process id cannot be represented in a request id', 'client/request-id-namespace');
+    }
+    return BigInt(pid);
+  }
+  if (typeof globalThis.crypto?.getRandomValues !== 'function') {
+    fail('runtime cannot create a unique request id namespace', 'client/request-id-namespace');
+  }
+  const words = new Uint32Array(1);
+  globalThis.crypto.getRandomValues(words);
+  const namespace = BigInt(words[0]) & REQUEST_NAMESPACE_MAX;
+  return namespace === 0n ? 1n : namespace;
+}
+
+const REQUEST_NAMESPACE = requestNamespace();
+let nextRequestSequence = 1n;
+
+function nextRequestId() {
+  if (nextRequestSequence > U32_MAX) {
+    fail('request id sequence exhausted', 'client/request-id-exhausted');
+  }
+  const requestId = (REQUEST_NAMESPACE << REQUEST_SEQUENCE_BITS) | nextRequestSequence;
+  nextRequestSequence += 1n;
+  return requestId;
 }
 
 function configuredTransportDeadline(requestTimeoutMs) {
@@ -1220,7 +1251,7 @@ export async function storeTransportCheckpoint({
   strictUtf8(space, MAX_SPACE_BYTES, 'SpaceId');
   const transportDeadlineMs = configuredTransportDeadline(requestTimeoutMs);
   const operation = 'rpc/checkpoint';
-  const requestId = 1n;
+  const requestId = nextRequestId();
   const encoded = encodeRequest(
     requestId,
     space,
@@ -1281,7 +1312,6 @@ export function storeClient({
   if (typeof space !== 'string' || !space) fail('space must be a nonempty string', 'client/invalid-space');
   strictUtf8(space, MAX_SPACE_BYTES, 'SpaceId');
   const transportDeadlineMs = configuredTransportDeadline(requestTimeoutMs);
-  let nextRequestId = 1n;
 
   async function call(
     operation,
@@ -1290,8 +1320,7 @@ export function storeClient({
     preflight = null,
     actionCount = 0,
   ) {
-    const requestId = nextRequestId;
-    nextRequestId = nextRequestId === I64_MAX ? 1n : nextRequestId + 1n;
+    const requestId = nextRequestId();
     const encoded = encodeRequest(requestId, space, operation, payload, options);
     if (preflight !== null) {
       requireMatchingPreflight(preflight, batchPreflight(encoded, actionCount));

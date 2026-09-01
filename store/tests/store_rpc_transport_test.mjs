@@ -127,6 +127,48 @@ async function expectRemoteRejection(promise) {
   );
 }
 
+async function firstRequestIdentity() {
+  const core = new URL('../clients/bun/store-rpc-core.mjs', import.meta.url).href;
+  const probe = `
+    const { storeClient } = await import(${JSON.stringify(core)});
+    const transport = request => {
+      console.log(JSON.stringify({
+        pid: process.pid,
+        requestId: request.requestId.toString(),
+      }));
+      throw new Error('request identity captured');
+    };
+    await storeClient({ space: 'identity-probe', transport }).version().catch(() => {});
+  `;
+  const child = Bun.spawn([process.execPath, '--eval', probe], {
+    stdin: 'ignore',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  assert.equal(exitCode, 0, stderr);
+  return JSON.parse(stdout.trim());
+}
+
+test('first request ids are distinct across Bun processes', async () => {
+  const [left, right] = await Promise.all([
+    firstRequestIdentity(),
+    firstRequestIdentity(),
+  ]);
+  assert.notEqual(left.pid, right.pid);
+  assert.notEqual(left.requestId, right.requestId);
+  for (const identity of [left, right]) {
+    const requestId = BigInt(identity.requestId);
+    assert.equal(requestId >> 32n, BigInt(identity.pid));
+    assert.equal(requestId & ((1n << 32n) - 1n), 1n);
+    assert(requestId > 0n && requestId <= (1n << 63n) - 1n);
+  }
+});
+
 test('data client and operator checkpoint cover the exact fourteen server operations', async () => {
   const observed = [];
   const transport = request => {
