@@ -883,7 +883,8 @@
 ;; `iife`/loop output, so this never over-awaits an inline-await call like
 ;; `f(await g())` (which does not start with `(async () => `).
 (define (await-async-iife s)
-  (if (string-prefix? (js-render-shape s) "(async () => ")
+  (if (and (current-js-async?)
+           (string-prefix? (js-render-shape s) "(async () => "))
     (string-append "await " s)
     s))
 
@@ -891,6 +892,7 @@
 
 (define current-js-context (make-parameter 'stmt))
 (define current-js-generator? (make-parameter #f))
+(define current-js-async? (make-parameter #f))
 (define current-js-inline-scope (make-parameter (set)))
 (define current-js-record-fields (make-parameter (hasheq)))
 (define current-js-union-members (make-parameter (hasheq)))
@@ -2472,7 +2474,8 @@
         (with-param-envs
          (arity-clause-params a)
          (lambda ()
-           (parameterize ([current-rename-env arity-rename-env])
+           (parameterize ([current-rename-env arity-rename-env]
+                          [current-js-async? async?])
              (with-bindings arity-bound
                (lambda ()
                  (emit-body-return (arity-clause-body a) "    ")))))
@@ -2513,7 +2516,8 @@
     (with-param-envs (defn-form-params f)
       (lambda ()
         (parameterize ([current-rename-env param-rename-env]
-                       [current-js-generator? generator?])
+                       [current-js-generator? generator?]
+                       [current-js-async? async?])
           (with-bindings bound
             (lambda ()
               (if generator?
@@ -2712,7 +2716,8 @@
                ;; never inherits async-generator statement authority from the
                ;; surrounding function.
                (parameterize ([current-rename-env param-rename-env]
-                              [current-js-generator? #f])
+                              [current-js-generator? #f]
+                              [current-js-async? fn-async?])
                  (with-bindings fn-bound
                    (lambda ()
                      (format "~afunction ~a(~a) { ~a }"
@@ -3166,7 +3171,8 @@
      (with-param-envs
       (fn-form-params e)
       (lambda ()
-       (parameterize ([current-rename-env param-rename-env])
+       (parameterize ([current-rename-env param-rename-env]
+                      [current-js-async? async?])
          (with-bindings bound
            (lambda ()
              (if (and (null? setup)
@@ -4151,7 +4157,7 @@
      (define collection-str
        (parameterize ([current-js-bound pre-bound]
                       [current-rename-env pre-rename-env])
-         (emit-expr expr)))
+         (runtime-render-call "eager_seq" (list (emit-expr expr)))))
      (define setup-str (string-join setup "\n  "))
      (define inner-body
        (if (null? setup)
@@ -4705,7 +4711,7 @@
                 (lambda (c)
                   (define exception-type (catch-clause-exception-type c))
                   (cond
-                    [(eq? exception-type ':default) "$$bd$default_catch"]
+                    [(memq exception-type '(Any :default)) "$$bd$default_catch"]
                     [(eq? exception-type 'ExceptionInfo) "$$be$ExceptionInfo"]
                     [(and (symbol? exception-type)
                           (string-prefix? (symbol->string exception-type) "js/"))

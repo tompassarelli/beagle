@@ -898,6 +898,12 @@ console.log(JSON.stringify(snapshot()));"
      "console.log(f());"
      "43")
 
+   (check-js-output "Any catch is the typed spelling of a JavaScript catch-all"
+     (list '(defn recover [] Int
+              (try (throw "foreign") (catch Any error 7))))
+     "console.log(recover());"
+     "7")
+
    (test-case "exception imports are demand tracked"
      (define plain-js
        (js-emit
@@ -1022,6 +1028,17 @@ JS
      (list '(defn f [(xs (Vec Int))] Nil (doseq [x xs] (println x))))
      "f([10, 20, 30]);"
      "10\n20\n30")
+
+   (check-js-output "doseq destructures native JsMap entries"
+     (list
+      `(defn f [] Nil
+         (let [(values (JsMap String Int)) (new Map)]
+           (.set values "a" 1)
+           (.set values "b" 2)
+           (doseq ,(br (br 'key 'value) '(HVec String Int) 'values)
+             (println key value)))))
+     "f();"
+     "a 1\nb 2")
 
    ;; --- interop -------------------------------------------------------------
 
@@ -1190,6 +1207,22 @@ globalThis.get_val = async (n) => n * 10;
 f(3).then(r => console.log(r));
 "
      "70")
+
+   (check-js-output "sync callable may intentionally detach an authored async closure"
+     (list
+      `(declare-extern settle ,(fn-ty '() '(Promise Nil)))
+      '(defn (#%meta :async launch) [] (Promise Nil)
+         (letfn [(expire [] Nil
+                   (do
+                     ((fn [] (Promise Nil)
+                        (do
+                          (await (settle))
+                          (println "settled"))))
+                     nil))]
+           (expire)
+           nil)))
+     "globalThis.settle = async () => {}; launch();"
+     "settled")
 
    (check-js-output "await-containing try in if branch yields its value"
      (list `(declare-extern get-val ,(fn-ty '(Int) '(Promise Int)))
