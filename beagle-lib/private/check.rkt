@@ -6929,10 +6929,11 @@
           declared-order))
         (for ([u (in-list (with-form-updates e))])
           (define kw (with-update-field-kw u))
-          (define val-type (infer-expr (with-update-value u) env))
           (cond
             [(hash-has-key? field-map kw)
              (define expected (hash-ref field-map kw))
+             (define val-type
+               (infer-expr-with-expected (with-update-value u) env expected))
              (unless (type-compatible? val-type expected)
                (define alt-fields
                  (for/list ([(f t) (in-hash field-map)]
@@ -7916,7 +7917,7 @@
     (parameterize
         ([current-order-killing-consumer?
           (order-killing-collection-arg? fn-name i arg)])
-      (infer-expr arg env)))
+      (infer-expr-with-expected arg env expected-type)))
   (let ([ev (enum-member-violation expected-type arg)])
     (when ev
       (raise-diag 'type-mismatch
