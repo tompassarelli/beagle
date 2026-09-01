@@ -3422,7 +3422,11 @@
           (define name (string->symbol (hash-ref expected 'name)))
          (case name
             [(foreign-dynamic)
-             (foreign-positive-use-error interface expected "an argument")]
+             ;; A declaration-side any is an unconstrained input slot, not a
+             ;; dynamic value being positively used.  Admit concrete typed
+             ;; evidence while keeping Beagle Any rejected above and imported
+             ;; dynamic values behind their narrowing boundary.
+             (not (foreign-dynamic-type? actual))]
             [(unknown) #t]
             [(object) (foreign-object-compatible? actual)]
             [(undefined void never) #f]

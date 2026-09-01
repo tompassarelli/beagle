@@ -507,7 +507,8 @@
       "#lang beagle/js\n"
       "(ns resolver-test.native-success\n"
       "  (:require [\"@fixture/native\" :refer [acceptFlag loadBuffer loadText makeBytes notify pipeline schedule stringTransformer value]]\n"
-      "            [\"@fixture/wasm-bindgen-init\" :refer [consumeBytes SyncInitInput initSync]]))\n"
+      "            [\"@fixture/wasm-bindgen-init\" :refer [consumeBytes SyncInitInput initSync]])\n"
+      "  (:require-global [\"typescript:lib.es5\" :refer [Error]]))\n"
       "(js/export (def answer String value))\n"
       "(js/export (defn relay [flag Bool] Nil (acceptFlag flag)))\n"
       "(js/export (defn transform [value String] String (stringTransformer value)))\n"
@@ -519,6 +520,7 @@
       "(js/export (defn consumeProducedBytes [] Number (consumeBytes (makeBytes))))\n"
       "(js/export (defn consumeConstructedBytes [request (Vec Int)] Number (consumeBytes (new Uint8Array request))))\n"
       "(js/export (defn consumeCopiedBytes [] Number (consumeBytes (new Uint8Array (makeBytes)))))\n"
+      "(js/export (defn rejectFailure [] Any (.reject Promise (new Error \"resident slice failure\"))))\n"
       "(js/export (defn loadTogether [] Any (.all Promise [(loadBuffer) (loadText)])))\n"
       "(js/export (defn settleTogether [] Any\n"
       "  (.then (.all Promise [(loadBuffer) (loadText)])\n"
@@ -545,7 +547,7 @@
     (define resolutions
       (hash-values
        (module-source-closure-foreign-module-resolutions closure)))
-    (check-equal? (length resolutions) 2)
+    (check-equal? (length resolutions) 3)
     (define (foreign-source-for module-specifier)
       (for/first
           ([source (in-list resolutions)]
@@ -563,6 +565,16 @@
     (define wasm-source
       (foreign-source-for "@fixture/wasm-bindgen-init"))
     (check-pred module-source? wasm-source)
+    (define error-source (foreign-source-for "typescript:lib.es5"))
+    (check-pred module-source? error-source)
+    (define error-interface
+      (module-interface-foreign-interface-v1
+       (module-source-interface error-source)))
+    (define error-binding
+      (findf
+       (lambda (binding) (string=? (hash-ref binding 'name) "Error"))
+       (foreign-interface-v1-ambient-values error-interface)))
+    (check-pred hash? error-binding)
     (check-pred
      foreign-interface-v1?
      (module-interface-foreign-interface-v1
@@ -588,6 +600,33 @@
       (hash-ref foreign-nodes (hash-ref promise-all-property 'type)))
     (define promise-all-overloads (hash-ref promise-all-node 'overloads))
     (check-equal? (length promise-all-overloads) 2)
+    (define promise-reject-property
+      (findf
+       (lambda (property) (string=? (hash-ref property 'name) "reject"))
+       (hash-ref promise-constructor 'properties)))
+    (check-pred hash? promise-reject-property)
+    (define promise-reject-node
+      (hash-ref foreign-nodes (hash-ref promise-reject-property 'type)))
+    (define promise-reject-signature
+      (car (hash-ref promise-reject-node 'overloads)))
+    (define promise-reject-parameter-node
+      (hash-ref
+       foreign-nodes
+       (hash-ref
+        (car (hash-ref promise-reject-signature 'parameters))
+        'type)))
+    (check-equal? (hash-ref promise-reject-parameter-node 'kind) "primitive")
+    (check-equal?
+     (hash-ref promise-reject-parameter-node 'name)
+     "foreign-dynamic")
+    (define promise-reject-type-parameter
+      (car (hash-ref promise-reject-signature 'typeParameters)))
+    (define promise-reject-default-id
+      (hash-ref promise-reject-type-parameter 'default))
+    (check-pred string? promise-reject-default-id)
+    (check-equal?
+     (hash-ref (hash-ref foreign-nodes promise-reject-default-id) 'name)
+     "never")
     (define iterable-type-parameter
       (car (hash-ref (car promise-all-overloads) 'typeParameters)))
     (check-false (hash-ref iterable-type-parameter 'constraint))
@@ -740,6 +779,24 @@
                                 "all")))
         inferred))
     (check-equal? (length promise-all-results) 3)
+    (define promise-reject-result
+      (for/first ([(expression inferred)
+                   (in-hash (program-type-table checked-program))]
+                  #:when
+                  (and (jst-call? expression)
+                       (jst-selector? (jst-call-key expression))
+                       (string=? (jst-selector-name (jst-call-key expression))
+                                 "reject")))
+        inferred))
+    (check-true
+     (and (type-app? promise-reject-result)
+          (eq? (type-app-ctor promise-reject-result) 'Promise)
+          (= (length (type-app-args promise-reject-result)) 1)
+          (let ([payload (car (type-app-args promise-reject-result))])
+            (and (type-foreign? payload)
+                 (string=? (type-foreign-node-id payload)
+                           promise-reject-default-id))))
+     (and promise-reject-result (type->string promise-reject-result)))
     (for ([promise-all-result (in-list promise-all-results)])
       (check-true
        (and (type-app? promise-all-result)
