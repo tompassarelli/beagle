@@ -2788,6 +2788,47 @@
       expression
       actual
       (hash-copy (foreign-view-bindings target)))))
+  ;; Keep the expected reference intact while following the supplied value's
+  ;; declared bases.  Normalizing it to the target object first loses the
+  ;; reference's type arguments and makes the eventual same-declaration check
+  ;; invariant.  At the matching base reference, MATCH-REFERENCE can instead
+  ;; prove each supplied generic argument against its expected subtype.
+  (define (match-declared-base-reference)
+    (and
+     (type-foreign? actual)
+     (let-values ([(actual-interface _actual-node)
+                   (foreign-node-ref actual)])
+       (and
+        (string=? (foreign-interface-v1-semantic-id actual-interface)
+                  (foreign-interface-v1-semantic-id interface))
+        (let* ([actual-view
+                (normalize-foreign-view
+                 actual-interface
+                 (make-foreign-view
+                  (type-foreign-node-id actual)
+                  (foreign-type-bindings actual-interface actual))
+                 (mutable-set))]
+               [actual-node
+                (node-at actual-interface (foreign-view-node-id actual-view))])
+          (and
+           (string=? (hash-ref actual-node 'kind) "object")
+           (for/or ([base-id (in-list (hash-ref actual-node 'baseTypes))])
+             (try-foreign-branch
+              bindings
+              (lambda (trial)
+                (foreign-argument-compatible?
+                 interface
+                 expected-id
+                 expression
+                 (foreign-result-type
+                  actual-interface
+                  base-id
+                  (foreign-view-bindings actual-view))
+                 trial
+                 active
+                 inferable
+                 join-inference?
+                 dynamic-inference?))))))))))
   (define (match-structural-object expected)
     (and
      (type-foreign? actual)
@@ -3692,6 +3733,7 @@
               (match-native-promise-like-reference expected)
               (and actual-view (match-reference expected actual-view))
               (match-cross-interface-reference expected)
+              (match-declared-base-reference)
               (match-reference-target))]
          [(function)
           (or
