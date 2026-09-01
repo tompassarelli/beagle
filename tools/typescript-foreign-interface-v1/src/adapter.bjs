@@ -140,6 +140,7 @@
   [seen OpaqueCompilerValueV1
    nodes Any
    obligations Any
+   requestedMemberNames (Vec String)
    ambientCandidateNames (Atom (Vec String))
    nodeCounter (Atom Int)
    obligationCounter (Atom Int)])
@@ -183,11 +184,14 @@
    values (Vec ExportV1)] (Vec ExportV1)
   (.sort bridge values))
 
-(defn empty-build-state [bridge OpaqueCompilerValueV1] BuildStateV1
+(defn empty-build-state
+  [bridge OpaqueCompilerValueV1
+   requested-member-names (Vec String)] BuildStateV1
   (->BuildStateV1
     (.weakMap bridge)
     (transient [])
     (transient [])
+    requested-member-names
     (atom [])
     (atom 1)
     (atom 1)))
@@ -316,7 +320,10 @@
    state BuildStateV1
    id String
    type OpaqueCompilerValueV1] ForeignNodeV1
-  (let [properties OpaqueCompilerValueV1 (sorted-opaque bridge (.propertiesOfType bridge type))]
+  (let [properties OpaqueCompilerValueV1 (sorted-opaque
+        bridge
+        (.propertiesOfType
+          bridge type (buildstatev1-requestedMemberNames state)))]
     (->ObjectNode
       id
       (.typeName bridge type)
@@ -738,8 +745,9 @@
      module-specifier String
      conditions (Vec String)
      requested-ambient-names (Vec String)
-     requested-exports (Vec String)] WireValueV1
-    (let [state BuildStateV1 (empty-build-state bridge)
+     requested-exports (Vec String)
+     requested-member-names (Vec String)] WireValueV1
+    (let [state BuildStateV1 (empty-build-state bridge requested-member-names)
           exports (Vec ExportV1) (sorted-exports
             bridge
             (if (empty? requested-ambient-names)

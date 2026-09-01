@@ -33,6 +33,8 @@
 (declare-extern selfhost.rt/projection-sha256 (Fn [Any] String))
 (declare-extern selfhost.rt/valid-sha256? (Fn [Any] Bool))
 (declare-extern selfhost.rt/valid-projection-sha256? (Fn [Any] Bool))
+(declare-extern selfhost.rt/foreign-interface-v1
+  (Fn [String String String (Vec String) (Vec String)] Any))
 
 (def CHECKED-PROGRAM-SCHEMA-VERSION Int 4)
 
@@ -60,6 +62,11 @@
 (def MODULE-SOURCE-UNIT-CACHE Any (atom {}))
 (def MODULE-REQUIRE-CACHE Any (atom {}))
 (def MODULE-RESOLUTION-EDGE-CACHE Any (atom {}))
+(def FOREIGN-INTERFACE-CACHE Any (atom {}))
+(def FOREIGN-PROJECT-ROOT Any (atom nil))
+
+(def FOREIGN-INTERFACES-KEY String
+  "$beagle$selfhost$foreign-interfaces")
 
 (defn- read-source-unit! [path String] Any
   (let [absolute-path (selfhost.rt/abs-path path)
@@ -194,12 +201,15 @@
 
 (defn- install-module-resolution!
   [root-specs Any
-   source-paths Any] Nil
+   source-paths Any
+   project-root Any] Nil
   (reset! MODULE-SOURCE-UNIT-CACHE {})
   (reset! MODULE-REQUIRE-CACHE {})
   (reset! MODULE-RESOLUTION-EDGE-CACHE {})
   (reset! MODULE-SURFACE-CACHE {})
   (reset! MODULE-LOAD-STACK {})
+  (reset! FOREIGN-INTERFACE-CACHE {})
+  (reset! FOREIGN-PROJECT-ROOT project-root)
   (reset! MODULE-RESOLUTION
     {"providers" (reduce register-bundle-source! {} source-paths)
      "roots" (mapv parse-module-root-spec! root-specs)})
@@ -315,6 +325,100 @@
   (let [refer (get require "refer")]
     (if (and (some? refer) (not (= refer false))) refer nil)))
 
+(defn- member-demand-name [value String] Any
+  (cond
+    (and (str/starts-with? value ".-") (> (count value) 2))
+    (subs value 2)
+
+    (and (str/starts-with? value ".") (> (count value) 1))
+    (subs value 1)
+
+    :else nil))
+
+(defn- foreign-member-demand*!
+  [value Any
+   names Any] Nil
+  (cond
+    (string? value)
+    (let [name (member-demand-name value)]
+      (when (some? name) (swap! names assoc name true)))
+
+    (vector? value)
+    (do
+      (when (and (> (count value) 1) (= (nth value 0) "#%map"))
+        (doseq [index (range 1 (count value) 2)]
+          (let [key (nth value index)]
+            (when (and (string? key) (str/starts-with? key ":")
+                       (> (count key) 1))
+              (swap! names assoc (subs key 1) true)))))
+      (doseq [child value] (foreign-member-demand*! child names)))
+
+    (map? value)
+    (doseq [key (keys value)]
+      (foreign-member-demand*! (get value key) names))
+
+    :else nil)
+  nil)
+
+(defn- foreign-member-demand [datums Any] (Vec String)
+  (let [names Any (atom {})]
+    (foreign-member-demand*! datums names)
+    (vec (sort (keys (deref names))))))
+
+(defn- checked-foreign-interface!
+  [require Any
+   source-unit Any] Any
+  (let [module-specifier (get require "ns")
+        requested-exports (require-refer-syms require)
+        requested-members (foreign-member-demand (get source-unit "datums"))
+        project-root (deref FOREIGN-PROJECT-ROOT)
+        source-path (get source-unit "path")]
+    (cond
+      (or (nil? requested-exports) (= (count requested-exports) 0))
+      (do
+        (selfhost.rt/eprint
+          (str "beagle [foreign]: native ESM module " module-specifier
+            " requires an explicit non-empty :refer root set\n"))
+        (selfhost.rt/exit 1)
+        nil)
+
+      (not (string? project-root))
+      (do
+        (selfhost.rt/eprint
+          (str "beagle [foreign]: --project-root is required for native ESM module "
+            module-specifier "\n"))
+        (selfhost.rt/exit 2)
+        nil)
+
+      :else
+      (let [cache-key (str project-root "\n" source-path "\n"
+                        module-specifier "\n" requested-exports "\n"
+                        requested-members)
+            cached (get (deref FOREIGN-INTERFACE-CACHE) cache-key)]
+        (if (some? cached)
+          cached
+          (let [interface (selfhost.rt/foreign-interface-v1
+                            project-root source-path module-specifier
+                            requested-exports requested-members)
+                stats (get interface "stats")]
+            (if (not (and (= (get interface "kind") "ForeignInterfaceV1")
+                          (= (get interface "schemaVersion") 1)
+                          (= (get interface "frontend") "typescript")
+                          (= (get interface "moduleSpecifier") module-specifier)
+                          (= (get stats "anyCount") 0)
+                          (= (get stats "obligationCount") 0)))
+              (do
+                (selfhost.rt/eprint
+                  (str "beagle [foreign]: native interface for " module-specifier
+                    " is not a closed no-Any ForeignInterfaceV1 graph\n"))
+                (selfhost.rt/exit 1)
+                nil)
+              (let [entry {"graph" interface
+                           "prefix" (require-prefix require)
+                           "refer" requested-exports}]
+                (swap! FOREIGN-INTERFACE-CACHE assoc cache-key entry)
+                entry))))))))
+
 (defn- read-required-source-unit!
   [required-ns String
    path String] Any
@@ -370,7 +474,11 @@
    source-unit Any
    target String] Any
   (if (p/native-esm-require? require)
-    {"kind" "unsupported" "applicable" false}
+    (if (and (= target "js") (not (p/renamed-require? require)))
+      {"kind" "foreign"
+       "applicable" true
+       "require" require}
+      {"kind" "unsupported" "applicable" false})
     (let [ns (get require "ns")
           prefix (require-prefix require)
           refer-syms (require-refer-syms require)
@@ -557,6 +665,12 @@
                     "imported-aliases" imported-aliases
                     "type-aliases" type-aliases)))))
 
+          (= kind "foreign")
+          (conj surfaces
+            (assoc (checked-foreign-interface!
+                     (get route "require") source-unit)
+              "foreign" true))
+
           :else
           surfaces)))
     []
@@ -575,11 +689,31 @@
     (fn
       [arities Any
        surface Any] Any
-      (into arities
-        (p/module-parametric-arities!
-          (get surface "datums")
-          (get surface "prefix")
-          (get surface "refer"))))
+      (if (= true (get surface "foreign"))
+        (reduce
+          (fn
+            [out Any
+             export Any] Any
+            (let [node-id (get export "node")
+                  node (first
+                         (filterv
+                           (fn [candidate Any] Bool
+                             (= (get candidate "id") node-id))
+                           (get (get surface "graph") "nodes")))
+                  signatures (get node "constructSignatures" [])
+                  arity (if (= (count signatures) 0)
+                          (count (get node "typeParameters" []))
+                          (count
+                            (get (nth signatures 0)
+                              "capturedTypeParameters" [])))]
+              (if (> arity 0) (assoc out (get export "name") arity) out)))
+          arities
+          (get (get surface "graph") "exports"))
+        (into arities
+          (p/module-parametric-arities!
+            (get surface "datums")
+            (get surface "prefix")
+            (get surface "refer")))))
     {}
     surfaces))
 
@@ -591,12 +725,20 @@
     (fn
       [names Any
        surface Any] Any
-      (into names
-        (p/module-nominal-type-names-with-imports!
-          (get surface "datums")
-          (get surface "prefix")
-          (get surface "refer")
-          (get surface "imported-nominal-type-names" {}))))
+      (if (= true (get surface "foreign"))
+        (reduce
+          (fn
+            [out Any
+             export Any] Any
+            (assoc out (get export "name") true))
+          names
+          (get (get surface "graph") "exports"))
+        (into names
+          (p/module-nominal-type-names-with-imports!
+            (get surface "datums")
+            (get surface "prefix")
+            (get surface "refer")
+            (get surface "imported-nominal-type-names" {})))))
     {}
     surfaces))
 
@@ -612,42 +754,51 @@
                    (fn
                      [acc Any
                       surface Any] Any
-                     (into acc
-                       (mapv
-                         (fn [extern Any] Any
-                         (assoc extern
-                           "synchronous" false
-                           "returnsSynchronousCallable" false))
-                         (p/import-module-surface-with-aliases!
-                           (get surface "datums")
-                           (get surface "prefix")
-                           (get surface "refer")
-                           (get surface "imported-aliases")))))
+                     (if (= true (get surface "foreign"))
+                       acc
+                       (into acc
+                         (mapv
+                           (fn [extern Any] Any
+                           (assoc extern
+                             "synchronous" false
+                             "returnsSynchronousCallable" false))
+                           (p/import-module-surface-with-aliases!
+                             (get surface "datums")
+                             (get surface "prefix")
+                             (get surface "refer")
+                             (get surface "imported-aliases"))))))
                    [] surfaces)
         record-contracts (reduce
             (fn
               [acc Any
                surface Any] Any
-              (into acc
-                (p/qualify-imported-record-contracts
-                  (get surface "record-contracts")
-                  (get surface "prefix")
-                  (get surface "refer"))))
+              (if (= true (get surface "foreign"))
+                acc
+                (into acc
+                  (p/qualify-imported-record-contracts
+                    (get surface "record-contracts")
+                    (get surface "prefix")
+                    (get surface "refer")))))
             [] surfaces)
         callable-synchronization (reduce
             (fn
               [acc Any
                surface Any] Any
-              (into acc
-                (p/qualify-imported-callable-synchronization
-                  (get surface "callable-synchronization")
-                  (get surface "prefix")
-                  (get surface "refer"))))
+              (if (= true (get surface "foreign"))
+                acc
+                (into acc
+                  (p/qualify-imported-callable-synchronization
+                    (get surface "callable-synchronization")
+                    (get surface "prefix")
+                    (get surface "refer")))))
             [] surfaces)]
     (assoc prog
       "externs" (dedup-externs (into own-externs imported))
       IMPORTED-RECORD-CONTRACTS-KEY record-contracts
-      IMPORTED-CALLABLE-SYNCHRONIZATION-KEY callable-synchronization)))
+      IMPORTED-CALLABLE-SYNCHRONIZATION-KEY callable-synchronization
+      FOREIGN-INTERFACES-KEY
+      (filterv (fn [surface Any] Bool (= true (get surface "foreign")))
+        surfaces))))
 
 ;; Inject the requested emit target into the datum stream when the source
 ;; declares none, so parse target-case + emit agree. The
@@ -1019,9 +1170,10 @@
   [command String
    root-specs Any
    source-paths Any
+   project-root Any
    path String
    target String] Nil
-  (install-module-resolution! root-specs (conj source-paths path))
+  (install-module-resolution! root-specs (conj source-paths path) project-root)
   (if (admit-source-graph! path target)
     (cond
       (= command "ast") (cmd-ast! path target)
@@ -1068,6 +1220,8 @@
          after-double-dash? Bool false
          target String "clj"
          target-seen? Bool false
+         project-root Any nil
+         project-root-seen? Bool false
          roots Any []
          sources Any []
          positionals Any []]
@@ -1086,15 +1240,18 @@
         {"target" target
          "roots" roots
          "sources" sources
+         "project-root" project-root
          "path" (nth positionals 0)})
       (let [arg (nth args i)]
         (cond
           after-double-dash?
-          (recur (+ i 1) true target target-seen? roots sources
+          (recur (+ i 1) true target target-seen?
+            project-root project-root-seen? roots sources
             (conj positionals arg))
 
           (= arg "--")
-          (recur (+ i 1) true target target-seen? roots sources positionals)
+          (recur (+ i 1) true target target-seen?
+            project-root project-root-seen? roots sources positionals)
 
           (= arg "--target")
           (cond
@@ -1105,21 +1262,36 @@
             (source-command-argument-error!
               "source command --target requires a value")
             :else
-            (recur (+ i 2) false (nth args (+ i 1)) true roots sources
+            (recur (+ i 2) false (nth args (+ i 1)) true
+              project-root project-root-seen? roots sources
               positionals))
+
+          (= arg "--project-root")
+          (cond
+            project-root-seen?
+            (source-command-argument-error!
+              "source command accepts --project-root only once")
+            (or (>= (+ i 1) (count args)) (= (nth args (+ i 1)) "--"))
+            (source-command-argument-error!
+              "source command --project-root requires a value")
+            :else
+            (recur (+ i 2) false target target-seen?
+              (nth args (+ i 1)) true roots sources positionals))
 
           (= arg "--module-root")
           (if (or (>= (+ i 1) (count args)) (= (nth args (+ i 1)) "--"))
             (source-command-argument-error!
               "source command --module-root requires a value")
             (recur (+ i 2) false target target-seen?
+              project-root project-root-seen?
               (conj roots (nth args (+ i 1))) sources positionals))
 
           (= arg "--source")
           (if (or (>= (+ i 1) (count args)) (= (nth args (+ i 1)) "--"))
             (source-command-argument-error!
               "source command --source requires a value")
-            (recur (+ i 2) false target target-seen? roots
+            (recur (+ i 2) false target target-seen?
+              project-root project-root-seen? roots
               (conj sources (nth args (+ i 1))) positionals))
 
           (str/starts-with? arg "--")
@@ -1127,7 +1299,8 @@
             (str "unsupported source command option " arg))
 
           :else
-          (recur (+ i 1) false target target-seen? roots sources
+          (recur (+ i 1) false target target-seen?
+            project-root project-root-seen? roots sources
             (conj positionals arg)))))))
 
 (defn -main [& (args (List String))] Nil
@@ -1139,6 +1312,7 @@
           cmd
           (get options "roots")
           (get options "sources")
+          (get options "project-root")
           (get options "path")
           (get options "target")))
       (= cmd "emit-from-ast")

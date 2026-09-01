@@ -99,6 +99,57 @@ export function getenv(name) {
   return process.env[name] ?? null;
 }
 
+function requiredEnvironment(name) {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`self-hosted TypeScript ingestion requires ${name}`);
+  }
+  return value;
+}
+
+export function foreign_interface_v1(
+  projectRoot,
+  containingFile,
+  moduleSpecifier,
+  requestedExports,
+  requestedMembers,
+) {
+  const repositoryRoot = requiredEnvironment("BEAGLE_REPOSITORY_ROOT");
+  const compiledAdapter = requiredEnvironment("BEAGLE_COMPILED_ADAPTER");
+  const typescriptRuntimeRoot = requiredEnvironment("BEAGLE_TYPESCRIPT_RUNTIME_ROOT");
+  const adapterRoot = resolve(repositoryRoot, "tools/typescript-foreign-interface-v1");
+  const runner = resolve(adapterRoot, "src/run.mjs");
+  const runtimeRoot = resolve(repositoryRoot, "beagle-lib/lib/beagle");
+  const result = Bun.spawnSync([
+    process.execPath,
+    runner,
+    compiledAdapter,
+    adapterRoot,
+    typescriptRuntimeRoot,
+    runtimeRoot,
+    projectRoot,
+    containingFile,
+    moduleSpecifier,
+    "[]",
+    "beagle",
+    "--refer",
+    ...requestedExports,
+    "--member",
+    ...requestedMembers,
+  ], {
+    cwd: projectRoot,
+    stderr: "pipe",
+    stdout: "pipe",
+  });
+  if (result.exitCode !== 0) {
+    const detail = new TextDecoder().decode(result.stderr).trim();
+    throw new Error(
+      `TypeScript foreign interface failed for ${moduleSpecifier}: ${detail}`,
+    );
+  }
+  return fromJsonValue(JSON.parse(new TextDecoder().decode(result.stdout)));
+}
+
 export function canonical_json(value) {
   return canonicalJsonValue(value);
 }

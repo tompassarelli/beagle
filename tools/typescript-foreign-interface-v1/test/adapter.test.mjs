@@ -47,10 +47,20 @@ function compile() {
   expect(result.exitCode, result.stderr.toString()).toBe(0);
 }
 
-async function prepare({ projectRoot = adapterRoot, importer = containingFile } = {}) {
+async function prepare({
+  projectRoot = adapterRoot,
+  importer = containingFile,
+  requestedExports = [],
+} = {}) {
   const compiledAdapter = bindCompiledAdapter(compiled);
   const bridge = createCompilerBridge({ adapterRoot, compiledAdapter });
-  const context = createContext({ projectRoot, containingFile: importer, moduleSpecifier, conditions });
+  const context = createContext({
+    projectRoot,
+    containingFile: importer,
+    moduleSpecifier,
+    conditions,
+    requestedExports,
+  });
   const adapter = await compiledAdapter.load(runtimeRoot);
   const build = foreignInterfaceBuilder(adapter);
   return { bridge, build, context };
@@ -58,7 +68,15 @@ async function prepare({ projectRoot = adapterRoot, importer = containingFile } 
 
 async function produce(options = {}) {
   const { bridge, build, context } = await prepare(options);
-  return build(bridge, context, moduleSpecifier, conditions, []);
+  return build(
+    bridge,
+    context,
+    moduleSpecifier,
+    conditions,
+    [],
+    options.requestedExports ?? [],
+    options.requestedMemberNames ?? [],
+  );
 }
 
 function fixtureProject({ typedEntry = false, projectLock = true } = {}) {
@@ -112,6 +130,17 @@ beforeAll(() => {
 });
 
 describe("ForeignInterfaceV1 graph semantics", () => {
+  test("bounds an explicit export closure to requested object members", async () => {
+    const graph = await produce({
+      requestedExports: ["User"],
+      requestedMemberNames: ["id"],
+    });
+    expect(graph.exports.map(({ name }) => name)).toEqual(["User"]);
+    const user = exportedNode(graph, "User");
+    expect(user.properties.map(({ name }) => name)).toEqual(["id"]);
+    expect(graph.nodes.length).toBeLessThan((await produce()).nodes.length);
+  });
+
   test("is deterministic, canonical, and preserves the representative surface", async () => {
     const first = await produce();
     const second = await produce();
@@ -313,6 +342,8 @@ describe("provenance authority", () => {
       moduleSpecifier,
       conditions,
       [],
+      [],
+      [],
     )).toThrow("compiler input changed after snapshot");
   });
 
@@ -325,6 +356,8 @@ describe("provenance authority", () => {
       prepared.context,
       moduleSpecifier,
       conditions,
+      [],
+      [],
       [],
     )).toThrow("project lockfile bun.lock changed after snapshot");
   });
