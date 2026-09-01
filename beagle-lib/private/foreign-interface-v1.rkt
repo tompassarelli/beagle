@@ -1945,6 +1945,7 @@
     [(number) (type-prim 'Float)]
     [(boolean) (type-prim 'Bool)]
     [(js-array-buffer) (type-prim 'ArrayBuffer)]
+    [(never) (type-prim 'Never)]
     [(null undefined void) (type-prim 'Nil)]
     [else #f]))
 
@@ -2594,11 +2595,13 @@
               (type-union alternatives)))]))
 
 (define (foreign-never-type? type)
-  (and
-   (type-foreign? type)
-   (let-values ([(_interface node) (foreign-node-ref type)])
-     (and (string=? (hash-ref node 'kind) "primitive")
-          (string=? (hash-ref node 'name) "never")))))
+  (or
+   (and (type-prim? type) (eq? (type-prim-name type) 'Never))
+   (and
+    (type-foreign? type)
+    (let-values ([(_interface node) (foreign-node-ref type)])
+      (and (string=? (hash-ref node 'kind) "primitive")
+           (string=? (hash-ref node 'name) "never"))))))
 
 (define (foreign-dynamic-type? type)
   (and
@@ -3367,7 +3370,43 @@
                        [property-name (in-list property-names)]
                        #:when (set-member? properties property-name))
               pair))
-          (recur member (map-form member-pairs) actual))))))
+           (recur member (map-form member-pairs) actual))))))
+  (define (never-or-undefined-node? node-id [seen (set)])
+    (and
+     (not (set-member? seen node-id))
+     (let* ([next-seen (set-add seen node-id)]
+            [node (node-at interface node-id)])
+       (case (string->symbol (hash-ref node 'kind))
+         [(primitive)
+          (member (hash-ref node 'name) '("never" "undefined"))]
+         [(union)
+          (andmap
+           (lambda (member)
+             (never-or-undefined-node? member next-seen))
+           (hash-ref node 'members))]
+         [(reference)
+          (define target (hash-ref node 'target))
+          (and target (never-or-undefined-node? target next-seen))]
+         [else #f]))))
+  (define (optional-never-object-node? node-id [seen (set)])
+    (and
+     (not (set-member? seen node-id))
+     (let* ([next-seen (set-add seen node-id)]
+            [node (node-at interface node-id)])
+       (case (string->symbol (hash-ref node 'kind))
+         [(object)
+          (and
+           (null? (hash-ref node 'indexes))
+           (null? (hash-ref node 'callSignatures))
+           (null? (hash-ref node 'constructSignatures))
+           (for/and ([property (in-list (hash-ref node 'properties))])
+             (and
+              (hash-ref property 'optional)
+              (never-or-undefined-node? (hash-ref property 'type)))))]
+         [(reference)
+          (define target (hash-ref node 'target))
+          (and target (optional-never-object-node? target next-seen))]
+         [else #f]))))
   (define argument-operation (list 'argument actual))
   (cond
     ;; Any is useful inside Beagle, but it is not evidence for a foreign
@@ -3484,17 +3523,24 @@
                     inference-members)])]
          [(intersection)
           ;; A branded or nominal intersection cannot be manufactured by a
-          ;; structurally compatible Beagle scalar. Exact map literals are the
-          ;; one stronger case: their per-entry evidence can satisfy every
-          ;; closed structural member while still rejecting unclaimed keys.
+          ;; structurally compatible Beagle scalar. An ordinary primitive can
+          ;; satisfy a TypeScript negative-property constraint such as
+          ;; ArrayBufferLike & { BYTES_PER_ELEMENT?: never } only after every
+          ;; substantive member matches and the remaining structural member
+          ;; proves that it contains optional never properties exclusively.
+          ;; Exact map literals remain the other stronger case: their per-entry
+          ;; evidence must satisfy every closed structural member.
           (or
-           (and (type-foreign? actual)
-                (andmap (lambda (member)
-                          (foreign-argument-compatible?
-                           interface member expression actual
-                           bindings active inferable join-inference?
-                           dynamic-inference?))
-                        (hash-ref expected 'members)))
+           (andmap
+            (lambda (member)
+              (or
+               (and (type-prim? actual)
+                    (optional-never-object-node? member))
+               (foreign-argument-compatible?
+                interface member expression actual
+                bindings active inferable join-inference?
+                dynamic-inference?)))
+            (hash-ref expected 'members))
            (match-map-literal-intersection expected))]
          [(array)
           (or

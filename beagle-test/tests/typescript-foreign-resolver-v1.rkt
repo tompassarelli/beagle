@@ -508,7 +508,7 @@
       "(ns resolver-test.native-success\n"
       "  (:require [\"@fixture/native\" :refer [acceptFlag loadBuffer loadText makeBytes notify pipeline schedule stringTransformer value]]\n"
       "            [\"@fixture/wasm-bindgen-init\" :refer [consumeBytes SyncInitInput initSync]])\n"
-      "  (:require-global [\"typescript:lib.es5\" :refer [Error]]))\n"
+      "  (:require-global [\"typescript:lib.es5\" :refer [ArrayBuffer DataView Error]]))\n"
       "(require '[\"bun\" :refer [file]])\n"
       "(js/export (def answer String value))\n"
       "(js/export (defn relay [flag Bool] Nil (acceptFlag flag)))\n"
@@ -521,6 +521,8 @@
       "(js/export (defn consumeProducedBytes [] Number (consumeBytes (makeBytes))))\n"
       "(js/export (defn consumeConstructedBytes [request (Vec Int)] Number (consumeBytes (new Uint8Array request))))\n"
       "(js/export (defn consumeCopiedBytes [] Number (consumeBytes (new Uint8Array (makeBytes)))))\n"
+      "(js/export (defn constructDataView [] Any\n"
+      "  (let [packed ArrayBuffer (new ArrayBuffer 8)] (new DataView packed))))\n"
       "(js/export (defn rejectFailure [] Any (.reject Promise (new Error \"resident slice failure\"))))\n"
       "(js/export (defn loadTogether [] Any (.all Promise [(loadBuffer) (loadText)])))\n"
       "(js/export (defn settleTogether [] Any\n"
@@ -809,24 +811,8 @@
      (and (type-app? promise-reject-result)
           (eq? (type-app-ctor promise-reject-result) 'Promise)
           (= (length (type-app-args promise-reject-result)) 1)
-          (let* ([payload (car (type-app-args promise-reject-result))]
-                 [payload-interface
-                  (and
-                   (type-foreign? payload)
-                   (hash-ref
-                    resolution-interfaces
-                    (type-foreign-interface-id payload)
-                    #f))]
-                 [payload-node
-                  (and
-                   payload-interface
-                   (hash-ref
-                    (foreign-interface-v1-nodes payload-interface)
-                    (type-foreign-node-id payload)
-                    #f))])
-            (and payload-node
-                 (string=? (hash-ref payload-node 'kind) "primitive")
-                 (string=? (hash-ref payload-node 'name) "never"))))
+          (equal? (car (type-app-args promise-reject-result))
+                  (type-prim 'Never)))
      (and promise-reject-result (type->string promise-reject-result)))
     (for ([promise-all-result (in-list promise-all-results)])
       (check-true
