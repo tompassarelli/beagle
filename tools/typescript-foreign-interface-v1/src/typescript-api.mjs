@@ -1065,6 +1065,7 @@ export function createCompilerBridge({
       return Number.isInteger(value) ? `${value}.0` : String(value);
     },
     nodeTokenKind: canonicalTokenKind,
+    metaPropertyKeywordKind: (node) => ts.SyntaxKind[node?.keywordToken] ?? "",
     prefixOperatorKind: (node) => canonicalTokenKind({ kind: node.operator }),
     "nodeExported?": (node) => Boolean(node?.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)),
     "nodeOptional?": (node) => Boolean(

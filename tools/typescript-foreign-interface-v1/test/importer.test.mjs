@@ -16,6 +16,8 @@ const runtimeRoot = resolve(repositoryRoot, "beagle-lib/lib/beagle");
 const fixture = resolve(adapterRoot, "fixture/wasm-bindgen-init.ts");
 const diagnosticIsolationDirty = resolve(adapterRoot, "fixture/diagnostic-isolation-dirty.ts");
 const diagnosticIsolationTarget = resolve(adapterRoot, "fixture/diagnostic-isolation-target.ts");
+const metaPropertySupported = resolve(adapterRoot, "fixture/meta-property-supported.ts");
+const metaPropertyUnsupported = resolve(adapterRoot, "fixture/meta-property-unsupported.ts");
 const temporary = mkdtempSync(join(tmpdir(), "beagle-ts-import-v1-"));
 const compiled = resolve(temporary, "importer.mjs");
 
@@ -102,4 +104,35 @@ test("target translation ignores diagnostics owned by a transitive dependency", 
   expect(result.source).toContain(
     "(js/export (defn isolatedValue [] String dependencyValue))",
   );
+});
+
+test("import.meta becomes the canonical Beagle import-meta form", async () => {
+  const result = await importFixture(
+    metaPropertySupported,
+    "beagle.typescript.meta-property-supported",
+  );
+
+  expect(result.diagnostics).toEqual([]);
+  expect(result.source.match(/\(js\/import-meta\)/g)).toEqual([
+    "(js/import-meta)",
+    "(js/import-meta)",
+  ]);
+  expect(result.source).not.toContain("__typescript_import_unsupported__");
+});
+
+test("unsupported TypeScript meta-properties retain an exact diagnostic", async () => {
+  const result = await importFixture(
+    metaPropertyUnsupported,
+    "beagle.typescript.meta-property-unsupported",
+  );
+
+  expect(result.diagnostics).toEqual([{
+    _tag: "SourceDiagnosticV1",
+    code: "TSI_META_PROPERTY",
+    message: "unsupported TypeScript meta-property new.target",
+    file: "fixture/meta-property-unsupported.ts",
+    line: 2,
+    column: 3,
+  }]);
+  expect(result.source).toContain("__typescript_import_unsupported__");
 });

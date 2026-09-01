@@ -928,6 +928,18 @@
           (diagnostic! state node "TSI_BINARY_OPERATOR"
             (str "unsupported binary operator " operator)))))))
 
+(defn emit-meta-property!
+  [state ImportStateV1
+   node OpaqueTypeScriptNodeV1] String
+  (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
+        keyword String (.metaPropertyKeywordKind bridge node)
+        name String (node-name state (bridge-node state node "name"))]
+    (if (and (identical? keyword "ImportKeyword")
+             (identical? name "meta"))
+      "(js/import-meta)"
+      (diagnostic! state node "TSI_META_PROPERTY"
+        (str "unsupported TypeScript meta-property " (.nodeText bridge node))))))
+
 (defn emit-expression! [state ImportStateV1 node OpaqueTypeScriptNodeV1] String
   (do
     (note-supported! state)
@@ -956,6 +968,7 @@
         (identical? kind "TemplateExpression") (emit-template! state node)
         (identical? kind "ArrowFunction") (emit-arrow! state node)
         (identical? kind "CallExpression") (emit-call! state node)
+        (identical? kind "MetaProperty") (emit-meta-property! state node)
         (identical? kind "PropertyAccessExpression") (emit-property-get! state node)
         (identical? kind "ElementAccessExpression")
         (let [receiver String (emit-expression! state (bridge-node state node "expression"))
