@@ -25,6 +25,12 @@
    type String
    value String])
 
+(defrecord ImportedClassFieldV1
+  [name String
+   type-node OpaqueTypeScriptNodeV1
+   initializer (U OpaqueTypeScriptNodeV1 Nil)
+   mutable Bool])
+
 (defrecord ImportStateV1
   [bridge OpaqueCompilerValueV1
    context OpaqueCompilerValueV1
@@ -40,6 +46,9 @@
    extra-imports (Atom (Map String (Vec String)))
    needs-process (Atom Bool)
    needs-pad-end (Atom Bool)
+   needs-error (Atom Bool)
+   loop-break-name (Atom (U String Nil))
+   loop-continue-name (Atom (U String Nil))
    counter (Atom Int)
    supported-count (Atom Int)])
 
@@ -117,6 +126,14 @@
    prefix String] String
   (let [value Int (swap! (importstatev1-counter state) inc)]
     (str prefix value)))
+
+(defn member-name
+  [state ImportStateV1
+   node OpaqueTypeScriptNodeV1] String
+  (let [name String (node-name state node)]
+    (if (.startsWith name "#")
+      (str "private-" (.slice name 1))
+      name)))
 
 (defn type-members
   [state ImportStateV1
@@ -635,7 +652,10 @@
                  (identical? (.typeKind bridge declared) "unknown")
                  (identical? (.typeKind bridge declared) "object-keyword"))
              (.flowAscriptionType? bridge actual))
-      (str "(: " source " " (type->beagle! state actual true) ")")
+      (let [actual-source String (type->beagle! state actual true)]
+        (if (identical? (.typeKind bridge declared) "any")
+          (str "(: " source " " actual-source ")")
+          (str "(: (: " source " Any) " actual-source ")")))
       source)))
 
 (defn type-parameter-binding!
@@ -760,6 +780,31 @@
       name
       nil)))
 
+(defn local-class-name
+  [state ImportStateV1
+   type OpaqueTypeScriptTypeV1] (U String Nil)
+  (let [name (U String Nil) (local-record-name state type)]
+    (if (and name
+             (.nominalReference? (importstatev1-bridge state) type))
+      name
+      nil)))
+
+(defn class-field-atom-source!
+  [state ImportStateV1
+   node OpaqueTypeScriptNodeV1] (U String Nil)
+  (if (identical? (node-kind state node) "PropertyAccessExpression")
+    (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
+          receiver OpaqueTypeScriptNodeV1 (bridge-node state node "expression")
+          receiver-type OpaqueTypeScriptTypeV1 (.typeAt bridge receiver)
+          class-name (U String Nil) (local-class-name state receiver-type)
+          raw-name String (node-name state (bridge-node state node "name"))]
+      (if (and class-name (.classFieldMutable? bridge receiver-type raw-name))
+        (str "(" (.toLowerCase class-name) "-"
+             (member-name state (bridge-node state node "name")) " "
+             (emit-expression! state receiver) ")")
+        nil))
+    nil))
+
 (defn imported-record-name!
   [state ImportStateV1
    type OpaqueTypeScriptTypeV1] (U String Nil)
@@ -851,9 +896,15 @@
         record-name (U String Nil) (if forced-record
           forced-record
           (if (present? contextual)
-            (let [known (U String Nil)
+            (let [known-structural (U String Nil)
                   (get (deref (importstatev1-structural-records state))
                        (structural-record-key state contextual))
+                  known-anonymous (U String Nil)
+                  (get (deref (importstatev1-anonymous-records state))
+                       (structural-record-key state contextual))
+                  known (U String Nil) (if known-structural
+                    known-structural
+                    known-anonymous)
                   local (U String Nil) (local-record-name state contextual)]
               (if known
                 known
@@ -988,7 +1039,9 @@
    node OpaqueTypeScriptNodeV1] String
   (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
         receiver OpaqueTypeScriptNodeV1 (bridge-node state node "expression")
-        name String (node-name state (bridge-node state node "name"))
+        name-node OpaqueTypeScriptNodeV1 (bridge-node state node "name")
+        name String (node-name state name-node)
+        source-name String (member-name state name-node)
         optional? Bool (.nodeOptional? bridge node)
         receiver-source String (if (and optional?
                  (identical? (node-kind state receiver) "ElementAccessExpression"))
@@ -1003,7 +1056,10 @@
         synthetic-record (U String Nil) (if (identical? (node-kind state receiver) "Identifier")
           (get (deref (importstatev1-synthetic-values state)) (node-name state receiver))
           nil)
-        record-name (U String Nil) (if synthetic-record synthetic-record (local-record-name state receiver-type))]
+        record-name (U String Nil) (if synthetic-record synthetic-record (local-record-name state receiver-type))
+        class-name (U String Nil) (local-class-name state receiver-type)
+        mutable-class-field? Bool (and class-name
+          (.classFieldMutable? bridge receiver-type name))]
     (cond
       (and (identical? (node-kind state receiver) "Identifier")
            (identical? (node-name state receiver) "process")
@@ -1029,14 +1085,18 @@
             access String (cond
               (identical? name "length") (str "(count " temporary ")")
               map-receiver? (str "(get " temporary " " (.jsonString bridge name) ")")
-              record-name (str "(" (.toLowerCase record-name) "-" name " " temporary ")")
+              mutable-class-field?
+              (str "(deref (" (.toLowerCase class-name) "-" source-name " " temporary "))")
+              record-name (str "(" (.toLowerCase record-name) "-" source-name " " temporary ")")
               :else (str "(.-" name " " temporary ")"))]
         (str "(let [" temporary " " receiver-type-source " " receiver-source "] "
              "(if (nil? " temporary ") nil " access "))"))
       (identical? name "length") (str "(count " receiver-source ")")
       map-receiver? (str "(get " receiver-source " " (.jsonString bridge name) ")")
+      mutable-class-field?
+      (str "(deref (" (.toLowerCase class-name) "-" source-name " " receiver-source "))")
       record-name
-      (str "(" (.toLowerCase record-name) "-" name " " receiver-source ")")
+      (str "(" (.toLowerCase record-name) "-" source-name " " receiver-source ")")
       :else (str "(.-" name " " receiver-source ")"))))
 
 (defn emit-condition!
@@ -1085,6 +1145,7 @@
       (identical? callee-kind "PropertyAccessExpression")
       (let [receiver OpaqueTypeScriptNodeV1 (bridge-node state callee "expression")
             method String (node-name state (bridge-node state callee "name"))
+            method-source String (member-name state (bridge-node state callee "name"))
             receiver-source String (emit-expression! state receiver)
             receiver-kind String (node-kind state receiver)
             receiver-name String (if (identical? receiver-kind "Identifier")
@@ -1103,7 +1164,13 @@
                     (identical? (node-kind state argument) "SpreadElement"))
                   arguments)
             receiver-type OpaqueTypeScriptTypeV1 (.typeAt bridge receiver)
-            record-name (U String Nil) (local-record-name state receiver-type)]
+            record-name (U String Nil) (local-record-name state receiver-type)
+            class-name (U String Nil) (local-class-name state receiver-type)
+            class-method-name String (str method-source
+              (if (and class-name
+                       (.classMethodEffectful? bridge receiver-type method))
+                "!"
+                ""))]
         (cond
           (and (identical? receiver-name "Array") (identical? method "from")
                (identical? (count arguments) 2))
@@ -1157,6 +1224,9 @@
                (identical? (count arguments) 1)
                (identical? (node-kind state (first arguments)) "PrefixUnaryExpression"))
           (str "(last " receiver-source ")")
+          class-name
+          (parenthesize (str (.toLowerCase class-name) "-" class-method-name)
+            (into [receiver-source] argument-sources))
           record-name
           (str "((" (.toLowerCase record-name) "-" method " " receiver-source ")"
                (if (empty? argument-sources) "" (str " " (join-with " " argument-sources)))
@@ -1185,7 +1255,8 @@
         left OpaqueTypeScriptNodeV1 (bridge-node state node "left")
         right OpaqueTypeScriptNodeV1 (bridge-node state node "right")
         left-source String (emit-expression! state left)
-        right-source String (emit-expression! state right)]
+        right-source String (emit-expression! state right)
+        class-field-atom (U String Nil) (class-field-atom-source! state left)]
     (cond
       (identical? operator "EqualsEqualsEqualsToken")
       (str "(identical? " left-source " " right-source ")")
@@ -1227,15 +1298,46 @@
                 true))]
         (str "(let [" temporary " " type-source " " coalesce-source "] "
              "(if (nil? " temporary ") " right-source " " temporary "))"))
+      (identical? operator "InKeyword")
+      (str "(js/in? " right-source " " left-source ")")
+      (identical? operator "InstanceOfKeyword")
+      (str "(instance? " (.nodeText (importstatev1-bridge state) right)
+           " " left-source ")")
+      (identical? operator "QuestionQuestionEqualsToken")
+      (if class-field-atom
+        (let [temporary String (next-temporary! state "coalesce-field-")]
+          (str "(let [" temporary " "
+               (type->beagle! state
+                 (.typeAt (importstatev1-bridge state) left)
+                 true)
+               " (deref " class-field-atom ")] "
+               "(if (nil? " temporary ") "
+               "(reset! " class-field-atom " " right-source ") " temporary "))"))
+        (str "(if (nil? " left-source ") "
+             "(set! " left-source " " right-source ") " left-source ")"))
       (identical? operator "SlashEqualsToken")
-      (str "(set! " left-source " (/ " left-source " " right-source "))")
+      (if class-field-atom
+        (str "(swap! " class-field-atom " / " right-source ")")
+        (str "(set! " left-source " (/ " left-source " " right-source "))"))
+      (or (identical? operator "PlusEqualsToken")
+          (identical? operator "MinusEqualsToken")
+          (identical? operator "AsteriskEqualsToken"))
+      (let [operation String (if (identical? operator "PlusEqualsToken")
+              "+"
+              (if (identical? operator "MinusEqualsToken") "-" "*"))]
+        (if class-field-atom
+          (str "(swap! " class-field-atom " " operation " " right-source ")")
+          (str "(set! " left-source " (" operation " " left-source " " right-source "))")))
       (identical? operator "EqualsToken")
-      (str "(set! " left-source " " right-source ")")
+      (if class-field-atom
+        (str "(reset! " class-field-atom " " right-source ")")
+        (str "(set! " left-source " " right-source ")"))
       :else
       (let [name (U String Nil) (get {"PlusToken" "+"
                   "MinusToken" "-"
                   "AsteriskToken" "*"
                   "SlashToken" "/"
+                  "BarToken" "bit-or"
                   "LessThanToken" "<"
                   "LessThanEqualsToken" "<="
                   "GreaterThanToken" ">"
@@ -1264,12 +1366,23 @@
   (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
         callee OpaqueTypeScriptNodeV1 (bridge-node state node "expression")
         arguments (Vec OpaqueTypeScriptNodeV1) (bridge-nodes state node "arguments")
-        name String (node-name state callee)]
+        name String (node-name state callee)
+        result-type OpaqueTypeScriptTypeV1 (.typeAt bridge node)
+        local-class (U String Nil) (local-class-name state result-type)]
     (cond
+      local-class
+      (parenthesize (str "new-" local-class)
+        (mapv (fn [argument OpaqueTypeScriptNodeV1] String
+                (emit-expression! state argument))
+              arguments))
       (and (identical? (node-kind state callee) "Identifier")
            (identical? name "Set")
            (identical? (count arguments) 1))
       (str "(set " (emit-expression! state (first arguments)) ")")
+      (and (identical? (node-kind state callee) "Identifier")
+           (identical? name "Set")
+           (empty? arguments))
+      "#{}"
       (and (identical? (node-kind state callee) "Identifier")
            (identical? name "Map"))
       (let [map-type OpaqueTypeScriptTypeV1 (.typeAt bridge node)
@@ -1298,6 +1411,21 @@
            (identical? name "Date")
            (empty? arguments))
       "(: (new Date) JsDate)"
+      (and (identical? (node-kind state callee) "Identifier")
+           (identical? name "Error"))
+      (do
+        (reset! (importstatev1-needs-error state) true)
+        (parenthesize "new Error"
+          (mapv (fn [argument OpaqueTypeScriptNodeV1] String
+                  (emit-expression! state argument))
+                arguments)))
+      (and (identical? (node-kind state callee) "Identifier")
+           (not (empty? (: (.constructSignatures bridge (.typeAt bridge callee))
+                           (Vec OpaqueCompilerValueV1)))))
+      (parenthesize (str "new " name)
+        (mapv (fn [argument OpaqueTypeScriptNodeV1] String
+                (emit-expression! state argument))
+              arguments))
       :else
       (diagnostic! state node "TSI_NEW_EXPRESSION"
         (str "unsupported TypeScript constructor " name)))))
@@ -1353,6 +1481,11 @@
         (identical? kind "CallExpression") (emit-call! state node)
         (identical? kind "MetaProperty") (emit-meta-property! state node)
         (identical? kind "NewExpression") (emit-new! state node)
+        (identical? kind "VoidExpression")
+        (str "(do "
+             (emit-expression! state (bridge-node state node "expression"))
+             " nil)")
+        (identical? kind "ThisKeyword") "self"
         (identical? kind "TypeOfExpression")
         (str "(js/typeof " (emit-expression! state (bridge-node state node "expression")) ")")
         (identical? kind "PropertyAccessExpression")
@@ -1382,6 +1515,19 @@
             (identical? operator "MinusToken") (str "(- " operand ")")
             :else (diagnostic! state node "TSI_PREFIX_OPERATOR"
                     (str "unsupported prefix operator " operator))))
+        (identical? kind "PostfixUnaryExpression")
+        (let [operator String (.prefixOperatorKind bridge node)
+              operand-node OpaqueTypeScriptNodeV1 (bridge-node state node "operand")
+              operand String (emit-expression! state operand-node)
+              class-field-atom (U String Nil) (class-field-atom-source! state operand-node)
+              operation String (if (identical? operator "PlusPlusToken") "+" "-")]
+          (if (or (identical? operator "PlusPlusToken")
+                  (identical? operator "MinusMinusToken"))
+            (if class-field-atom
+              (str "(swap! " class-field-atom " " operation " 1)")
+              (str "(set! " operand " (" operation " " operand " 1))"))
+            (diagnostic! state node "TSI_POSTFIX_OPERATOR"
+              (str "unsupported postfix operator " operator))))
         (identical? kind "ConditionalExpression")
         (str "(if " (emit-condition! state (bridge-node state node "condition")) " "
              (emit-expression! state (bridge-node state node "whenTrue")) " "
@@ -1404,6 +1550,8 @@
   (let [kind String (node-kind state node)]
     (cond
       (identical? kind "ReturnStatement") true
+      (or (identical? kind "BreakStatement")
+          (identical? kind "ContinueStatement")) true
       (identical? kind "Block")
       (some (fn [item OpaqueTypeScriptNodeV1] Bool (statement-returns? state item))
             (bridge-nodes state node "statements"))
@@ -1731,6 +1879,99 @@
              "(let [" (join-with " " state-access-bindings) "] "
              (emit-statements! state remaining) "))")))))
 
+(defn emit-controlled-loop-body!
+  [state ImportStateV1
+   body OpaqueTypeScriptNodeV1
+   break-name String
+   continue-name String] String
+  (let [old-break (U String Nil) (deref (importstatev1-loop-break-name state))
+        old-continue (U String Nil) (deref (importstatev1-loop-continue-name state))]
+    (do
+      (reset! (importstatev1-loop-break-name state) break-name)
+      (reset! (importstatev1-loop-continue-name state) continue-name)
+      (let [source String (emit-statement-body! state body)]
+        (do
+          (reset! (importstatev1-loop-break-name state) old-break)
+          (reset! (importstatev1-loop-continue-name state) old-continue)
+          (str "(let [" continue-name " (Atom Bool) (atom false)] " source ")"))))))
+
+(defn emit-general-for-of!
+  [state ImportStateV1
+   statement OpaqueTypeScriptNodeV1
+   remaining (Vec OpaqueTypeScriptNodeV1)] String
+  (if (.nodeAwait? (importstatev1-bridge state) statement)
+    (diagnostic! state statement "TSI_FOR_AWAIT"
+      "for-await requires Beagle async iteration semantics")
+    (let [initializer OpaqueTypeScriptNodeV1 (bridge-node state statement "initializer")
+          declaration OpaqueTypeScriptNodeV1 (first (bridge-nodes state initializer "declarations"))
+          binding OpaqueTypeScriptNodeV1 (bridge-node state declaration "name")
+          binding-source String (emit-binding-name! state binding)
+          binding-type String (type->beagle! state
+            (.typeAt (importstatev1-bridge state) declaration)
+            true)
+          collection OpaqueTypeScriptNodeV1 (bridge-node state statement "expression")
+          break-name String (next-temporary! state "for-break-")
+          continue-name String (next-temporary! state "for-continue-")
+          body-source String (emit-controlled-loop-body! state
+            (bridge-node state statement "statement")
+            break-name continue-name)]
+      (str "(let [" break-name " (Atom Bool) (atom false)] "
+           "(do (doseq [" binding-source " " binding-type " "
+           (emit-expression! state collection) "] "
+           "(when (not (deref " break-name ")) " body-source ")) "
+           (emit-statements! state remaining) "))"))))
+
+(defn emit-loop-initializer-bindings!
+  [state ImportStateV1
+   initializer OpaqueTypeScriptNodeV1] (Vec String)
+  (reduce
+    (fn
+      [bindings (Vec String)
+       declaration OpaqueTypeScriptNodeV1] (Vec String)
+      (let [value OpaqueTypeScriptNodeV1 (bridge-node state declaration "initializer")]
+        (into bindings
+          [(emit-binding-name! state (bridge-node state declaration "name"))
+           (type->beagle! state
+             (.typeAt (importstatev1-bridge state) declaration)
+             true)
+           (if (present? value) (emit-expression! state value) "nil")])))
+    []
+    (bridge-nodes state initializer "declarations")))
+
+(defn emit-general-for!
+  [state ImportStateV1
+   statement OpaqueTypeScriptNodeV1
+   remaining (Vec OpaqueTypeScriptNodeV1)] String
+  (let [initializer OpaqueTypeScriptNodeV1 (bridge-node state statement "initializer")
+        condition OpaqueTypeScriptNodeV1 (bridge-node state statement "condition")
+        incrementor OpaqueTypeScriptNodeV1 (bridge-node state statement "incrementor")
+        initializer-bindings (Vec String) (emit-loop-initializer-bindings! state initializer)
+        break-name String (next-temporary! state "for-break-")
+        continue-name String (next-temporary! state "for-continue-")
+        body-source String (emit-controlled-loop-body! state
+          (bridge-node state statement "statement") break-name continue-name)]
+    (str "(let [" (join-with " " initializer-bindings)
+         (if (empty? initializer-bindings) "" " ")
+         break-name " (Atom Bool) (atom false)] "
+         "(do (loop [] (when " (emit-condition! state condition) " "
+         body-source " (when (not (deref " break-name ")) "
+         (emit-expression! state incrementor) " (recur)))) "
+         (emit-statements! state remaining) "))")))
+
+(defn emit-general-while!
+  [state ImportStateV1
+   statement OpaqueTypeScriptNodeV1
+   remaining (Vec OpaqueTypeScriptNodeV1)] String
+  (let [break-name String (next-temporary! state "while-break-")
+        continue-name String (next-temporary! state "while-continue-")
+        body-source String (emit-controlled-loop-body! state
+          (bridge-node state statement "statement") break-name continue-name)]
+    (str "(let [" break-name " (Atom Bool) (atom false)] "
+         "(do (loop [] (when "
+         (emit-condition! state (bridge-node state statement "expression")) " "
+         body-source " (when (not (deref " break-name ")) (recur)))) "
+         (emit-statements! state remaining) "))")))
+
 (defn emit-throw!
   [state ImportStateV1
    statement OpaqueTypeScriptNodeV1] String
@@ -1782,6 +2023,18 @@
           (if (present? expression) (emit-expression! state expression) "nil"))
         (identical? kind "ThrowStatement") (emit-throw! state statement)
         (identical? kind "TryStatement") (emit-try! state statement)
+        (identical? kind "BreakStatement")
+        (let [name (U String Nil) (deref (importstatev1-loop-break-name state))]
+          (if name
+            (str "(reset! " name " true)")
+            (diagnostic! state statement "TSI_BREAK_CONTEXT"
+              "break statement is outside an imported loop")))
+        (identical? kind "ContinueStatement")
+        (let [name (U String Nil) (deref (importstatev1-loop-continue-name state))]
+          (if name
+            (str "(reset! " name " true)")
+            (diagnostic! state statement "TSI_CONTINUE_CONTEXT"
+              "continue statement is outside an imported loop")))
         (identical? kind "VariableStatement")
         (let [declaration-list OpaqueTypeScriptNodeV1 (bridge-node state statement "declarationList")
               declarations (Vec OpaqueTypeScriptNodeV1) (bridge-nodes state declaration-list "declarations")
@@ -1824,7 +2077,11 @@
             (str "(do (when " condition " " then-source ") "
                  (emit-statements! state remaining) ")")))
         (identical? kind "ForOfStatement")
-        (emit-pure-for-of! state statement remaining)
+        (emit-general-for-of! state statement remaining)
+        (identical? kind "ForStatement")
+        (emit-general-for! state statement remaining)
+        (identical? kind "WhileStatement")
+        (emit-general-while! state statement remaining)
         (identical? kind "Block")
         (emit-statements! state (bridge-nodes state statement "statements"))
         :else
@@ -1869,51 +2126,268 @@
       (str "(js/export " form ")")
       form)))
 
+(defn class-constructor
+  [state ImportStateV1
+   members (Vec OpaqueTypeScriptNodeV1)] (U OpaqueTypeScriptNodeV1 Nil)
+  (some
+    (fn [member OpaqueTypeScriptNodeV1] (U OpaqueTypeScriptNodeV1 Nil)
+      (if (identical? (node-kind state member) "Constructor") member nil))
+    members))
+
+(defn direct-this-field-assignment?
+  [state ImportStateV1
+   statement OpaqueTypeScriptNodeV1] Bool
+  (if (identical? (node-kind state statement) "ExpressionStatement")
+    (let [expression OpaqueTypeScriptNodeV1 (bridge-node state statement "expression")]
+      (and (identical? (node-kind state expression) "BinaryExpression")
+           (identical?
+             (.nodeTokenKind (importstatev1-bridge state)
+               (bridge-node state expression "operatorToken"))
+             "EqualsToken")
+           (let [left OpaqueTypeScriptNodeV1 (bridge-node state expression "left")]
+             (and (identical? (node-kind state left) "PropertyAccessExpression")
+                  (identical?
+                    (node-kind state (bridge-node state left "expression"))
+                    "ThisKeyword")))))
+    false))
+
+(defn constructor-field-initializer
+  [state ImportStateV1
+   constructor (U OpaqueTypeScriptNodeV1 Nil)
+   name String] (U OpaqueTypeScriptNodeV1 Nil)
+  (if constructor
+    (some
+      (fn [statement OpaqueTypeScriptNodeV1] (U OpaqueTypeScriptNodeV1 Nil)
+        (if (direct-this-field-assignment? state statement)
+          (let [expression OpaqueTypeScriptNodeV1 (bridge-node state statement "expression")
+                left OpaqueTypeScriptNodeV1 (bridge-node state expression "left")]
+            (if (identical? (member-name state (bridge-node state left "name")) name)
+              (bridge-node state expression "right")
+              nil))
+          nil))
+      (bridge-nodes state (bridge-node state constructor "body") "statements"))
+    nil))
+
+(defn class-field-present?
+  [fields (Vec ImportedClassFieldV1)
+   name String] Bool
+  (some
+    (fn [field ImportedClassFieldV1] Bool
+      (identical? (importedclassfieldv1-name field) name))
+    fields))
+
+(defn class-fields!
+  [state ImportStateV1
+   members (Vec OpaqueTypeScriptNodeV1)] (Vec ImportedClassFieldV1)
+  (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
+        constructor (U OpaqueTypeScriptNodeV1 Nil) (class-constructor state members)
+        declared (Vec ImportedClassFieldV1) (reduce
+          (fn
+            [fields (Vec ImportedClassFieldV1)
+             member OpaqueTypeScriptNodeV1] (Vec ImportedClassFieldV1)
+            (let [kind String (node-kind state member)]
+              (cond
+                (identical? kind "PropertyDeclaration")
+                (let [name String (member-name state (bridge-node state member "name"))
+                      direct OpaqueTypeScriptNodeV1 (bridge-node state member "initializer")]
+                  (conj fields
+                    (->ImportedClassFieldV1
+                      name
+                      member
+                      (if (present? direct)
+                        direct
+                        (constructor-field-initializer state constructor name))
+                      (not (.nodeReadonly? bridge member)))))
+                (identical? kind "Constructor")
+                (reduce
+                  (fn
+                    [constructor-fields (Vec ImportedClassFieldV1)
+                     parameter OpaqueTypeScriptNodeV1] (Vec ImportedClassFieldV1)
+                    (if (.nodeParameterProperty? bridge parameter)
+                      (let [name-node OpaqueTypeScriptNodeV1 (bridge-node state parameter "name")
+                            name String (member-name state name-node)]
+                        (if (class-field-present? constructor-fields name)
+                          constructor-fields
+                          (conj constructor-fields
+                            (->ImportedClassFieldV1
+                              name parameter name-node
+                              (not (.nodeReadonly? bridge parameter))))))
+                      constructor-fields))
+                  fields
+                  (bridge-nodes state member "parameters"))
+                :else fields)))
+          []
+          members)]
+    (if constructor
+      (reduce
+        (fn
+          [fields (Vec ImportedClassFieldV1)
+           statement OpaqueTypeScriptNodeV1] (Vec ImportedClassFieldV1)
+          (if (direct-this-field-assignment? state statement)
+            (let [expression OpaqueTypeScriptNodeV1 (bridge-node state statement "expression")
+                  left OpaqueTypeScriptNodeV1 (bridge-node state expression "left")
+                  name String (member-name state (bridge-node state left "name"))]
+              (if (class-field-present? fields name)
+                fields
+                (conj fields
+                  (->ImportedClassFieldV1
+                    name left (bridge-node state expression "right") true))))
+            fields))
+        declared
+        (bridge-nodes state (bridge-node state constructor "body") "statements"))
+      declared)))
+
 (defn class-field-sources!
   [state ImportStateV1
-   members (Vec OpaqueTypeScriptNodeV1)] (Vec String)
+   fields (Vec ImportedClassFieldV1)] (Vec String)
   (reduce
     (fn
-      [fields (Vec String)
-       member OpaqueTypeScriptNodeV1] (Vec String)
-      (let [kind String (node-kind state member)]
-        (cond
-          (identical? kind "PropertyDeclaration")
-          (into fields
-            [(node-name state (bridge-node state member "name"))
-             (type->beagle! state
-               (.typeAt (importstatev1-bridge state) member)
-               true)])
-          (identical? kind "Constructor")
-          (reduce
-            (fn
-              [constructor-fields (Vec String)
-               parameter OpaqueTypeScriptNodeV1] (Vec String)
-              (if (.nodeParameterProperty? (importstatev1-bridge state) parameter)
-                (into constructor-fields
-                  [(node-name state (bridge-node state parameter "name"))
-                   (type->beagle! state
-                     (.typeAt (importstatev1-bridge state) parameter)
-                     true)])
-                constructor-fields))
-            fields
-            (bridge-nodes state member "parameters"))
-          :else
-          (do (diagnostic! state member "TSI_CLASS_MEMBER"
-                (str "unsupported class member " kind))
-              fields))))
+      [sources (Vec String)
+       field ImportedClassFieldV1] (Vec String)
+      (let [type-source String (type->beagle! state
+              (.typeAt (importstatev1-bridge state)
+                (importedclassfieldv1-type-node field))
+              true)]
+        (into sources
+          [(importedclassfieldv1-name field)
+           (if (importedclassfieldv1-mutable field)
+             (parenthesize "Atom" [type-source])
+             type-source)])))
     []
-    members))
+    fields))
+
+(defn class-field-initializer-source!
+  [state ImportStateV1
+   field ImportedClassFieldV1] String
+  (let [initializer (U OpaqueTypeScriptNodeV1 Nil)
+        (importedclassfieldv1-initializer field)
+        source String (if initializer (emit-expression! state initializer) "nil")]
+    (if (importedclassfieldv1-mutable field)
+      (str "(atom " source ")")
+      source)))
+
+(defn constructor-body-statements
+  [state ImportStateV1
+   constructor OpaqueTypeScriptNodeV1] (Vec OpaqueTypeScriptNodeV1)
+  (filterv
+    (fn [statement OpaqueTypeScriptNodeV1] Bool
+      (and (not (direct-this-field-assignment? state statement))
+           (not (and (identical? (node-kind state statement) "ExpressionStatement")
+                     (let [expression OpaqueTypeScriptNodeV1
+                           (bridge-node state statement "expression")]
+                       (and (identical? (node-kind state expression) "CallExpression")
+                            (identical?
+                              (node-kind state (bridge-node state expression "expression"))
+                              "SuperKeyword")))))))
+    (bridge-nodes state (bridge-node state constructor "body") "statements")))
+
+(defn emit-class-constructor!
+  [state ImportStateV1
+   class-name String
+   fields (Vec ImportedClassFieldV1)
+   constructor (U OpaqueTypeScriptNodeV1 Nil)] String
+  (let [parameters (Vec OpaqueTypeScriptNodeV1) (if constructor
+          (bridge-nodes state constructor "parameters")
+          [])
+        field-values (Vec String) (mapv
+          (fn [field ImportedClassFieldV1] String
+            (class-field-initializer-source! state field))
+          fields)
+        body-statements (Vec OpaqueTypeScriptNodeV1) (if constructor
+          (constructor-body-statements state constructor)
+          [])
+        body-source String (emit-statements! state body-statements)
+        full-source String (str "(let [self " class-name " "
+             (parenthesize (str "->" class-name) field-values)
+             "] (do " body-source " self))")
+        first-default Int (first-default-index state parameters)
+        name String (str "new-" class-name)]
+    (if (identical? first-default (count parameters))
+      (str "(defn " name " ["
+           (join-with " " (mapv
+             (fn [parameter OpaqueTypeScriptNodeV1] String
+               (emit-parameter! state parameter))
+             parameters))
+           "] " class-name " " full-source ")")
+      (let [arities (Vec String) (mapv
+              (fn [arity Int] String
+                (let [present-parameters (Vec OpaqueTypeScriptNodeV1)
+                      (subvec parameters 0 arity)]
+                  (if (identical? arity (count parameters))
+                    (str "([" (join-with " " (mapv
+                        (fn [parameter OpaqueTypeScriptNodeV1] String
+                          (emit-parameter! state parameter))
+                        parameters)) "] " class-name " " full-source ")")
+                    (str "([" (join-with " " (mapv
+                        (fn [parameter OpaqueTypeScriptNodeV1] String
+                          (emit-parameter! state parameter))
+                        present-parameters)) "] " class-name " "
+                         (parenthesize name
+                           (map-indexed
+                             (fn [index Int
+                                  parameter OpaqueTypeScriptNodeV1] String
+                               (if (< index arity)
+                                 (parameter-call-name! state parameter)
+                                 (parameter-default-source! state parameter)))
+                             parameters)) ")"))))
+              (range first-default (+ (count parameters) 1)))]
+        (str "(defn " name " " (join-with " " arities) ")")))))
+
+(defn emit-class-method!
+  [state ImportStateV1
+   class-name String
+   member OpaqueTypeScriptNodeV1] String
+  (let [bridge OpaqueCompilerValueV1 (importstatev1-bridge state)
+        signature OpaqueCompilerValueV1 (.getSignatureFromDeclaration bridge member)]
+    (cond
+      (.nodeGenerator? bridge member)
+      (diagnostic! state member "TSI_CLASS_GENERATOR"
+        "generator methods require Beagle generator semantics")
+      (and (present? signature)
+           (not (empty? (: (.signatureTypeParameters bridge signature)
+                           (Vec OpaqueTypeScriptTypeV1)))))
+      (diagnostic! state member "TSI_CLASS_GENERIC_METHOD"
+        "generic class methods require an explicit receiver-aware type scheme")
+      :else
+      (let [method-name String (member-name state (bridge-node state member "name"))
+            async-prefix String (if (.nodeAsync? bridge member) "^:async " "")
+            parameters (Vec OpaqueTypeScriptNodeV1) (bridge-nodes state member "parameters")
+            return-type String (type->beagle! state (.returnType bridge member) true)
+            body OpaqueTypeScriptNodeV1 (bridge-node state member "body")
+            body-source String (emit-statements! state (bridge-nodes state body "statements"))
+            name String (str (.toLowerCase class-name) "-" method-name
+              (if (.nodeEffectful? bridge body) "!" ""))]
+        (str "(defn " async-prefix name " [self " class-name
+             (if (empty? parameters) "" " ")
+             (join-with " " (mapv
+               (fn [parameter OpaqueTypeScriptNodeV1] String
+                 (emit-parameter! state parameter))
+               parameters))
+             "] " return-type " " body-source ")")))))
 
 (defn emit-class!
   [state ImportStateV1
    node OpaqueTypeScriptNodeV1] String
   (let [name String (node-name state node)
-        fields (Vec String) (class-field-sources! state (bridge-nodes state node "members"))
-        form String (str "(defrecord " name " [" (join-with " " fields) "])")]
-    (if (.nodeExported? (importstatev1-bridge state) node)
-      (str "(js/export " form ")")
-      form)))
+        members (Vec OpaqueTypeScriptNodeV1) (bridge-nodes state node "members")
+        fields (Vec ImportedClassFieldV1) (class-fields! state members)
+        form String (str "(defrecord " name " ["
+             (join-with " " (class-field-sources! state fields)) "])")
+        constructor String (emit-class-constructor! state name fields
+          (class-constructor state members))
+        methods (Vec String) (mapv
+          (fn [member OpaqueTypeScriptNodeV1] String
+            (emit-class-method! state name member))
+          (filterv
+            (fn [member OpaqueTypeScriptNodeV1] Bool
+              (identical? (node-kind state member) "MethodDeclaration"))
+            members))]
+    (join-with "\n\n"
+      (into [(if (.nodeExported? (importstatev1-bridge state) node)
+               (str "(js/export " form ")")
+               form)
+             constructor]
+            methods))))
 
 (defn literal-string-union?
   [state ImportStateV1
@@ -1950,7 +2424,16 @@
 (defn parameter-default?
   [state ImportStateV1
    parameter OpaqueTypeScriptNodeV1] Bool
-  (present? (bridge-node state parameter "initializer")))
+  (or (present? (bridge-node state parameter "initializer"))
+      (.nodeOptional? (importstatev1-bridge state) parameter)))
+
+(defn parameter-default-source!
+  [state ImportStateV1
+   parameter OpaqueTypeScriptNodeV1] String
+  (let [initializer OpaqueTypeScriptNodeV1 (bridge-node state parameter "initializer")]
+    (if (present? initializer)
+      (emit-expression! state initializer)
+      "nil")))
 
 (defn parameter-call-name!
   [state ImportStateV1
@@ -2043,8 +2526,7 @@
                                    parameter OpaqueTypeScriptNodeV1] String
                                   (if (< index arity)
                                     (parameter-call-name! state parameter)
-                                    (emit-expression! state
-                                      (bridge-node state parameter "initializer"))))
+                                    (parameter-default-source! state parameter)))
                                 parameters)]
                           (str "(["
                                (join-with " "
@@ -2224,6 +2706,9 @@
   (str "(defn typescript-pad-end [value String width Number] String "
        "(str value (apply str (repeat (max 0 (- width (count value))) \" \"))))"))
 
+(defn error-prelude [] String
+  "(declare-extern Error Any)")
+
 (defn collect-local-types!
   [state ImportStateV1
    statements (Vec OpaqueTypeScriptNodeV1)] Nil
@@ -2274,7 +2759,7 @@
           state ImportStateV1
           (->ImportStateV1 bridge context namespace module-mappings
             (atom []) (atom {}) (atom []) (atom {}) (atom {}) (atom {}) (atom {}) (atom {})
-            (atom false) (atom false) (atom 0) (atom 0))
+            (atom false) (atom false) (atom false) (atom nil) (atom nil) (atom 0) (atom 0))
           _ Nil (collect-local-types! state statements)
           forms (Vec String) (emit-top-level! state statements)
           imports (Vec String) (mapv (fn [statement OpaqueTypeScriptNodeV1] String (emit-import! state statement))
@@ -2286,7 +2771,9 @@
             (str "(ns " namespace " (:require " (join-with " " imports) "))"))
           preludes (Vec String) (into
             (if (deref (importstatev1-needs-process state)) (process-prelude) [])
-            (if (deref (importstatev1-needs-pad-end state)) [(pad-end-prelude)] []))
+            (into
+              (if (deref (importstatev1-needs-pad-end state)) [(pad-end-prelude)] [])
+              (if (deref (importstatev1-needs-error state)) [(error-prelude)] [])))
           source String (str "#lang beagle/js\n\n" ns-form "\n\n"
                (join-with "\n\n"
                  (into preludes

@@ -189,6 +189,10 @@ const canonicalTokenKind = (node) => {
     [ts.SyntaxKind.MinusToken, "MinusToken"],
     [ts.SyntaxKind.AsteriskToken, "AsteriskToken"],
     [ts.SyntaxKind.SlashToken, "SlashToken"],
+    [ts.SyntaxKind.BarToken, "BarToken"],
+    [ts.SyntaxKind.PlusEqualsToken, "PlusEqualsToken"],
+    [ts.SyntaxKind.MinusEqualsToken, "MinusEqualsToken"],
+    [ts.SyntaxKind.AsteriskEqualsToken, "AsteriskEqualsToken"],
     [ts.SyntaxKind.SlashEqualsToken, "SlashEqualsToken"],
     [ts.SyntaxKind.LessThanToken, "LessThanToken"],
     [ts.SyntaxKind.LessThanEqualsToken, "LessThanEqualsToken"],
@@ -201,9 +205,32 @@ const canonicalTokenKind = (node) => {
     [ts.SyntaxKind.AmpersandAmpersandToken, "AmpersandAmpersandToken"],
     [ts.SyntaxKind.BarBarToken, "BarBarToken"],
     [ts.SyntaxKind.QuestionQuestionToken, "QuestionQuestionToken"],
+    [ts.SyntaxKind.QuestionQuestionEqualsToken, "QuestionQuestionEqualsToken"],
     [ts.SyntaxKind.ExclamationToken, "ExclamationToken"],
   ]);
   return names.get(node.kind) ?? ts.SyntaxKind[node.kind];
+};
+const nodeEffectful = (node) => {
+  let effectful = false;
+  const visit = (current) => {
+    if (!current || effectful) return;
+    if (
+      (ts.isBinaryExpression(current)
+        && current.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+        && current.operatorToken.kind <= ts.SyntaxKind.LastAssignment)
+      || ((ts.isPrefixUnaryExpression(current) || ts.isPostfixUnaryExpression(current))
+        && (current.operator === ts.SyntaxKind.PlusPlusToken
+          || current.operator === ts.SyntaxKind.MinusMinusToken))
+      || ts.isBreakStatement(current)
+      || ts.isContinueStatement(current)
+    ) {
+      effectful = true;
+      return;
+    }
+    ts.forEachChild(current, visit);
+  };
+  visit(node);
+  return effectful;
 };
 const SUPPORTED_OBJECT_FLAGS = ts.ObjectFlags.Class | ts.ObjectFlags.Interface
   | ts.ObjectFlags.Reference | ts.ObjectFlags.Anonymous | ts.ObjectFlags.Mapped
@@ -1143,14 +1170,31 @@ export function createCompilerBridge({
     prefixOperatorKind: (node) => canonicalTokenKind({ kind: node.operator }),
     "nodeExported?": (node) => Boolean(node?.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)),
     "nodeAsync?": (node) => Boolean(node?.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword)),
+    "nodeAwait?": (node) => Boolean(node?.awaitModifier),
+    "nodeGenerator?": (node) => Boolean(node?.asteriskToken),
     "nodeOptional?": (node) => Boolean(
       node?.questionToken
       || node?.questionDotToken
       || (node?.flags & ts.NodeFlags.OptionalChain),
     ),
+    "nodeReadonly?": (node) => Boolean(
+      node?.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ReadonlyKeyword)
+    ),
+    "nodeEffectful?": nodeEffectful,
     "nodeParameterProperty?": (node) => Boolean(
       node?.parent && ts.isParameterPropertyDeclaration(node, node.parent)
     ),
+    "classFieldMutable?": (type, fieldName) => {
+      const symbol = type.getProperty?.(fieldName);
+      const member = declaration(symbol);
+      if (!member) return false;
+      return !member.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ReadonlyKeyword);
+    },
+    "classMethodEffectful?": (type, methodName) => {
+      const symbol = type.getProperty?.(methodName);
+      const member = declaration(symbol);
+      return nodeEffectful(member?.body ?? member);
+    },
     "nodeRest?": (node) => Boolean(node?.dotDotDotToken),
     "nodeMutable?": (node) => Boolean(node?.parent?.flags & ts.NodeFlags.Let),
     literalJson: (node) => JSON.stringify(node.text),
