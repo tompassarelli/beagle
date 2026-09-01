@@ -393,8 +393,7 @@
        (subs HEX (mod code 16) (+ (mod code 16) 1))))
 
 (defn js-escape-char [c String] String
-  (let [cs Any c
-        code Any (int (first cs))]
+  (let [code Int (.charCodeAt c 0)]
     (cond
       (= c "\"") "\\\""
       (= c "\\") "\\\\"
@@ -1457,6 +1456,9 @@
             (str "new Set([..." a0 ", " (str/join ", " (mapv emit-expr*! (subvec args 1))) "])")
             (str "[..." a0 ", " (str/join ", " (mapv emit-expr*! (subvec args 1))) "]"))
           nil)
+      (= fn-sym "transient") (if (= n 1) (demand-runtime-call! "transient_vec" args) nil)
+      (= fn-sym "conj!") (if (= n 2) (demand-runtime-call! "transient_vec_push" args) nil)
+      (= fn-sym "persistent!") (if (= n 1) (demand-runtime-call! "transient_vec_freeze" args) nil)
       (= fn-sym "cons") (if (= n 2) (str "[" a0 ", ..." a1 "]") nil)
       (= fn-sym "vec") (if (= n 1) (str "Array.from(" a0 ")") nil)
       (= fn-sym "vector") (str "[" (emit-args-list args) "]")

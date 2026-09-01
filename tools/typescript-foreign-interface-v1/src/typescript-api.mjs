@@ -1081,7 +1081,21 @@ export function createCompilerBridge({
         ? type.intrinsicName === "true"
         : typeof type.value === "object" ? String(type.value.base10Value) : type.value;
     },
-    moduleExports(context) { this.context = context; return context.checker.getExportsOfModule(context.moduleSymbol); },
+    moduleExports(context, requestedExports = []) {
+      this.context = context;
+      const exports = context.checker.getExportsOfModule(context.moduleSymbol);
+      if (requestedExports.length === 0) return exports;
+      const requested = new Set(requestedExports);
+      const selected = exports.filter((symbol) => requested.has(symbol.getName()));
+      const selectedNames = new Set(selected.map((symbol) => symbol.getName()));
+      const missing = requestedExports.filter((name) => !selectedNames.has(name));
+      if (missing.length > 0) {
+        throw new Error(
+          `TypeScript module ${context.moduleSpecifier ?? "<unknown>"} does not export requested names: ${missing.join(", ")}`,
+        );
+      }
+      return selected;
+    },
     moduleMapping(mappings, specifier) { return mappings.get(specifier) ?? null; },
     relativeModuleNamespace(namespace, specifier) {
       if (!specifier.startsWith(".")) return null;

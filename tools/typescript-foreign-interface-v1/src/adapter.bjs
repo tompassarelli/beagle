@@ -138,8 +138,8 @@
 
 (defrecord BuildStateV1
   [seen OpaqueCompilerValueV1
-   nodes (Atom (Vec ForeignNodeV1))
-   obligations (Atom (Vec ObligationV1))
+   nodes Any
+   obligations Any
    ambientCandidateNames (Atom (Vec String))
    nodeCounter (Atom Int)
    obligationCounter (Atom Int)])
@@ -186,8 +186,8 @@
 (defn empty-build-state [bridge OpaqueCompilerValueV1] BuildStateV1
   (->BuildStateV1
     (.weakMap bridge)
-    (atom [])
-    (atom [])
+    (transient [])
+    (transient [])
     (atom [])
     (atom 1)
     (atom 1)))
@@ -306,9 +306,7 @@
           (str "TypeScript type requires a lazy foreign obligation: " display)
           (->ObligationSourceV1 display (.typeKind bridge type)))]
     (do
-      (reset!
-        (buildstatev1-obligations state)
-        (conj (deref (buildstatev1-obligations state)) obligation))
+      (conj! (buildstatev1-obligations state) obligation)
       (->UnsupportedNode id obligation-id display))))
 
 ;; Base traversal preserves nominal/reference identity in the shared cache;
@@ -480,9 +478,7 @@
           (.set seen type id)
           (let [node ForeignNodeV1 (node-shape! bridge state id type)]
             (do
-              (reset!
-                (buildstatev1-nodes state)
-                (conj (deref (buildstatev1-nodes state)) node))
+              (conj! (buildstatev1-nodes state) node)
               id)))))))
 
 (defn export-node!
@@ -741,7 +737,8 @@
      context OpaqueCompilerValueV1
      module-specifier String
      conditions (Vec String)
-     requested-ambient-names (Vec String)] WireValueV1
+     requested-ambient-names (Vec String)
+     requested-exports (Vec String)] WireValueV1
     (let [state BuildStateV1 (empty-build-state bridge)
           exports (Vec ExportV1) (sorted-exports
             bridge
@@ -749,7 +746,9 @@
               (mapv
                 (fn [exported-symbol OpaqueCompilerValueV1] ExportV1
                   (export-node! bridge state exported-symbol))
-                (sorted-opaque bridge (.moduleExports bridge context)))
+                (sorted-opaque
+                  bridge
+                  (.moduleExports bridge context requested-exports)))
               []))
           ambient-candidate-names (Vec String)
           (if (empty? requested-ambient-names)
@@ -765,8 +764,8 @@
                 context
                 ambient-candidate-names
                 (not (empty? requested-ambient-names)))))
-          nodes (Vec ForeignNodeV1) (sorted-nodes bridge (deref (buildstatev1-nodes state)))
-          obligations (Vec ObligationV1) (sorted-obligations bridge (deref (buildstatev1-obligations state)))
+          nodes (Vec ForeignNodeV1) (sorted-nodes bridge (persistent! (buildstatev1-nodes state)))
+          obligations (Vec ObligationV1) (sorted-obligations bridge (persistent! (buildstatev1-obligations state)))
           stats StatsV1 (->StatsV1
             (count nodes)
             (count exports)

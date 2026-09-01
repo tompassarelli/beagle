@@ -2,9 +2,9 @@ import { readFileSync, realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const [compiledPath, adapterRoot, typescriptRuntimeRoot, runtimeRoot, projectRoot, containingFile, moduleSpecifier, ambientNamesJson, ...conditions] = process.argv.slice(2);
+const [compiledPath, adapterRoot, typescriptRuntimeRoot, runtimeRoot, projectRoot, containingFile, moduleSpecifier, ambientNamesJson, ...tail] = process.argv.slice(2);
 if (!compiledPath || !adapterRoot || !typescriptRuntimeRoot || !runtimeRoot || !projectRoot || !containingFile || !moduleSpecifier || !ambientNamesJson) {
-  throw new Error("usage: bun src/run.mjs COMPILED-ADAPTER ADAPTER-ROOT TYPESCRIPT-RUNTIME-ROOT BEAGLE-RUNTIME-ROOT PROJECT-ROOT CONTAINING-FILE MODULE-SPECIFIER AMBIENT-NAMES-JSON [CONDITION ...]");
+  throw new Error("usage: bun src/run.mjs COMPILED-ADAPTER ADAPTER-ROOT TYPESCRIPT-RUNTIME-ROOT BEAGLE-RUNTIME-ROOT PROJECT-ROOT CONTAINING-FILE MODULE-SPECIFIER AMBIENT-NAMES-JSON [CONDITION ...] [--refer EXPORT ...]");
 }
 const ambientNames = JSON.parse(ambientNamesJson);
 if (!Array.isArray(ambientNames)
@@ -12,6 +12,12 @@ if (!Array.isArray(ambientNames)
     || new Set(ambientNames).size !== ambientNames.length
     || ambientNames.some((name, index) => index > 0 && ambientNames[index - 1] >= name)) {
   throw new Error("ambient names must be a sorted duplicate-free JSON array of non-empty strings");
+}
+const referMarker = tail.indexOf("--refer");
+const conditions = referMarker < 0 ? tail : tail.slice(0, referMarker);
+const requestedExports = referMarker < 0 ? [] : tail.slice(referMarker + 1);
+if (new Set(requestedExports).size !== requestedExports.length) {
+  throw new Error("--refer exports must be duplicate-free");
 }
 
 const runnerPath = realpathSync(fileURLToPath(import.meta.url));
@@ -39,9 +45,23 @@ const bridge = createCompilerBridge({
   producerInputs,
   typescriptRuntimeRoot,
 });
-const context = createContext({ projectRoot, containingFile, moduleSpecifier, ambientNames, conditions });
+const context = createContext({
+  projectRoot,
+  containingFile,
+  moduleSpecifier,
+  ambientNames,
+  conditions,
+  requestedExports,
+});
 const adapter = await compiledAdapter.load(runtimeRoot);
 const build = foreignInterfaceBuilder(adapter);
-const graph = build(bridge, context, moduleSpecifier, [...conditions].sort(), ambientNames);
+const graph = build(
+  bridge,
+  context,
+  moduleSpecifier,
+  [...conditions].sort(),
+  ambientNames,
+  [...requestedExports].sort(),
+);
 producerInputs.assertUnchanged();
 process.stdout.write(`${JSON.stringify(graph)}\n`);
