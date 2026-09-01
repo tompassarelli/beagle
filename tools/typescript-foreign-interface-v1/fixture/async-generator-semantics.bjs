@@ -5,11 +5,16 @@
 (js/export
   (js/async-generator
     (defn stream
-      [values (AsyncIterable String) closed (Vec Bool)]
-      (AsyncIterable String)
+      [values (AsyncIterable String)
+       closed (Vec Bool)] (AsyncIterable String)
       (try
         (do
-          (js/for-await [value String values]
-            (js/yield value))
+          (loop []
+            (when true
+              (try
+                (js/for-await [value String values]
+                  (js/yield value))
+                (finally nil)))
+            (when false (recur)))
           (js/generator-return))
         (finally (.push closed true))))))

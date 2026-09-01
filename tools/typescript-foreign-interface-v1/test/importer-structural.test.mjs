@@ -18,6 +18,10 @@ const fixture = resolve(adapterRoot, "fixture/structural-intersection.ts");
 const classLoopFixture = resolve(adapterRoot, "fixture/class-loop-operators.ts");
 const objectLiteralFixture = resolve(adapterRoot, "fixture/object-literal-spreads.ts");
 const asyncGeneratorFixture = resolve(adapterRoot, "fixture/async-generator-method.ts");
+const asyncGeneratorSemanticsFixture = resolve(
+  adapterRoot,
+  "fixture/async-generator-semantics.bjs",
+);
 const temporary = mkdtempSync(join(tmpdir(), "beagle-ts-structural-import-"));
 const compiled = resolve(temporary, "importer.mjs");
 
@@ -219,25 +223,10 @@ test("async generator methods preserve yield, for-await, return, and finally", a
   });
   expect(checked.exitCode, checked.stderr.toString()).toBe(0);
 
-  const semanticSource = resolve(temporary, "async-generator-semantics.bjs");
   const semanticOutput = resolve(temporary, "async-generator-semantics.mjs");
-  writeFileSync(semanticSource, `#lang beagle/js
-(ns beagle.typescript.async-generator-semantics)
-(js/export
-  (js/async-generator
-    (defn stream
-      [values (AsyncIterable String) closed (Vec Bool)]
-      (AsyncIterable String)
-      (try
-        (do
-          (js/for-await [value String values]
-            (js/yield value))
-          (js/generator-return))
-        (finally (.push closed true))))))
-`);
   const built = Bun.spawnSync([
     resolve(repositoryRoot, "bin/beagle-build"),
-    semanticSource,
+    asyncGeneratorSemanticsFixture,
     semanticOutput,
   ], {
     cwd: repositoryRoot,

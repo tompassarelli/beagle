@@ -4892,7 +4892,9 @@
                  (cdr forms) bind-names emit-value))))]
     [else
      (format "~a ~a"
-             (emit-expr-stmt (car forms))
+             (if (current-js-generator?)
+                 (emit-stmt-inline (car forms) "")
+                 (emit-expr-stmt (car forms)))
              (emit-loop-body-sequence
               (cdr forms) bind-names emit-value))]))
 
