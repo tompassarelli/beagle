@@ -185,13 +185,27 @@ test("async generator methods preserve yield, for-await, return, and finally", a
   );
 
   expect(result.diagnostics).toEqual([]);
-  expect(result.source).toContain("(js/async-generator");
+  expect(result.source.match(/\(js\/async-generator/g)).toHaveLength(2);
   expect(result.source).toContain("(AsyncIterable String)");
   expect(result.source).toContain("(js/for-await [value String values]");
   expect(result.source).toContain("(js/yield value)");
   expect(result.source).toContain("(js/generator-return)");
   expect(result.source).toContain("(finally");
   expect(result.source).not.toContain("__typescript_import_unsupported__");
+
+  const attemptStart = result.source.indexOf(
+    "(js/async-generator (defn asyncgeneratorowner-attempt!",
+  );
+  const attemptEnd = result.source.indexOf(
+    "(js/async-generator (defn asyncgeneratorowner-session!",
+  );
+  expect(attemptStart).toBeGreaterThan(-1);
+  expect(attemptEnd).toBeGreaterThan(attemptStart);
+  const attemptSource = result.source.slice(attemptStart, attemptEnd);
+  expect(attemptSource).toContain("launch preflight did not settle");
+  expect(attemptSource).toContain("(js/for-await [value String values]");
+  expect(attemptSource).toContain("(js/yield value)");
+  expect(attemptSource).toContain("(js/generator-return)");
 
   const imported = resolve(temporary, "async-generator-method.bjs");
   writeFileSync(imported, result.source);

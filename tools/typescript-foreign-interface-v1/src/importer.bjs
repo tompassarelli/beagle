@@ -763,13 +763,11 @@
         return-type OpaqueTypeScriptTypeV1 (.returnType (importstatev1-bridge state) node)
         body OpaqueTypeScriptNodeV1 (bridge-node state node "body")
         old-generator-context Bool (deref (importstatev1-generator-context state))
-        entered-generator-context Bool
-        (reset! (importstatev1-generator-context state) false)
+        entered-generator-context Bool (reset! (importstatev1-generator-context state) false)
         body-source String (if (identical? (node-kind state body) "Block")
           (emit-statements! state (bridge-nodes state body "statements"))
           (emit-expression! state body))
-        restored-generator-context Bool
-        (reset! (importstatev1-generator-context state) old-generator-context)]
+        restored-generator-context Bool (reset! (importstatev1-generator-context state) old-generator-context)]
     (str "(fn [" (join-with " " (mapv (fn [p OpaqueTypeScriptNodeV1] String
                                           (emit-parameter! state p))
                                         parameters))
@@ -2086,7 +2084,11 @@
               "(js/generator-return)")
             (if (present? expression) (emit-expression! state expression) "nil")))
         (identical? kind "ThrowStatement") (emit-throw! state statement)
-        (identical? kind "TryStatement") (emit-try! state statement)
+        (identical? kind "TryStatement")
+        (if (empty? remaining)
+          (emit-try! state statement)
+          (str "(do " (emit-try! state statement) " "
+               (emit-statements! state remaining) ")"))
         (identical? kind "BreakStatement")
         (let [name (U String Nil) (deref (importstatev1-loop-break-name state))]
           (if name
@@ -2417,11 +2419,9 @@
             return-type String (type->beagle! state (.returnType bridge member) true)
             body OpaqueTypeScriptNodeV1 (bridge-node state member "body")
             old-generator-context Bool (deref (importstatev1-generator-context state))
-            entered-generator-context Bool
-            (reset! (importstatev1-generator-context state) generator?)
+            entered-generator-context Bool (reset! (importstatev1-generator-context state) generator?)
             body-source String (emit-statements! state (bridge-nodes state body "statements"))
-            restored-generator-context Bool
-            (reset! (importstatev1-generator-context state) old-generator-context)
+            restored-generator-context Bool (reset! (importstatev1-generator-context state) old-generator-context)
             name String (str (.toLowerCase class-name) "-" method-name
               (if (.nodeEffectful? bridge body) "!" ""))]
         (str (if generator? "(js/async-generator " "")
