@@ -1386,6 +1386,7 @@ export function createCompilerBridge({
     "tupleElementRest?": (element) => hasFlag(element.flag, ts.ElementFlags.Rest),
     tupleElementType: (element) => element.elementType,
     tupleElements(type) { return tupleElements(this.context, type); },
+    baseTypes: (type) => [...(type.getBaseTypes?.() ?? [])],
     templateLiteralTexts: (type) => [...type.texts],
     templateLiteralTypes: (type) => [...type.types],
     awaitedArgument(type) { return builtinAwaitedArgument(this.context, type); },

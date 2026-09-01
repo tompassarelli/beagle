@@ -108,6 +108,7 @@
      name (U String Nil)
      identity (U String Nil)
      typeParameters (Vec TypeParameterV1)
+     baseTypes (Vec String)
      properties (Vec PropertyV1)
      indexes (Vec IndexV1)
      callSignatures (Vec SignatureV1)
@@ -163,6 +164,15 @@
   [bridge OpaqueCompilerValueV1
    values (Vec String)] (Vec String)
   (.sort bridge values))
+
+(defn distinct-strings [values (Vec String)] (Vec String)
+  (reduce
+    (fn
+      [result (Vec String)
+       value String] (Vec String)
+      (if (.includes result value) result (conj result value)))
+    []
+    values))
 
 (defn sorted-nodes
   [bridge OpaqueCompilerValueV1
@@ -332,6 +342,13 @@
         (fn [parameter OpaqueCompilerValueV1] TypeParameterV1
           (type-parameter! bridge state parameter))
         (.declarationTypeParameters bridge type))
+      (sorted-strings
+        bridge
+        (distinct-strings
+          (mapv
+            (fn [base-type OpaqueCompilerValueV1] String
+              (node-for! bridge state base-type))
+            (.baseTypes bridge type))))
       (mapv
         (fn [property OpaqueCompilerValueV1] PropertyV1
           (property-node! bridge state type property))
@@ -652,8 +669,8 @@
               ["argument" argument-node]])]
 
     [(ObjectNode
-       id name identity type-parameters properties indexes call-signatures
-       construct-signatures)
+       id name identity type-parameters base-types properties indexes
+       call-signatures construct-signatures)
      (object-with-optional
        (if identity
          (conj
@@ -661,6 +678,7 @@
            ["kind" "object"]
            ["typeParameters"
             (mapv type-parameter->wire type-parameters)]
+           ["baseTypes" base-types]
            ["properties"
             (mapv property->wire properties)]
            ["indexes"
@@ -674,6 +692,7 @@
           ["kind" "object"]
           ["typeParameters"
            (mapv type-parameter->wire type-parameters)]
+          ["baseTypes" base-types]
           ["properties"
            (mapv property->wire properties)]
           ["indexes"
@@ -758,8 +777,7 @@
                   bridge
                   (.moduleExports bridge context requested-exports)))
               []))
-          ambient-candidate-names (Vec String)
-          (if (empty? requested-ambient-names)
+          ambient-candidate-names (Vec String) (if (empty? requested-ambient-names)
             (deref (buildstatev1-ambientCandidateNames state))
             requested-ambient-names)
           ambient-values (Vec AmbientValueV1) (mapv

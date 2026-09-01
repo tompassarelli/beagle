@@ -306,6 +306,73 @@
      1))))
 
 (test-case
+ "declared generic class inheritance satisfies mutable properties and constructors"
+ (with-isolated-adapter-cache
+  (lambda (project-root _adapter-cache)
+    (write-source!
+     (build-path project-root "package.json")
+     "{\"name\":\"resolver-test\",\"private\":true,\"type\":\"module\"}\n")
+    (define package-root
+      (build-path project-root "node_modules" "@fixture" "generic-inheritance"))
+    (make-directory* package-root)
+    (write-source!
+     (build-path package-root "package.json")
+     (string-append
+      "{\"name\":\"@fixture/generic-inheritance\",\"version\":\"1.0.0\","
+      "\"type\":\"module\",\"exports\":{\".\":{"
+      "\"beagle\":\"./index.d.ts\","
+      "\"types\":\"./index.d.ts\","
+      "\"default\":\"./index.js\"}}}\n"))
+    (write-source!
+     (build-path package-root "index.d.ts")
+     (string-append
+      "export interface Attributes { position: number; }\n"
+      "export interface Events { changed: boolean; }\n"
+      "export declare class BaseGeometry<A = Attributes, E = Events> {\n"
+      "  attributes: A;\n"
+      "  events: E;\n"
+      "}\n"
+      "export declare class ChildGeometry"
+      " extends BaseGeometry<Attributes, Events> {\n"
+      "  width: number;\n"
+      "}\n"
+      "export declare class Mesh<"
+      "G extends BaseGeometry<Attributes, Events>"
+      " = BaseGeometry<Attributes, Events>> {\n"
+      "  constructor(geometry?: G);\n"
+      "  geometry: G;\n"
+      "}\n"))
+    (define source-path (build-path project-root "generic-inheritance.bjs"))
+    (write-source!
+     source-path
+     (string-append
+      "#lang beagle/js\n"
+      "(ns resolver-test.generic-inheritance\n"
+      "  (:require [\"@fixture/generic-inheritance\""
+      " :refer [Attributes BaseGeometry ChildGeometry Events Mesh]]))\n"
+      "(defn assignGeometry! [] ChildGeometry\n"
+      "  (let [mesh (Mesh (BaseGeometry Attributes Events)) (new Mesh)\n"
+      "        geometry ChildGeometry (new ChildGeometry)]\n"
+      "    (set! (.-geometry mesh) geometry)\n"
+      "    geometry))\n"
+      "(defn constructMesh [] ChildGeometry\n"
+      "  (let [geometry ChildGeometry (new ChildGeometry)\n"
+      "        mesh (Mesh ChildGeometry) (new Mesh geometry)]\n"
+      "    geometry))\n"))
+    (define checked
+      (check-module-source-closure
+       (resolve-production-module-source-closure
+        (list
+         (module-source-input
+          "resolver-test/generic-inheritance.bjs"
+          source-path))
+        '())
+       #:emit? #f))
+    (check-true
+     (overlay-check-result-ok? checked)
+     (format "~a" (overlay-check-result-diagnostics checked))))))
+
+(test-case
  "exact maps satisfy optional Partial mapped-type constructor parameters"
  (with-isolated-adapter-cache
   (lambda (project-root _adapter-cache)

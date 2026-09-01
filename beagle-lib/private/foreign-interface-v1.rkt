@@ -172,7 +172,7 @@
     (tuple (elements readonly) ())
     (awaited (argument) ())
     (object (typeParameters properties indexes callSignatures constructSignatures)
-            (name identity))
+            (name identity baseTypes))
     (function (typeParameters overloads) ())
     (reference (name target typeArguments nominal) ())
     (type-parameter (name constraint default) ())
@@ -459,6 +459,16 @@
                    (strictly-sorted? properties (lambda (property)
                                                   (hash-ref property 'name))))
         (schema-error where "object properties must be unique and name-sorted"))
+      (define base-types
+        (for/list ([base-type
+                    (in-list
+                     (array! (format "~a.baseTypes" where)
+                             (hash-ref value 'baseTypes '())))])
+          (node-ref! (format "~a.baseTypes[]" where) base-type)))
+      (unless (and (unique? base-types values)
+                   (strictly-sorted? base-types values))
+        (schema-error where
+                      "object baseTypes must be unique and node-ID-sorted"))
       (define (signatures field)
         (for/list ([signature
                     (in-list (array! (format "~a.~a" where field)
@@ -480,6 +490,7 @@
       (define normalized
         (hash-set* base
                    'typeParameters type-parameters
+                   'baseTypes base-types
                    'properties properties
                    'indexes indexes
                    'callSignatures (signatures 'callSignatures)
@@ -758,6 +769,7 @@
                  (list (hash-ref parameter 'node)
                        (hash-ref parameter 'constraint)
                        (hash-ref parameter 'default)))))
+      (hash-ref node 'baseTypes)
       (map (lambda (property) (hash-ref property 'type))
            (hash-ref node 'properties))
       (apply append
@@ -1566,6 +1578,7 @@
      (append
       (edges (map (lambda (parameter) (hash-ref parameter 'node))
                   (hash-ref node 'typeParameters)))
+      (edges (hash-ref node 'baseTypes))
       (edges (map (lambda (property) (hash-ref property 'type))
                   (hash-ref node 'properties)))
       (edges
@@ -2836,6 +2849,39 @@
                   actual-interface
                   (hash-ref actual-property 'type)
                   (foreign-view-bindings actual-view))))))))))
+  (define (match-declared-base-object)
+    (and
+     (type-foreign? actual)
+     (let-values ([(actual-interface _actual-node)
+                   (foreign-node-ref actual)])
+       (define actual-view
+         (normalize-foreign-view
+          actual-interface
+          (make-foreign-view
+           (type-foreign-node-id actual)
+           (foreign-type-bindings actual-interface actual))
+          (mutable-set)))
+       (define actual-node
+         (node-at actual-interface (foreign-view-node-id actual-view)))
+       (and
+        (string=? (hash-ref actual-node 'kind) "object")
+        (for/or ([base-id (in-list (hash-ref actual-node 'baseTypes))])
+          (try-foreign-branch
+           bindings
+           (lambda (trial)
+             (foreign-argument-compatible?
+              interface
+              expected-id
+              expression
+              (foreign-result-type
+               actual-interface
+               base-id
+               (foreign-view-bindings actual-view))
+              trial
+              active
+              inferable
+              join-inference?
+              dynamic-inference?))))))))
   (define (match-native-vector-object expected)
     (define properties (hash-ref expected 'properties))
     (define indexes (hash-ref expected 'indexes))
@@ -3660,6 +3706,7 @@
          [(object)
           (or
            exact?
+           (match-declared-base-object)
            (match-native-vector-object expected)
            (and
             actual-view
