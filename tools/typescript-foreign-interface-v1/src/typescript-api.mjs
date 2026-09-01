@@ -403,7 +403,9 @@ export function createSourceContext({ projectRoot, sourceFile }) {
     return parsed;
   };
   const program = ts.createProgram([canonicalSourceFile], compilerOptions, host);
-  const diagnostics = ts.getPreEmitDiagnostics(program);
+  const source = program.getSourceFile(canonicalSourceFile);
+  if (!source) throw new Error(`TypeScript source is absent from Program: ${canonicalSourceFile}`);
+  const diagnostics = ts.getPreEmitDiagnostics(program, source);
   if (diagnostics.length) {
     throw new Error(ts.formatDiagnosticsWithColorAndContext(diagnostics, {
       getCanonicalFileName: (path) => path,
@@ -411,8 +413,6 @@ export function createSourceContext({ projectRoot, sourceFile }) {
       getNewLine: () => "\n",
     }));
   }
-  const source = program.getSourceFile(canonicalSourceFile);
-  if (!source) throw new Error(`TypeScript source is absent from Program: ${canonicalSourceFile}`);
   const programInputs = program.getSourceFiles().map((programSource) => reads.record(
     programSource.fileName,
     "Program source input",

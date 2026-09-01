@@ -14,6 +14,8 @@ const adapterRoot = resolve(import.meta.dir, "..");
 const repositoryRoot = resolve(adapterRoot, "../..");
 const runtimeRoot = resolve(repositoryRoot, "beagle-lib/lib/beagle");
 const fixture = resolve(adapterRoot, "fixture/wasm-bindgen-init.ts");
+const diagnosticIsolationDirty = resolve(adapterRoot, "fixture/diagnostic-isolation-dirty.ts");
+const diagnosticIsolationTarget = resolve(adapterRoot, "fixture/diagnostic-isolation-target.ts");
 const temporary = mkdtempSync(join(tmpdir(), "beagle-ts-import-v1-"));
 const compiled = resolve(temporary, "importer.mjs");
 
@@ -35,7 +37,7 @@ beforeAll(() => {
   expect(result.exitCode, result.stderr.toString()).toBe(0);
 });
 
-test("wasm-bindgen anonymous init objects become checked records", async () => {
+async function importFixture(sourceFile, namespace, moduleMappings = new Map()) {
   const compiledAdapter = bindCompiledAdapter(compiled);
   const producerInputs = bindProducerInputs({
     adapterRoot,
@@ -46,13 +48,20 @@ test("wasm-bindgen anonymous init objects become checked records", async () => {
     compiledAdapter,
     producerInputs,
   });
-  const context = createSourceContext({ projectRoot: adapterRoot, sourceFile: fixture });
+  const context = createSourceContext({ projectRoot: adapterRoot, sourceFile });
   const importer = sourceImporterBuilder(await compiledAdapter.load(runtimeRoot));
-  const result = importer(
+  return importer(
     bridge,
     context,
+    namespace,
+    moduleMappings,
+  );
+}
+
+test("wasm-bindgen anonymous init objects become checked records", async () => {
+  const result = await importFixture(
+    fixture,
     "beagle.typescript.wasm-bindgen-init",
-    new Map(),
   );
 
   expect(result.diagnostics).toEqual([]);
@@ -69,4 +78,28 @@ test("wasm-bindgen anonymous init objects become checked records", async () => {
     "(js/export (defn initInput [module SyncInitInput] Number (initSync module)))",
   );
   expect(result.source).not.toContain("__typescript_import_unsupported__");
+});
+
+test("target translation ignores diagnostics owned by a transitive dependency", async () => {
+  expect(() => createSourceContext({
+    projectRoot: adapterRoot,
+    sourceFile: diagnosticIsolationDirty,
+  })).toThrow("TS2322");
+
+  const result = await importFixture(
+    diagnosticIsolationTarget,
+    "beagle.typescript.diagnostic-isolation-target",
+    new Map([[
+      "./diagnostic-isolation-dirty.ts",
+      "beagle.typescript.diagnostic-isolation-dirty",
+    ]]),
+  );
+
+  expect(result.diagnostics).toEqual([]);
+  expect(result.source).toContain(
+    "(:require [beagle.typescript.diagnostic-isolation-dirty :refer [dependencyValue]])",
+  );
+  expect(result.source).toContain(
+    "(js/export (defn isolatedValue [] String dependencyValue))",
+  );
 });
