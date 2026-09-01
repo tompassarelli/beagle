@@ -144,6 +144,63 @@
      (format "~a" (overlay-check-result-diagnostics checked))))))
 
 (test-case
+ "typed ambient provider resolves import aliases before projection"
+ (with-isolated-adapter-cache
+  (lambda (project-root _adapter-cache)
+    (write-source!
+     (build-path project-root "package.json")
+     "{\"name\":\"typed-ambient-alias-test\",\"private\":true,\"type\":\"module\"}\n")
+    (define package-root
+      (build-path project-root "node_modules" "@types" "runtime-alias"))
+    (make-directory* package-root)
+    (write-source!
+     (build-path package-root "package.json")
+     (string-append
+      "{\"name\":\"@types/runtime-alias\",\"version\":\"1.0.0\","
+      "\"types\":\"index.d.ts\"}\n"))
+    (write-source!
+     (build-path package-root "runtime-module.d.ts")
+     (string-append
+      "export interface RuntimeFile { arrayBuffer(): Promise<ArrayBuffer>; }\n"
+      "export declare function file(path: string): RuntimeFile;\n"))
+    (write-source!
+     (build-path package-root "index.d.ts")
+     (string-append
+      "import * as RuntimeModule from \"./runtime-module\";\n"
+      "declare global { export import Runtime = RuntimeModule; }\n"
+      "export {};\n"))
+    (define source-path (build-path project-root "ambient-alias.bjs"))
+    (write-source!
+     source-path
+     (string-append
+      "#lang beagle/js\n"
+      "(ns resolver-test.ambient-alias\n"
+      "  (:require-global [\"@types/runtime-alias\" :refer [Runtime]]))\n"
+      "(def marker String \"typed\")\n"))
+    (define closure
+      (resolve-production-module-source-closure
+       (list (module-source-input "resolver-test/ambient-alias.bjs" source-path))
+       '()))
+    (define resolutions
+      (module-source-closure-foreign-module-resolutions closure))
+    (check-equal? (hash-count resolutions) 1)
+    (define interface
+      (module-interface-foreign-interface-v1
+       (module-source-interface (car (hash-values resolutions)))))
+    (define binding (car (foreign-interface-v1-ambient-values interface)))
+    (check-equal? (hash-ref binding 'name) "Runtime")
+    (define runtime-node
+      (hash-ref (foreign-interface-v1-nodes interface) (hash-ref binding 'node)))
+    (check-equal? (hash-ref runtime-node 'kind) "object")
+    (check-true
+     (for/or ([property (in-list (hash-ref runtime-node 'properties))])
+       (string=? (hash-ref property 'name) "file")))
+    (define checked (check-module-source-closure closure #:emit? #f))
+    (check-true
+     (overlay-check-result-ok? checked)
+     (format "~a" (overlay-check-result-diagnostics checked))))))
+
+(test-case
  "missing Bun fails before adapter compilation or cache mutation"
  (with-bun-absent
   (lambda (project-root adapter-cache)
