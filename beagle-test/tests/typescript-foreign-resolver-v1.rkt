@@ -5,6 +5,7 @@
          racket/runtime-path
          racket/string
          racket/system
+         beagle/private/ast
          beagle/private/foreign-interface-v1
          beagle/private/module-interface
          beagle/private/module-overlay-check
@@ -299,6 +300,9 @@
       "export declare function notify(): void;\n"
       "export declare function pipeline(...streams: [string, ...number[], boolean]): void;\n"
       "export declare function schedule(body: () => void): void;\n"
+      "export declare function acceptOnlyPromises<T>(values: Iterable<PromiseLike<T>>): Promise<T[]>;\n"
+      "export declare function loadBuffer(): Promise<ArrayBuffer>;\n"
+      "export declare function loadText(): Promise<string>;\n"
       "export type Transformer<T> = (value: T) => T;\n"
       "export declare const stringTransformer: Transformer<string>;\n"
       "export declare function makeBytes(): Uint8Array<ArrayBuffer>;\n"))
@@ -348,7 +352,7 @@
      (string-append
       "#lang beagle/js\n"
       "(ns resolver-test.native-success\n"
-      "  (:require [\"@fixture/native\" :refer [acceptFlag makeBytes notify pipeline schedule stringTransformer value]]\n"
+      "  (:require [\"@fixture/native\" :refer [acceptFlag loadBuffer loadText makeBytes notify pipeline schedule stringTransformer value]]\n"
       "            [\"@fixture/wasm-bindgen-init\" :refer [consumeBytes SyncInitInput initSync]]))\n"
       "(js/export (def answer String value))\n"
       "(js/export (defn relay [flag Bool] Nil (acceptFlag flag)))\n"
@@ -361,6 +365,7 @@
       "(js/export (defn consumeProducedBytes [] Number (consumeBytes (makeBytes))))\n"
       "(js/export (defn consumeConstructedBytes [request (Vec Int)] Number (consumeBytes (new Uint8Array request))))\n"
       "(js/export (defn consumeCopiedBytes [] Number (consumeBytes (new Uint8Array (makeBytes)))))\n"
+      "(js/export (defn loadTogether [] Any (.all Promise [(loadBuffer) (loadText)])))\n"
       "(js/export (defn run [] Nil (schedule (fn [] Nil (notify)))))\n"))
 
     (define closure
@@ -403,6 +408,43 @@
       (module-interface-foreign-interface-v1
        (module-source-interface foreign-source)))
     (check-pred foreign-interface-v1? foreign-interface)
+    (define foreign-nodes (foreign-interface-v1-nodes foreign-interface))
+    (define promise-binding
+      (findf
+       (lambda (binding) (string=? (hash-ref binding 'name) "Promise"))
+       (foreign-interface-v1-ambient-values foreign-interface)))
+    (check-pred hash? promise-binding)
+    (define promise-constructor
+      (hash-ref foreign-nodes (hash-ref promise-binding 'node)))
+    (define promise-all-property
+      (findf
+       (lambda (property) (string=? (hash-ref property 'name) "all"))
+       (hash-ref promise-constructor 'properties)))
+    (check-pred hash? promise-all-property)
+    (define promise-all-node
+      (hash-ref foreign-nodes (hash-ref promise-all-property 'type)))
+    (define promise-all-overloads (hash-ref promise-all-node 'overloads))
+    (check-equal? (length promise-all-overloads) 2)
+    (define iterable-type-parameter
+      (car (hash-ref (car promise-all-overloads) 'typeParameters)))
+    (check-false (hash-ref iterable-type-parameter 'constraint))
+    (check-false (hash-ref iterable-type-parameter 'default))
+    (define iterable-parameter
+      (hash-ref
+       foreign-nodes
+       (hash-ref
+        (car (hash-ref (car promise-all-overloads) 'parameters))
+        'type)))
+    (check-equal? (hash-ref iterable-parameter 'name) "Iterable")
+    (define iterable-element
+      (hash-ref foreign-nodes (car (hash-ref iterable-parameter 'typeArguments))))
+    (check-equal? (hash-ref iterable-element 'kind) "union")
+    (check-true
+     (for/or ([member-id (in-list (hash-ref iterable-element 'members))])
+       (define member (hash-ref foreign-nodes member-id))
+       (and (string=? (hash-ref member 'kind) "reference")
+            (string=? (hash-ref member 'name) "PromiseLike")))
+     "the fixture must retain the exact Iterable<T | PromiseLike<T>> overload")
     (check-equal?
      (hash-ref (foreign-interface-v1-stats foreign-interface) 'anyCount)
      0)
@@ -522,6 +564,27 @@
      (overlay-check-result-ok? checked)
      (format "~a" (overlay-check-result-diagnostics checked)))
     (check-equal? (length (overlay-check-result-modules checked)) 1)
+    (define checked-program
+      (checked-overlay-module-program
+       (car (overlay-check-result-modules checked))))
+    (define promise-all-results
+      (for/list ([(expression inferred)
+                  (in-hash (program-type-table checked-program))]
+                 #:when
+                 (and (jst-call? expression)
+                      (jst-selector? (jst-call-key expression))
+                      (string=? (jst-selector-name (jst-call-key expression))
+                                "all")))
+        inferred))
+    (check-equal? (length promise-all-results) 1)
+    (define promise-all-result (car promise-all-results))
+    (check-true
+     (and (type-app? promise-all-result)
+          (eq? (type-app-ctor promise-all-result) 'Promise)
+          (= (length (type-app-args promise-all-result)) 1)
+          (type-foreign? (car (type-app-args promise-all-result)))
+          (not (type-has-any? promise-all-result)))
+     (type->string promise-all-result))
     (define emitted
       (checked-overlay-module-emitted
        (car (overlay-check-result-modules checked))))
@@ -559,4 +622,36 @@
      (string-contains?
       (format "~a" (overlay-check-result-diagnostics invalid-checked))
       "no foreign overload of Uint8ArrayConstructor accepts the supplied arguments")
-     (format "~a" (overlay-check-result-diagnostics invalid-checked))))))
+     (format "~a" (overlay-check-result-diagnostics invalid-checked)))
+
+    (define invalid-promise-path
+      (build-path project-root "nested" "invalid-promise-inputs.bjs"))
+    (write-source!
+     invalid-promise-path
+     (string-append
+      "#lang beagle/js\n"
+      "(ns resolver-test.invalid-promise-inputs\n"
+      "  (:require [\"@fixture/native\" :refer [acceptOnlyPromises loadBuffer]]))\n"
+      "(js/export (defn invalidPromiseInputs [] Any\n"
+      "  (acceptOnlyPromises [(loadBuffer) true])))\n"))
+    (define invalid-promise-checked
+      (check-module-source-closure
+       (resolve-production-module-source-closure
+        (list
+         (module-source-input
+          "resolver-test/invalid-promise-inputs.bjs"
+          invalid-promise-path))
+        '())))
+    (check-false
+     (overlay-check-result-ok? invalid-promise-checked)
+     "typed unrelated elements must not become Any/unknown evidence")
+    (check-true
+     (and
+      (string-contains?
+       (format "~a" (overlay-check-result-diagnostics invalid-promise-checked))
+       "no foreign overload")
+      (string-contains?
+       (format "~a" (overlay-check-result-diagnostics invalid-promise-checked))
+       "PromiseLike<T>"))
+     (format "~a"
+             (overlay-check-result-diagnostics invalid-promise-checked))))))

@@ -1913,7 +1913,13 @@
 (define TYPESCRIPT-BUILTIN-PROMISE-IDENTITY-RX
   #px"^adapter/node_modules/typescript/lib/lib\\.es2015\\.promise\\.d\\.ts#Promise@sha256:[0-9a-f]{64}$")
 
-(define (foreign-reference-native-type interface view [active (mutable-set)])
+(define TYPESCRIPT-BUILTIN-PROMISE-LIKE-IDENTITY-RX
+  #px"^adapter/node_modules/typescript/lib/lib\\.es5\\.d\\.ts#PromiseLike@sha256:[0-9a-f]{64}$")
+
+(define TYPESCRIPT-BUILTIN-ITERABLE-IDENTITY-RX
+  #px"^adapter/node_modules/typescript/lib/lib\\.es2015\\.iterable\\.d\\.ts#Iterable@sha256:[0-9a-f]{64}$")
+
+(define (typescript-builtin-reference? interface view name arity identity-rx)
   (define node (node-at interface (foreign-view-node-id view)))
   (define target-id
     (and (string=? (hash-ref node 'kind) "reference")
@@ -1922,16 +1928,21 @@
   (and
    (string=? (foreign-interface-v1-frontend interface) "typescript")
    target-id
-   (string=? (hash-ref node 'name) "Promise")
-   (= (length arguments) 1)
+   (string=? (hash-ref node 'name) name)
+   (= (length arguments) arity)
    (let ([target (node-at interface target-id)])
      (and
       (string=? (hash-ref target 'kind) "object")
-      (string=? (hash-ref target 'name "") "Promise")
-      (= (length (hash-ref target 'typeParameters)) 1)
-      (regexp-match?
-       TYPESCRIPT-BUILTIN-PROMISE-IDENTITY-RX
-       (hash-ref target 'identity ""))))
+      (string=? (hash-ref target 'name "") name)
+      (= (length (hash-ref target 'typeParameters)) arity)
+      (regexp-match? identity-rx (hash-ref target 'identity ""))))))
+
+(define (foreign-reference-native-type interface view [active (mutable-set)])
+  (define node (node-at interface (foreign-view-node-id view)))
+  (define arguments (hash-ref node 'typeArguments '()))
+  (and
+   (typescript-builtin-reference?
+    interface view "Promise" 1 TYPESCRIPT-BUILTIN-PROMISE-IDENTITY-RX)
    (type-app
     'Promise
     (list
@@ -2285,6 +2296,33 @@
        [(< index suffix-start) (list-ref elements rest-position)]
        [else (list-ref suffix (- index suffix-start))])]))
 
+(define (foreign-evidence-expression value)
+  (if (foreign-expression-evidence-v1? value)
+      (foreign-expression-evidence-v1-expression value)
+      value))
+
+(define (foreign-evidence-type value [fallback #f])
+  (if (foreign-expression-evidence-v1? value)
+      (foreign-expression-evidence-v1-type value)
+      fallback))
+
+(define (foreign-inference-join prior actual)
+  (cond
+    [(not prior) actual]
+    [(foreign-binding-value-compatible? actual prior) prior]
+    [else
+     (define alternatives
+       (remove-duplicates
+        (append
+         (if (type-union? prior) (type-union-alts prior) (list prior))
+         (if (type-union? actual) (type-union-alts actual) (list actual)))
+        equal?))
+     (and (for/and ([alternative (in-list alternatives)])
+            (not (type-has-any? alternative)))
+          (if (null? (cdr alternatives))
+              (car alternatives)
+              (type-union alternatives)))]))
+
 (define (foreign-argument-compatible? interface expected-id expression actual
                                       [bindings #f]
                                       [active (mutable-set)]
@@ -2299,6 +2337,40 @@
   (define (recur nested-id nested-expression nested-actual [trial bindings])
     (foreign-argument-compatible?
      interface nested-id nested-expression nested-actual trial active inferable))
+  (define (native-vector-iterable-literal?)
+    (and
+     (vec-form? expression)
+     (type-app? actual)
+     (eq? (type-app-ctor actual) 'Vec)
+     (= (length (type-app-args actual)) 1)
+     (typescript-builtin-reference?
+      interface expected-view "Iterable" 3
+      TYPESCRIPT-BUILTIN-ITERABLE-IDENTITY-RX)
+     (pair? (vec-form-items expression))
+     (for/and ([item (in-list (vec-form-items expression))])
+       (define item-type (foreign-evidence-type item))
+       (and item-type (not (type-has-any? item-type))))))
+  (define (match-native-vector-iterable-reference _expected)
+    (and
+     (native-vector-iterable-literal?)
+     (let ([element-id (car (hash-ref expected 'typeArguments))])
+       (for/and ([item (in-list (vec-form-items expression))])
+         (recur
+          element-id
+          (foreign-evidence-expression item)
+          (foreign-evidence-type item))))))
+  (define (match-native-promise-like-reference _expected)
+    (and
+     (type-app? actual)
+     (eq? (type-app-ctor actual) 'Promise)
+     (= (length (type-app-args actual)) 1)
+     (typescript-builtin-reference?
+      interface expected-view "PromiseLike" 1
+      TYPESCRIPT-BUILTIN-PROMISE-LIKE-IDENTITY-RX)
+     (recur
+      (car (hash-ref expected 'typeArguments))
+      #f
+      (car (type-app-args actual)))))
   (define (match-reference expected actual-view)
     (define target-id (hash-ref expected 'target))
     (and
@@ -2827,6 +2899,7 @@
           (not expected-unknown?)
           (not (and (map-literal-object-node? expected-id)
                     (map-form? expression)))
+          (not (native-vector-iterable-literal?))
           (not (contextual-void-callback-evidence?)))
      #f]
     ;; Recursive structural types are checked coinductively.  Revisiting the
@@ -2868,6 +2941,21 @@
            interface expected expression expected-bindings)]
          [(union)
           (define expected-members (hash-ref expected 'members))
+          (define inference-members
+            (append
+             (filter
+              (lambda (member)
+                (define node (node-at interface member))
+                (not
+                 (and (string=? (hash-ref node 'kind) "type-parameter")
+                      (set-member? inferable member))))
+              expected-members)
+             (filter
+              (lambda (member)
+                (define node (node-at interface member))
+                (and (string=? (hash-ref node 'kind) "type-parameter")
+                     (set-member? inferable member)))
+              expected-members)))
           (define normalized-actual
             (and actual-view
                  (normalize-foreign-view
@@ -2890,7 +2978,7 @@
                          (foreign-argument-compatible?
                           interface member expression actual
                           trial active inferable))))
-                    expected-members)])]
+                    inference-members)])]
          [(intersection)
           ;; A branded or nominal intersection cannot be manufactured by a
           ;; structurally compatible Beagle scalar.  Values returned by the
@@ -2952,12 +3040,18 @@
                         #f actual-element))))))]
          [(type-parameter)
           (cond
+            [(and bindings (set-member? inferable expected-id))
+             (define joined
+               (foreign-inference-join
+                (hash-ref bindings expected-id #f)
+                actual))
+             (and joined
+                  (begin
+                    (hash-set! bindings expected-id joined)
+                    #t))]
             [(hash-has-key? expected-bindings expected-id)
              (foreign-binding-value-compatible?
               actual (hash-ref expected-bindings expected-id))]
-            [(and bindings (set-member? inferable expected-id))
-             (hash-set! bindings expected-id actual)
-             #t]
             [else
              (define default-id (hash-ref expected 'default))
              (and default-id
@@ -2971,6 +3065,8 @@
                      (foreign-reference-native-type
                       interface expected-view active)])
                 (and native (type-compatible? actual native)))
+              (match-native-vector-iterable-reference expected)
+              (match-native-promise-like-reference expected)
               (and actual-view (match-reference expected actual-view))
               (match-cross-interface-reference expected)
               (match-reference-target))]

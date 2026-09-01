@@ -876,6 +876,12 @@ export function createCompilerBridge({
     }
     return { captured, local };
   };
+  const explicitTypeParameterPart = (type, part) => {
+    const declarations = type.symbol?.declarations ?? [];
+    return declarations.some((item) => (
+      ts.isTypeParameterDeclaration(item) && item[part]
+    ));
+  };
   const declarationTypeParameters = (type) => {
     // Alias arguments are use-site substitutions, not lexical declarations.
     // An uninstantiated generic alias is the one exception: the compiler
@@ -1229,14 +1235,18 @@ export function createCompilerBridge({
     typeParameterDeclarationOwner(type) {
       return typeParameterDeclarationOwner(this.context, type);
     },
-    typeParameterConstraint: (type) => type.getConstraint?.() ?? type.constraint ?? null,
+    typeParameterConstraint: (type) => explicitTypeParameterPart(type, "constraint")
+      ? type.getConstraint?.() ?? type.constraint ?? null
+      : null,
     typeParameterArrayElementType(type) {
       const constraint = type.getConstraint?.() ?? type.constraint ?? null;
       return constraint && this.context.checker.isArrayLikeType(constraint)
         ? this.context.checker.getIndexTypeOfType(constraint, ts.IndexKind.Number)
         : null;
     },
-    typeParameterDefault: (type) => type.getDefault?.() ?? type.default ?? null,
+    typeParameterDefault: (type) => explicitTypeParameterPart(type, "default")
+      ? type.getDefault?.() ?? type.default ?? null
+      : null,
     unsupportedCode,
     weakMap: () => new WeakMap(),
     sourceFile(context) { this.context = context; return context.source; },
