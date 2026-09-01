@@ -133,6 +133,7 @@
     'schemaVersion FOREIGN-INTERFACE-SCHEMA-VERSION
     'frontend "typescript"
     'moduleSpecifier MODULE-SPECIFIER
+    'ambientValues '()
     'exports sorted-exports
     'nodes sorted-nodes
     'obligations sorted-obligations

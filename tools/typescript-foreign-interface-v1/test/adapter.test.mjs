@@ -10,14 +10,19 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import {
+const configuredTypescriptRuntimeRoot = process.env.BEAGLE_TYPESCRIPT_RUNTIME_ROOT;
+if (configuredTypescriptRuntimeRoot) {
+  globalThis.__BEAGLE_TYPESCRIPT_RUNTIME_ROOT__ = configuredTypescriptRuntimeRoot;
+}
+const {
   bindCompiledAdapter,
   createCompilerBridge,
   createContext,
   foreignInterfaceBuilder,
-} from "../src/typescript-api.mjs";
+} = await import("../src/typescript-api.mjs");
 
 const adapterRoot = resolve(import.meta.dir, "..");
+const typescriptRuntimeRoot = configuredTypescriptRuntimeRoot ?? adapterRoot;
 const repositoryRoot = resolve(adapterRoot, "../..");
 const source = resolve(adapterRoot, "src/adapter.bjs");
 const fixtureRoot = resolve(adapterRoot, "fixture");
@@ -98,7 +103,7 @@ const graphRefs = (value) => {
       visit(child);
     }
   };
-  visit({ exports: value.exports, nodes: value.nodes });
+  visit({ exports: value.exports, ambientValues: value.ambientValues, nodes: value.nodes });
   return refs;
 };
 
@@ -259,7 +264,7 @@ describe("provenance authority", () => {
     expect(consulted.get("adapter/src/run.mjs")).toBe(fileSha256(resolve(adapterRoot, "src/run.mjs")));
     expect(consulted.get("adapter/src/typescript-api.mjs")).toBe(fileSha256(resolve(adapterRoot, "src/typescript-api.mjs")));
     expect(consulted.get("adapter/node_modules/typescript/lib/lib.es5.d.ts")).toBe(
-      fileSha256(resolve(adapterRoot, "node_modules/typescript/lib/lib.es5.d.ts")),
+      fileSha256(resolve(typescriptRuntimeRoot, "node_modules/typescript/lib/lib.es5.d.ts")),
     );
     expect(consulted.has("runtime/core.js")).toBeFalse();
     expect(consulted.get("project/bun.lock")).toBe(fileSha256(project.lockfile));
@@ -322,6 +327,7 @@ describe("provenance authority", () => {
       resolve(adapterRoot, "src/run.mjs"),
       compiled,
       adapterRoot,
+      typescriptRuntimeRoot,
       runtimeRoot,
       adapterRoot,
       containingFile,

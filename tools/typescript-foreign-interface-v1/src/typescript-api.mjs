@@ -847,6 +847,17 @@ export function createCompilerBridge({
     return kind;
   };
   return {
+    ambientValues(context, names) {
+      this.context = context;
+      return [...new Set(names)].sort()
+        .map((name) => context.checker.resolveName(
+          name,
+          undefined,
+          ts.SymbolFlags.Value,
+          false,
+        ))
+        .filter(Boolean);
+    },
     array: () => [],
     arrayElementType(type) { return this.context.checker.getElementTypeOfArrayType(type); },
     brandBase: (type) => type.types.find((member) => !exactFlag(member, ts.TypeFlags.Object)) ?? type.types[0],

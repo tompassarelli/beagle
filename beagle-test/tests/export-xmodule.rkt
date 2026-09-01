@@ -27,6 +27,7 @@
      'schemaVersion FOREIGN-INTERFACE-SCHEMA-VERSION
      'frontend "typescript"
      'moduleSpecifier module-specifier
+     'ambientValues '()
      'exports
      (for/list ([export (in-list exports)])
        (hash 'name (car export)

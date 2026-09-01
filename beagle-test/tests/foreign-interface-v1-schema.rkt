@@ -67,6 +67,7 @@
    'schemaVersion 1
    'frontend frontend
    'moduleSpecifier module-specifier
+   'ambientValues '()
    'exports exports
    'nodes nodes
    'obligations obligations

@@ -55,6 +55,7 @@
      'schemaVersion FOREIGN-INTERFACE-SCHEMA-VERSION
      'frontend "typescript"
      'moduleSpecifier module-specifier
+     'ambientValues '()
      'exports
      (list
       (hash 'name export-name

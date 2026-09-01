@@ -71,6 +71,7 @@
      'schemaVersion FOREIGN-INTERFACE-SCHEMA-VERSION
      'frontend "typescript"
      'moduleSpecifier module-specifier
+     'ambientValues '()
      'exports canonical-exports
      'nodes canonical-nodes
      'obligations '()

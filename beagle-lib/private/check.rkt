@@ -2276,6 +2276,10 @@
 
 (define (build-initial-env prog)
   (define env (mut-copy (builtin-env-for-target (program-target prog))))
+  (for ([(name contract) (in-hash (foreign-ambient-value-types-v1))])
+    (when (or (not (hash-has-key? env name))
+              (any-type? (hash-ref env name)))
+      (hash-set! env name contract)))
   (when (eq? (program-target prog) 'core)
     (register-core-result-unions!))
   ;; user-declared external functions
@@ -7308,7 +7312,8 @@
 
 (define (infer-jst-new e env [expected-result #f])
   (define args (jst-new-args e))
-  (define raw-contract (infer-expr (jst-new-callee e) env))
+  (define callee (jst-new-callee e))
+  (define raw-contract (infer-expr callee env))
   (cond
     [(type-foreign? raw-contract)
      (define-values (argument-evidence argument-types)

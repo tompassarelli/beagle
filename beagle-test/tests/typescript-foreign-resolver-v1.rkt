@@ -249,8 +249,6 @@
       "export declare function schedule(body: () => void): void;\n"
       "export type Transformer<T> = (value: T) => T;\n"
       "export declare const stringTransformer: Transformer<string>;\n"
-      "export declare const Bytes: Uint8ArrayConstructor;\n"
-      "export declare function makeNumbers(): ArrayLike<number>;\n"
       "export declare function makeBytes(): Uint8Array<ArrayBuffer>;\n"))
     ;; If the production "beagle" condition is lost, this conflicting default
     ;; declaration makes the coherent String check fail instead of passing by
@@ -283,7 +281,7 @@
      (string-append
       "#lang beagle/js\n"
       "(ns resolver-test.native-success\n"
-      "  (:require [\"@fixture/native\" :refer [acceptFlag Bytes makeBytes makeNumbers notify pipeline schedule stringTransformer value]]\n"
+      "  (:require [\"@fixture/native\" :refer [acceptFlag makeBytes notify pipeline schedule stringTransformer value]]\n"
       "            [\"@fixture/wasm-bindgen-init\" :refer [consumeBytes SyncInitInput initSync]]))\n"
       "(js/export (def answer String value))\n"
       "(js/export (defn relay [flag Bool] Nil (acceptFlag flag)))\n"
@@ -292,7 +290,8 @@
       "(js/export (defn initialize [module SyncInitInput] Number (initSync module)))\n"
       "(js/export (defn initializeArrayBuffer [module ArrayBuffer] Number (initSync module)))\n"
       "(js/export (defn consumeProducedBytes [] Number (consumeBytes (makeBytes))))\n"
-      "(js/export (defn consumeConstructedBytes [] Number (consumeBytes (new Bytes (makeNumbers)))))\n"
+      "(js/export (defn consumeConstructedBytes [request (Vec Int)] Number (consumeBytes (new Uint8Array request))))\n"
+      "(js/export (defn consumeCopiedBytes [] Number (consumeBytes (new Uint8Array (makeBytes)))))\n"
       "(js/export (defn run [] Nil (schedule (fn [] Nil (notify)))))\n"))
 
     (define closure
@@ -408,6 +407,10 @@
     (parameterize
         ([current-foreign-interfaces
           (hash wasm-interface-id wasm-interface)])
+      (check-pred
+       type-foreign?
+       (hash-ref (foreign-ambient-value-types-v1) 'Uint8Array #f)
+       "the imported TypeScript graph must expose the ambient Uint8Array constructor")
       (check-true
        (foreign-type-compatible-v1
         (uint8-array-with (type-prim 'ArrayBuffer))
@@ -461,4 +464,30 @@
      "emission must preserve the exact wasm-bindgen ESM specifier")
     (check-false
      (string-contains? emitted "foreign-interface:")
-     "validated type identity must never become wrapper source"))))
+     "validated type identity must never become wrapper source")
+
+    (define invalid-source-path
+      (build-path project-root "nested" "invalid-constructor.bjs"))
+    (write-source!
+     invalid-source-path
+     (string-append
+      "#lang beagle/js\n"
+      "(ns resolver-test.invalid-constructor\n"
+      "  (:require [\"@fixture/wasm-bindgen-init\" :refer [consumeBytes]]))\n"
+      "(js/export (defn invalid [] Number (consumeBytes (new Uint8Array true))))\n"))
+    (define invalid-checked
+      (check-module-source-closure
+       (resolve-production-module-source-closure
+        (list
+         (module-source-input
+          "resolver-test/invalid-constructor.bjs"
+          invalid-source-path))
+        '())))
+    (check-false
+     (overlay-check-result-ok? invalid-checked)
+     "the ambient constructor must reject arguments outside its TypeScript overloads")
+    (check-true
+     (string-contains?
+      (format "~a" (overlay-check-result-diagnostics invalid-checked))
+      "no foreign overload of Uint8ArrayConstructor accepts the supplied arguments")
+     (format "~a" (overlay-check-result-diagnostics invalid-checked))))))

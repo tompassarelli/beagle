@@ -32,8 +32,8 @@
   (id export-name runtime-name node-id semantic-id content-id)
   #:transparent)
 (struct foreign-interface-v1
-  (semantic-id content-id frontend module-specifier exports nodes obligations
-               provenance receipts stats)
+  (semantic-id content-id frontend module-specifier exports ambient-values nodes
+               obligations provenance receipts stats)
   #:transparent)
 (struct foreign-expression-evidence-v1 (expression type) #:transparent)
 
@@ -546,6 +546,13 @@
         (string! (format "exports[~a].runtimeName" name)
                  (hash-ref value 'runtimeName))))
 
+(define (normalize-ambient-value value)
+  (object! "ambientValues[]" value '(name node) '())
+  (define name (string! "ambientValues[].name" (hash-ref value 'name)))
+  (hash 'name name
+        'node (node-ref! (format "ambientValues[~a].node" name)
+                         (hash-ref value 'node))))
+
 (define (normalize-obligation value)
   (object! "obligations[]" value '(id code message source) '())
   (define id (string! "obligations[].id" (hash-ref value 'id)))
@@ -893,10 +900,10 @@
           target-id
           (length arguments)))])))
 
-(define (validate-graph-obligations! exports nodes obligations node-table)
+(define (validate-graph-obligations! roots nodes obligations node-table)
   (define reachable (mutable-set))
   (let visit ([pending
-               (map (lambda (export) (hash-ref export 'node)) exports)])
+               (map (lambda (root) (hash-ref root 'node)) roots)])
     (unless (null? pending)
       (define node-id (car pending))
       (if (set-member? reachable node-id)
@@ -951,8 +958,8 @@
 
 (define (validate-foreign-interface-v1 value #:producer [producer #f])
   (object! "root" value
-           '(kind schemaVersion frontend moduleSpecifier exports nodes
-                  obligations provenance stats)
+           '(kind schemaVersion frontend moduleSpecifier exports ambientValues
+                  nodes obligations provenance stats)
            '(semanticId contentId receipts))
   (unless (equal? (hash-ref value 'kind) FOREIGN-INTERFACE-KIND)
     (schema-error "root.kind" "expected ~v" FOREIGN-INTERFACE-KIND))
@@ -973,6 +980,17 @@
                (strictly-sorted? exports (lambda (export)
                                            (hash-ref export 'name))))
     (schema-error "exports" "exports must be unique and name-sorted"))
+  (define ambient-values
+    (for/list
+        ([value
+          (in-list (array! "ambientValues" (hash-ref value 'ambientValues)))])
+      (normalize-ambient-value value)))
+  (unless
+      (and (unique? ambient-values (lambda (value) (hash-ref value 'name)))
+           (strictly-sorted? ambient-values
+                             (lambda (value) (hash-ref value 'name))))
+    (schema-error "ambientValues"
+                  "ambient values must be unique and name-sorted"))
   (define nodes
     (for/list ([node (in-list (array! "nodes" (hash-ref value 'nodes)))])
       (normalize-node node)))
@@ -997,6 +1015,11 @@
     (unless (hash-has-key? node-table (hash-ref export 'node))
       (schema-error (format "exports[~a].node" (hash-ref export 'name))
                     "unknown node ~a" (hash-ref export 'node))))
+  (for ([ambient-value (in-list ambient-values)])
+    (unless (hash-has-key? node-table (hash-ref ambient-value 'node))
+      (schema-error
+       (format "ambientValues[~a].node" (hash-ref ambient-value 'name))
+       "unknown node ~a" (hash-ref ambient-value 'node))))
   (for ([node (in-list nodes)])
     (for ([reference (in-list (node-references node))])
       (unless (hash-has-key? node-table reference)
@@ -1011,8 +1034,9 @@
     (validate-signature-captures! node node-table)
     (validate-reference-instantiation! node node-table))
   (validate-type-parameter-ownership! nodes)
-  (validate-exported-binders! exports node-table)
-  (validate-graph-obligations! exports nodes obligations node-table)
+  (define roots (append exports ambient-values))
+  (validate-exported-binders! roots node-table)
+  (validate-graph-obligations! roots nodes obligations node-table)
   (define provenance
     (normalize-provenance
      (hash-ref value 'provenance) module-specifier producer))
@@ -1024,6 +1048,7 @@
           'frontend frontend
           'moduleSpecifier module-specifier
           'exports exports
+          'ambientValues ambient-values
           'nodes nodes
           'obligations (map obligation->canonical obligations)))
   (define semantic-id (canonical-value-v1-id semantic-payload))
@@ -1070,7 +1095,7 @@
       (schema-error "root.receipts"
                     "do not match the canonical per-export receipts")))
   (foreign-interface-v1
-   semantic-id content-id frontend module-specifier exports node-table
+   semantic-id content-id frontend module-specifier exports ambient-values node-table
    obligation-table provenance receipts stats))
 
 (define (read-foreign-interface-v1 in)
@@ -1157,6 +1182,7 @@
    'frontend (foreign-interface-v1-frontend interface)
    'moduleSpecifier (foreign-interface-v1-module-specifier interface)
    'exports (foreign-interface-v1-exports interface)
+   'ambientValues (foreign-interface-v1-ambient-values interface)
    'nodes
    (map node->jsexpr
         (sort (hash-values (foreign-interface-v1-nodes interface))
@@ -2310,7 +2336,6 @@
   (define (match-structural-object expected)
     (and
      (type-foreign? actual)
-     (null? (hash-ref expected 'indexes))
      (null? (hash-ref expected 'callSignatures))
      (null? (hash-ref expected 'constructSignatures))
      (let-values ([(actual-interface _actual-node)
@@ -2326,7 +2351,26 @@
        (define actual-node
          (node-at actual-interface (foreign-view-node-id actual-view)))
        (and
-        (string=? (hash-ref actual-node 'kind) "object")
+       (string=? (hash-ref actual-node 'kind) "object")
+        (for/and ([expected-index (in-list (hash-ref expected 'indexes))])
+          (for/or ([actual-index (in-list (hash-ref actual-node 'indexes))])
+            (and
+             (or (hash-ref expected-index 'readonly)
+                 (not (hash-ref actual-index 'readonly)))
+             (recur
+              (hash-ref expected-index 'key)
+              #f
+              (foreign-result-type
+               actual-interface
+               (hash-ref actual-index 'key)
+               (foreign-view-bindings actual-view)))
+             (recur
+              (hash-ref expected-index 'value)
+              #f
+              (foreign-result-type
+               actual-interface
+               (hash-ref actual-index 'value)
+               (foreign-view-bindings actual-view))))))
         (for/and ([expected-property
                    (in-list (hash-ref expected 'properties))])
           (define actual-property
@@ -2350,6 +2394,44 @@
                   actual-interface
                   (hash-ref actual-property 'type)
                   (foreign-view-bindings actual-view))))))))))
+  (define (match-native-vector-object expected)
+    (define properties (hash-ref expected 'properties))
+    (define indexes (hash-ref expected 'indexes))
+    (define length-property
+      (findf
+       (lambda (property)
+         (string=? (hash-ref property 'name) "length"))
+       properties))
+    (and
+     (type-app? actual)
+     (eq? (type-app-ctor actual) 'Vec)
+     (= (length (type-app-args actual)) 1)
+     (pair? indexes)
+     length-property
+     (null? (hash-ref expected 'callSignatures))
+     (null? (hash-ref expected 'constructSignatures))
+     (for/and ([index (in-list indexes)])
+       (define key-node (node-at interface (hash-ref index 'key)))
+       (define expected-value
+         (foreign-result-type
+          interface (hash-ref index 'value) expected-bindings))
+       (and
+        (hash-ref index 'readonly)
+        (string=? (hash-ref key-node 'kind) "primitive")
+        (string=? (hash-ref key-node 'name) "number")
+        (not (type-foreign? expected-value))
+        (type-compatible? (car (type-app-args actual)) expected-value)))
+     (for/and ([property (in-list properties)])
+       (cond
+         [(string=? (hash-ref property 'name) "length")
+          (define expected-length
+            (foreign-result-type
+             interface (hash-ref property 'type) expected-bindings))
+          (and
+           (hash-ref property 'readonly)
+           (not (type-foreign? expected-length))
+           (type-compatible? (type-prim 'Int) expected-length))]
+         [else (hash-ref property 'optional)]))))
   (define (keyword-property-name key)
     (and
      (symbol? key)
@@ -2885,6 +2967,7 @@
          [(object)
           (or
            exact?
+           (match-native-vector-object expected)
            (and
             actual-view
             (let ([normalized
@@ -2942,6 +3025,38 @@
       expected
       (mutable-set))]
     [else #f]))
+
+(define (foreign-ambient-value-types-v1)
+  (define candidates (make-hash))
+  (for ([interface
+         (in-list
+          (sort
+           (hash-values (current-foreign-interfaces))
+           string<?
+           #:key foreign-interface-v1-semantic-id))])
+    (define interface-id (foreign-interface-v1-semantic-id interface))
+    (define nodes (foreign-interface-v1-nodes interface))
+    (for ([binding (in-list (foreign-interface-v1-ambient-values interface))])
+      (define node-id (hash-ref binding 'node))
+      (define node (hash-ref nodes node-id))
+      (hash-update!
+       candidates
+       (string->symbol (hash-ref binding 'name))
+       (lambda (prior)
+         (cons
+          (cons (hash-ref node 'identity #f)
+                (type-foreign interface-id node-id))
+          prior))
+       '())))
+  (for/hasheq ([(name bindings) (in-hash candidates)]
+               #:when
+               (or
+                (null? (cdr bindings))
+                (and
+                 (caar bindings)
+                 (for/and ([binding (in-list (cdr bindings))])
+                   (equal? (car binding) (caar bindings))))))
+    (values name (cdar bindings))))
 
 (define (rest-parameter-contract interface parameter)
   (define node (node-at interface (hash-ref parameter 'type)))
@@ -3478,6 +3593,7 @@
  foreign-interfaces-for-module-imports
  current-foreign-interfaces
  foreign-type-compatible-v1
+ foreign-ambient-value-types-v1
  foreign-call-v1
  foreign-construct-v1
  foreign-member-type-v1

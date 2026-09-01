@@ -36,6 +36,7 @@
      'schemaVersion FOREIGN-INTERFACE-SCHEMA-VERSION
      'frontend "typescript"
      'moduleSpecifier MODULE-SPECIFIER
+     'ambientValues '()
      'exports
      (list
       (hash 'name "Envelope"
