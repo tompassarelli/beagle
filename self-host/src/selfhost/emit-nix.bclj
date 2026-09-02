@@ -1026,11 +1026,9 @@
           (if (absent? constraint)
             (str "(("
               target-name
-              ": builtins.deepSeq "
-              target-name
-              " ("
+              ": "
               rest-str
-              ")) "
+              ") "
               (paren-wrap value-str v)
               ")")
             (let [raw-name (raw-binding-name index)]
@@ -2763,6 +2761,18 @@
       (and (str/includes? emitted
              "bgl____constraint__0 bgl____binding__0 then ((x:")
         (str/includes? emitted ")) (next-value null))"))))
+  (expect! "unconstrained let preserves Nix laziness"
+    (= (emit-expr!
+         {"node" "let"
+          "bindings" [{"name" "x"
+                        "ann" {"kind" "prim" "name" "Int"}
+                        "constraint" nil
+                        "value" {"node" "call"
+                                 "fn" {"node" "ref" "name" "next-value"}
+                                 "args" []}}]
+          "body" [{"node" "ref" "name" "x"}]}
+         0)
+      "((x: x) (next-value null))"))
   (expect! "for binding owns its constraint"
     (str/includes?
       (emit-for!

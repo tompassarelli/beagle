@@ -509,7 +509,7 @@
   (str "let\n" ind "inherit (" (emit-expr* (get v "ns-expr") (+ depth 1)) ") " (str/join " " (get v "names")) ";\n" (indent depth) "in\n" (indent depth) rest-str))
   :else (let [target-name (emit-binding-target! n)
    value-str (emit-expr* v (+ depth 1))]
-  (if (absent? constraint) (str "((" target-name ": builtins.deepSeq " target-name " (" rest-str ")) " (paren-wrap value-str v) ")") (let [raw-name (raw-binding-name index)]
+  (if (absent? constraint) (str "((" target-name ": " rest-str ") " (paren-wrap value-str v) ")") (let [raw-name (raw-binding-name index)]
   (str "((let " (constraint-name index) " = " (emit-expr* constraint (+ depth 1)) "; in " raw-name ": builtins.deepSeq " raw-name " (if " (constraint-name index) " " raw-name " then ((" target-name ": builtins.deepSeq " target-name " (" rest-str ")) " raw-name ")" ") else " (binding-constraint-failure n) ")" ") " (paren-wrap value-str v) ")"))))))))
 
 (defn ^String emit-let-binding-chain! [bindings ^String body-str depth]
@@ -1233,6 +1233,7 @@
   result)))
   (expect! "constrained let shares the incoming value" (let [emitted (emit-expr! {"node" "let" "bindings" [{"name" "x" "ann" {"kind" "prim" "name" "Int"} "constraint" {"node" "ref" "name" "positive?"} "value" {"node" "call" "fn" {"node" "ref" "name" "next-value"} "args" []}}] "body" [{"node" "ref" "name" "x"}]} 0)]
   (and (str/includes? emitted "bgl____constraint__0 bgl____binding__0 then ((x:") (str/includes? emitted ")) (next-value null))"))))
+  (expect! "unconstrained let preserves Nix laziness" (= (emit-expr! {"node" "let" "bindings" [{"name" "x" "ann" {"kind" "prim" "name" "Int"} "constraint" nil "value" {"node" "call" "fn" {"node" "ref" "name" "next-value"} "args" []}}] "body" [{"node" "ref" "name" "x"}]} 0) "((x: x) (next-value null))"))
   (expect! "for binding owns its constraint" (str/includes? (emit-for! {"clauses" [{"type" "binding" "name" "x" "ann" {"kind" "prim" "name" "Int"} "constraint" {"node" "ref" "name" "positive?"} "expr" {"node" "ref" "name" "xs"}}] "body" [{"node" "ref" "name" "x"}]} 0) "if bgl____constraint__0 bgl____binding__0"))
   (expect! "loop initial and recur routes each validate once" (let [emitted (emit-loop! {"bindings" [{"name" "x" "ann" {"kind" "prim" "name" "Int"} "constraint" {"node" "ref" "name" "positive?"} "value" {"node" "literal" "kind" "number" "value" 1}}] "body" [{"node" "recur" "args" [{"node" "literal" "kind" "number" "value" 2}]}]} 0)]
   (and (str/includes? emitted "bgl____loop = bgl____binding__0:") (str/includes? emitted "in ((let bgl____constraint__0 = positive_p; in bgl____binding__0:"))))
