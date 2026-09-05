@@ -1,20 +1,23 @@
 ---
 name: store-modeling-reference
 description: >-
-  Detailed Beagle Store RPC commands, recursive Term and occurrence semantics,
-  paging limits, query relations, generated-source authority, and executable
-  examples. Load when store-modeling-distilled routes here or the user
-  explicitly requests those details.
+  Full Store notes for recursive terms, occurrence history, snapshots/paging, and authoritative source.
 ---
 
-# Beagle Store modeling reference
+# Store applications: full notes
 
-Read `store:README.md`, `store:docs/architecture.md`,
-`store:docs/query-reference.md`, `store:docs/ontology.md`, and
-`store:docs/guarantees.md`. Use `store:docs/coming-from-datomic.md` when a design
-resembles attributes, entity types, or schema migrations. Inspect typed
-definitions under `store:src/store/` and the official Bun client under
-`store:clients/bun/`.
+## Read by question
+
+Use `beagle:store/README.md` for entrypoints,
+`beagle:store/docs/architecture.md` for boundaries,
+`beagle:store/docs/query-reference.md` for query contracts, and
+`beagle:store/docs/guarantees.md` for exact promises.
+Use the ontology and coming-from-Datomic notes when designing facts or mapping
+attribute/entity assumptions. Do not load all manuals for one operation.
+
+Typed definitions live under `beagle:store/src/store/`; the official client
+under `beagle:store/clients/bun/`. The paths below use `store:` to denote the
+embedded Store source under `beagle:store/`.
 
 ## Data boundary and terms
 
@@ -83,3 +86,15 @@ Executable examples live in `store:tests/triple_kernel_test.clj`,
 `store:tests/native_rpc_server_test.clj`. Client examples are in
 `store:clients/bun/README.md`; the wider source loop is in
 `beagle:docs/authoring-loops.md`.
+
+
+## Why history and content differ
+
+Two equal assertions are two occurrences but one structural proposition.
+Retracting one occurrence need not remove the proposition from a set query.
+This distinction matters for multiplicity, audit/history, and idempotency;
+choose the relation that answers the requested question.
+
+A cursor without its snapshot can mix changing worlds. Preserve the view and
+operation together across pages. Native and retained JVM behavior are separate
+contracts; a shared operation name does not prove semantic parity.

@@ -1,39 +1,32 @@
 ---
 name: code-as-facts-distilled
 description: >-
-  Use for CODE AS A FACT GRAPH, two faculties. (1) EDITING a Beagle source file
-  whose UPSTREAM is the fact GRAPH — one listed in the graph-upstream registry
-  or whose leading comment block carries `;; @upstream:graph`. Its text is a
-  regenerable view of the Beagle Store fact graph: author by GRAPH EDIT via the
-  mcp__store__* tools, never Edit/Write/MultiEdit (a PreToolUse guard refuses
-  text edits). (2) ASKING relational questions about a Beagle tree —
-  scope-correct "who calls THIS x", transitive blast radius, the real call
-  graph — as Datalog over the projected AST instead of grep. NOT for editing
-  ordinary text-upstream Beagle files, non-Beagle repos, or a single-file /
-  plain-string lookup (grep wins there).
+  Edit explicitly graph-upstream Beagle files or answer relational code questions from projected ASTs. Use normal text tools for ordinary source and literal lookup.
 ---
 
 # Code as facts
 
-First decide the faculty: graph-native editing or relational code analysis.
+Choose graph-native editing or relational analysis; they use different
+projections and do not imply each other.
 
-For editing, graph-upstream means its absolute path is in
-`$GRAPH_UPSTREAM_REGISTRY` (default `~/.config/store/graph-upstream-files`) or
-its leading comment block has `;; @upstream:graph`. Otherwise edit normally.
+## Editing
 
-Never text-edit graph-upstream source. Use `mcp__store__*` verbs, which apply
-structured EDN to lossless AST facts and commit only after regeneration and
-recompilation. If unavailable, stop and report the missing channel. De-adoption
-is an explicit decision removing both applicable markers, not an escape hatch.
+A file is graph-upstream when its absolute path is registered in
+`$GRAPH_UPSTREAM_REGISTRY` (default `~/.config/store/graph-upstream-files`)
+or its leading comment block carries `;; @upstream:graph`.
 
-For relational analysis, use projected ASTs and named reads or Datalog for
-identity, references, and transitive impact. Use text/source for literals,
-bodies, comments, and layout; skip the graph for a plain lookup.
+Use the session's graph-authoring `mcp__store__*` verbs, never text edits.
+They modify lossless AST facts and commit after regeneration/recompilation.
+If the channel is missing, stop that edit. De-adoption needs an explicit
+decision removing both applicable markers; it is not a workaround.
 
-Keep the public Store MCP data catalog closed to `tell`, `retract`, `show`,
-`ask`, and `validate`; program inspection and graph authoring remain session
-tools. Query projection is lossy analysis data; only the lossless round-trip
-projection may carry graph-native edits.
+## Analysis
 
-For verb tables, projection commands, named read sequences, examples, limits,
-and entry points, resolve and read `agents path code-as-facts-reference`.
+Use named reads or Datalog for identity, resolved references, and transitive
+impact. Use source tools for literals, bodies, comments, and layout.
+The compact query projection is lossy and cannot authorize graph edits.
+
+Keep the public Store data MCP catalog to `tell`, `retract`, `show`, `ask`,
+and `validate`; program inspection/authoring are separate session tools.
+For verbs, named reads, round trips, and limits, resolve
+`agents path code-as-facts-reference`.

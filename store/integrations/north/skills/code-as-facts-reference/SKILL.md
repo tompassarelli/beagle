@@ -1,16 +1,23 @@
 ---
 name: code-as-facts-reference
 description: >-
-  Detailed graph-edit verbs, lossless projection commands, relational program
-  reads, Datalog entry points, and scope limits for code-as-facts. Load when
-  code-as-facts-distilled routes here or the user explicitly requests details.
+  Full notes on graph-native authoring, lossless projection, named relational reads, and scope limits.
 ---
 
-# Code as facts reference
+# Code as facts: full notes
 
-"Facts" uses the view-level sense from `store:docs/ontology.md`: selected live
-triples constitute the program. The kernel stores recursive Triples and
-assertion occurrences; it has no stored `Fact` type.
+## Two projections, two uses
+
+“Facts” here means the selected live triples constituting a program view.
+The kernel stores recursive Triples and assertion occurrences, not a separate
+stored Fact type. A compact query projection can omit details useful only to
+rendering; an editing projection cannot. Never feed a lossy analysis graph
+back into source generation.
+
+The `store:` paths below refer to the embedded `beagle:store/` source.
+Repository-qualified paths in command sketches are locators: resolve them to
+real checkout paths before execution. Read the Beagle pinned-Racket procedure
+before any direct Racket command; do not select an ambient runtime.
 
 ## Graph-edit verbs
 
@@ -40,9 +47,9 @@ An edit payload is an EDN datum such as
 Grounding commands:
 
 ```sh
-racket beagle:beagle-lib/private/facts-roundtrip.rkt --emit-edn file.bclj > a.edn
+"$RACKET" beagle:beagle-lib/private/facts-roundtrip.rkt --emit-edn file.bclj > a.edn
 bb -cp store:out store:resolve.clj set-body name scope body.edn a.edn
-racket beagle:beagle-lib/private/facts-roundtrip.rkt --render "$RESOLVE_OUT/resolved-file.edn"
+"$RACKET" beagle:beagle-lib/private/facts-roundtrip.rkt --render "$RESOLVE_OUT/resolved-file.edn"
 ```
 
 The in-band marker is regenerated immediately after the
@@ -77,3 +84,16 @@ types and parameters; `facts-roundtrip.rkt --emit-edn` is the lossless truth
 projection. `store:codegraph/` is opt-in and should be opened only for its
 relational reports. The broader loop vocabulary is in
 `beagle:docs/authoring-loops.md`.
+
+
+## Adoption and failure boundary
+
+Availability of graph operations is capability, not per-file adoption.
+Registry membership or a genuine leading marker selects graph-native editing.
+A quoted marker in a body is not adoption. Removing adoption to evade a failing
+channel changes source authority and requires an explicit decision.
+
+If a verb is unavailable or candidate compilation fails, preserve the original
+graph/source and report the missing boundary. A text splice or lossy projection
+does not repair it. Relational answers should cite the pinned logical version
+and resolved semantic identity, not merely a matching name.

@@ -1,12 +1,21 @@
 ---
 name: fact-modeling-reference
 description: >-
-  Detailed Fact Normal Form examples, identity cases, nesting consequences,
-  typed admission internals, and the seven-question review gate. Load when
-  fact-modeling-distilled routes here or the user explicitly requests details.
+  Full Fact Normal Form rationale, canonical/counterexamples, identity choices, and admission review.
 ---
 
-# Fact modeling reference
+# Fact modeling: full notes
+
+## Model and rationale
+
+Fact-oriented profiles make domain meaning queryable as relationships and
+membership. Encoding classification only in a keyword prefix makes consumers
+parse spelling instead of querying the ontology. Opaque field rows replace a
+direct proposition with another schema and identity problem.
+
+This rule is profile-scoped. The recursive kernel permits neutral Terms and
+nested Triples; nesting does not assert the inner proposition. Keep the closed
+kernel/RPC vocabulary outside application-ontology lint.
 
 ## Canonical contact example
 
@@ -78,3 +87,16 @@ The current semantic contract lives in `store:docs/ontology.md` and
 5. Does each new Atom kind add intrinsic scalar semantics?
 6. Does each resource have continuity or lifecycle beyond its representation?
 7. Are Atom, proposition, and assertion-occurrence identity still separate?
+
+
+## Alternatives and open modeling choices
+
+Use a scalar Atom when representation equality is the intended identity.
+A resource is justified when something remains the same through representation
+changes, such as an address record with lifecycle. Neither is universally
+superior: choose from the domain's continuity requirement.
+
+The review questions are diagnostic, not an invitation to invent extra Atom
+kinds or resources. If two models satisfy the contract, favor the one exposing
+the needed relationships with fewer independent authorities. An unresolved
+domain identity decision belongs to the domain owner, not a relaxed validator.

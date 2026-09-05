@@ -1,28 +1,19 @@
 ---
 name: beagle-authoring-reference
 description: >-
-  Detailed Beagle authoring commands, profile and syntax notes, loop diagnosis,
-  and pinned Racket procedure. Load when beagle-authoring-distilled routes to
-  this reference or when the user explicitly requests those details.
+  Full Beagle notes for compiler queries, semantic leverage, foreign importers, and pinned bootstrap.
 ---
 
-# Beagle authoring reference
+# Beagle authoring: full notes
 
-## Checkout grounding
+## Authority and query selection
 
-Use these live discovery commands:
-
-```text
-beagle help
-beagle langs --json
-beagle langs --view extensions
-```
-
-Read a file's `#lang` and extension when its profile is unclear. Re-ground after
-a compiler or surface change. For compiler work, consult the relevant parser,
-type, standard-library, or target source only when its question arises.
-
-## Compiler command map
+The compiler answers versioned syntax, profile, type, and target questions.
+Use `beagle help`, `beagle langs --json`, and
+`beagle langs --view extensions`; inspect a file's header and extension when
+its profile is unclear. Re-ground after a compiler/surface change, not before
+every keystroke. Consult parser, type, stdlib, or target source for a named
+unresolved question.
 
 | Need | Command |
 |---|---|
@@ -38,18 +29,52 @@ Concrete degradation includes a silent expected PostToolUse result, a compiler
 command unable to use the loop, or an explicit degraded-canary report. A
 successful relevant compiler command or functional canary restores authority.
 
-## Current syntax and profile notes
+## Semantic compression, not code golf
 
-- `.bgl` with bare `#lang beagle` selects Native Core; hosted source uses an
-  explicit profile such as `.bclj` with `#lang beagle/clj`.
-- Use typed binding/type pairs and explicit return types. Query the compiler for
-  the current grammar rather than copying an inventory here.
-- `(declare-extern [name ...] Type)` declares one shared type once. Formatter
-  output may lay out long batches as pairwise name rows.
-- Graph reasoning is optional read-only research. Legacy graph-authority
-  markers do not make ordinary source uneditable.
+Compare the existing direct implementation with the proposed abstraction:
+repeated cases, parallel authorities, next-change sites, and target variation.
+A macro earns its complexity only when it removes structural repetition while
+retaining typed, hygienic, deterministic, source-located, inspectable expansion.
+Explicit source is preferable when no abstraction improves that comparison.
 
-## Pinned Racket procedure
+A smaller text diff is not necessarily a simpler semantic model. Conversely,
+one typed authority serving several backends can reduce maintenance even if
+the declaration is longer. Keep effects visible and generated names meaningful.
+
+## Foreign input and migrations
+
+JVM/Clojure values must be decoded into typed records, unions, collections,
+and options before domain use. Repeated migrations use parser/compiler/schema
+conversion; AI handles only identified residual ambiguity.
+
+TypeScript declarations and schemas are versioned foreign inputs. Import their
+representable unions, optionals, nullability, enums, records, and generics, then
+regenerate when the pin changes. Do not maintain parallel host/Beagle shapes.
+
+```text
+bin/beagle ts-import SOURCE.ts --namespace NAME [--project-root DIR]
+bin/beagle ts-import --help
+bin/beagle-build examples/clojure-to-beagle-vslice/converter.bclj converter.clj
+clojure -M converter.clj SOURCE.clj > OUTPUT.bclj
+```
+
+Run these from the selected Beagle/consumer checkout as the command requires;
+output paths must be owned. TypeScript also supports repeated
+`--module-map SPECIFIER=NAMESPACE` and `--json`. Emitted host files remain
+projections. A required missing representation is compiler/importer repair,
+not permission to widen the domain to Any.
+
+## Surface notes and graph authority
+
+Typed binding/type pairs and explicit returns express checked intent.
+`(declare-extern [name ...] Type)` declares a shared type once; formatting may
+use pairwise rows. These are illustrations, not a frozen grammar.
+
+Relational graph reads do not make ordinary source graph-owned. Explicit
+graph-upstream adoption does: follow code-as-facts and the current guard.
+Do not treat a genuine leading adoption marker as a harmless legacy comment.
+
+## Pinned Racket bootstrap
 
 Pinned Racket is the exceptional cold route. Before using it, read
 `beagle:integrations/north/docs/racket-beagle-bytecode.md` completely. Source
