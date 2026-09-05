@@ -354,6 +354,10 @@
    jst-in?                  'js
    jst-typeof?              'js
    jst-export?              'js
+   jst-async-generator?     'js
+   jst-yield?               'js
+   jst-for-await?           'js
+   jst-generator-return?    'js
    nix-inherit?             'nix
    nix-inherit-from?        'nix
    nix-with?                'nix
@@ -386,6 +390,10 @@
    jst-in?                  "js/in?"
    jst-typeof?              "js/typeof"
    jst-export?              "js/export"
+   jst-async-generator?     "js/async-generator"
+   jst-yield?               "js/yield"
+   jst-for-await?           "js/for-await"
+   jst-generator-return?    "js/generator-return"
    nix-inherit?             "inherit"
    nix-inherit-from?        "inherit-from"
    nix-with?                "with"
@@ -1215,6 +1223,8 @@
                    [current-error-definitions (hasheq)]
                    [current-raising-functions (hasheq)]
                    [current-binder-type-table binder-type-tbl]
+                   [current-generator-definition-yield-types
+                    (program-generator-definition-yield-types prog)]
                    [current-nixos-schema nix-schema])
       (reject-authored-refinements! prog)
       (call-with-fresh-type-metas
@@ -3716,7 +3726,9 @@
    #:src (and (pair? (inference-clause-body clause))
               (src-for (last (inference-clause-body clause))))))
 
-(define (constrain-inference-clause! clause env signature)
+(define (constrain-inference-clause! clause env signature
+                                     #:generator-yield-type
+                                     [generator-yield-type #f])
   (define rest-p (inference-clause-rest-param clause))
   (define all-params
     (if rest-p
@@ -3730,8 +3742,9 @@
                 '())))
   (define body-env (extend-with-params env all-params effective-param-types))
   (define actual
-    (last-expr-type
-     (inference-clause-body clause) body-env (type-fn-ret signature)))
+    (parameterize ([current-generator-yield-type generator-yield-type])
+      (last-expr-type
+       (inference-clause-body clause) body-env (type-fn-ret signature))))
   ;; A concrete mismatch remains the ordinary return-type diagnostic in the
   ;; normal check pass. The solver only needs to run when a return constraint
   ;; can actually solve a parameter metavariable.
@@ -3790,7 +3803,12 @@
               (definition-name form) (length clauses) (length alternatives)))
      (for ([clause (in-list clauses)]
            [alternative (in-list alternatives)])
-       (constrain-inference-clause! clause env alternative))]))
+       (constrain-inference-clause!
+        clause env alternative
+        #:generator-yield-type
+        (hash-ref (current-generator-definition-yield-types)
+                  (definition-name form)
+                  #f)))]))
 
 (define (finalized-definition-type type)
   (define final (generalize-type type))
@@ -4679,6 +4697,59 @@
        (= 1 (length (type-app-args type)))
        (car (type-app-args type))))
 
+(define (async-iterable-element-type type)
+  (and (type-app? type)
+       (eq? (type-app-ctor type) 'AsyncIterable)
+       (= 1 (length (type-app-args type)))
+       (car (type-app-args type))))
+
+(define current-generator-yield-type (make-parameter #f))
+(define current-generator-definition-yield-types (make-parameter (hasheq)))
+
+(define (async-generator-form-in value)
+  (cond
+    [(jst-async-generator? value) value]
+    [(jst-export? value) (async-generator-form-in (jst-export-form value))]
+    [(jst-export-default? value)
+     (async-generator-form-in (jst-export-default-form value))]
+    [(with-meta? value) (async-generator-form-in (with-meta-expr value))]
+    [else #f]))
+
+(define (program-generator-definition-yield-types prog)
+  (for/fold ([out (hasheq)])
+            ([raw-form (in-list (program-forms prog))])
+    (define generator (async-generator-form-in raw-form))
+    (define callable (and generator (jst-async-generator-form generator)))
+    (define element
+      (and (defn-form? callable)
+           (async-iterable-element-type (defn-form-return-type callable))))
+    (if element
+        (hash-set out (defn-form-name callable) element)
+        out)))
+
+(define (check-js-async-generator-contract! form)
+  (define callable (jst-async-generator-form form))
+  (unless (defn-form? callable)
+    (raise-diag
+     'bad-form
+     "js/async-generator may wrap only a single-arity defn"
+     (hasheq 'form "js/async-generator")
+     #:src (src-for form)))
+  (define element
+    (and (defn-form? callable)
+         (async-iterable-element-type (defn-form-return-type callable))))
+  (unless element
+    (raise-diag
+     'return-type
+     (format "js/async-generator defn ~a must declare (AsyncIterable T), got ~a"
+             (if (defn-form? callable) (defn-form-name callable) 'unknown)
+             (if (defn-form? callable)
+                 (type->string (defn-form-return-type callable))
+                 "unknown"))
+     (hasheq 'required-return "(AsyncIterable T)")
+     #:src (src-for form)))
+  element)
+
 (define (check-authored-async-return! name return-type form)
   (unless (promise-payload-type return-type)
     (raise-diag
@@ -4894,6 +4965,17 @@
     [(? async-callable?)
      (check-authored-async-contract! form)
      (check-form (async-callable-form form) env)]
+
+    [(? jst-async-generator?)
+     (define callable (jst-async-generator-form form))
+     (define element (check-js-async-generator-contract! form))
+     (when (and element (defn-form? callable))
+       ;; The authored return type describes the generator object. Its body
+       ;; terminates with generator-return/nil, not with that object value.
+       (parameterize ([current-generator-yield-type element])
+         (check-form
+          (struct-copy defn-form callable [return-type (type-prim 'Nil)])
+          env)))]
 
     [(? with-meta?) (check-form (with-meta-expr form) env)]
 
@@ -6003,9 +6085,9 @@
 ;; project per-node types. store-type! applies the interned-leaf exclusion and
 ;; is a no-op when no table is bound (the normal check path), so this adds
 ;; nothing to ordinary type-checking. The real cond body is infer-expr*.
-(define current-foreign-map-pair-types (make-parameter #f))
+(define current-foreign-expression-types (make-parameter #f))
 
-(define (foreign-expression-evidence expression pair-types)
+(define (foreign-expression-evidence expression expression-types)
   (cond
     [(map-form? expression)
      (map-form
@@ -6014,21 +6096,29 @@
         (cons
          (car pair)
          (foreign-expression-evidence-v1
-          (foreign-expression-evidence value pair-types)
-          (hash-ref pair-types pair #f)))))]
+          (foreign-expression-evidence value expression-types)
+          (hash-ref expression-types value #f)))))]
+    [(vec-form? expression)
+     (vec-form
+      (for/list ([item (in-list (vec-form-items expression))])
+        (foreign-expression-evidence-v1
+         (foreign-expression-evidence item expression-types)
+         (hash-ref expression-types item #f))))]
     [else expression]))
 
 (define (infer-foreign-arguments arguments env)
   (for/lists (evidence types) ([argument (in-list arguments)])
-    (define pair-types (make-hasheq))
+    (define expression-types (make-hasheq))
     (define type
-      (parameterize ([current-foreign-map-pair-types pair-types])
+      (parameterize ([current-foreign-expression-types expression-types])
         (infer-expr argument env)))
-    (values (foreign-expression-evidence argument pair-types) type)))
+    (values (foreign-expression-evidence argument expression-types) type)))
 
 (define (infer-expr e env)
   (with-foreign-diagnostic e
     (define t (infer-expr* e env))
+    (when (current-foreign-expression-types)
+      (hash-set! (current-foreign-expression-types) e t))
     (store-type! e t)
     t))
 
@@ -6174,10 +6264,7 @@
          (define key-types (map (λ (p) (infer-expr (car p) env)) pairs))
          (define val-types
            (for/list ([pair (in-list pairs)])
-             (define value-type (infer-expr (cdr pair) env))
-             (when (current-foreign-map-pair-types)
-               (hash-set! (current-foreign-map-pair-types) pair value-type))
-             value-type))
+             (infer-expr (cdr pair) env)))
          (define first-k (car key-types))
          (define first-v (car val-types))
          (define kt (if (and (not (any-type? first-k))
@@ -6427,6 +6514,58 @@
         (type-mismatch-details (type-app 'Promise (list ANY)) inner-type)
         #:src (src-for e)))
      payload]
+    [(jst-yield? e)
+     (define expected (current-generator-yield-type))
+     (unless expected
+       (raise-diag
+        'target-form
+        "js/yield is only valid inside js/async-generator"
+        (hasheq 'form "js/yield" 'required-owner "js/async-generator")
+        #:src (src-for e)))
+     (define actual (infer-expr (jst-yield-expr e) env))
+     (when (and expected (not (type-compatible? actual expected)))
+       (raise-diag
+        'type-mismatch
+        (format "js/yield: expected ~a, got ~a"
+                (type->string expected) (type->string actual))
+        (type-mismatch-details expected actual)
+        #:src (src-for (jst-yield-expr e))))
+     (type-prim 'Nil)]
+    [(jst-generator-return? e)
+     (unless (current-generator-yield-type)
+       (raise-diag
+        'target-form
+        "js/generator-return is only valid inside js/async-generator"
+        (hasheq 'form "js/generator-return"
+                'required-owner "js/async-generator")
+        #:src (src-for e)))
+     (type-prim 'Nil)]
+    [(jst-for-await? e)
+     (define binding (jst-for-await-binding e))
+     (define body-env (mut-copy env))
+     (define collection-type (infer-expr (for-binding-expr binding) body-env))
+     (define inferred-element (async-iterable-element-type collection-type))
+     (unless inferred-element
+       (raise-diag
+        'type-mismatch
+        (format "js/for-await: expected (AsyncIterable T), got ~a"
+                (type->string collection-type))
+        (hasheq 'expected "(AsyncIterable T)"
+                'actual (type->string collection-type))
+        #:src (src-for (for-binding-expr binding))))
+     (define declared (for-binding-type binding))
+     (when (and inferred-element declared
+                (not (type-compatible? inferred-element declared)))
+       (raise-diag
+        'type-mismatch
+        (format "js/for-await binding: expected ~a, got ~a"
+                (type->string declared) (type->string inferred-element))
+        (type-mismatch-details declared inferred-element)
+        #:src (src-for binding)))
+     (binder-env-set! body-env binding (for-binding-name binding)
+                      (or declared inferred-element ANY))
+     (last-expr-type (jst-for-await-body e) body-env)
+     (type-prim 'Nil)]
     ;; --- Typed JS target forms (js/*) -----------------------------------------
     [(jst-import-meta? e) (type-prim 'JsImportMeta)]
     [(jst-selector? e) ANY]
@@ -6790,10 +6929,11 @@
           declared-order))
         (for ([u (in-list (with-form-updates e))])
           (define kw (with-update-field-kw u))
-          (define val-type (infer-expr (with-update-value u) env))
           (cond
             [(hash-has-key? field-map kw)
              (define expected (hash-ref field-map kw))
+             (define val-type
+               (infer-expr-with-expected (with-update-value u) env expected))
              (unless (type-compatible? val-type expected)
                (define alt-fields
                  (for/list ([(f t) (in-hash field-map)]
@@ -7000,7 +7140,7 @@
           inferred-call-type]
          [else raw-type]))
      (cond
-       [(type-foreign? fn-type)
+       [(foreign-call-contract-v1? fn-type)
         (define arguments (call-form-args e))
         (define-values (argument-evidence argument-types)
           (infer-foreign-arguments arguments env))
@@ -7085,21 +7225,23 @@
     [else #f]))
 
 (define (jst-native-member-contract receiver-type selector)
-  (define head (jst-receiver-type-head receiver-type))
-  (define entry (and head (hash-ref JS-MEMBER-CONTRACTS head #f)))
-  (and entry
-       (let* ([member-name (string->symbol selector)]
-              [raw-contract
-               (hash-ref (hash-ref entry 'members) member-name #f)])
-         (and raw-contract
-              (let ([bindings (make-hasheq)]
-                    [args (if (type-app? receiver-type)
-                              (type-app-args receiver-type)
-                              '())])
-                (for ([var (in-list (hash-ref entry 'vars))]
-                      [arg (in-list args)])
-                  (hash-set! bindings var arg))
-                (apply-type-bindings raw-contract bindings))))))
+  (or
+   (foreign-native-member-type-v1 receiver-type selector)
+   (let* ([head (jst-receiver-type-head receiver-type)]
+          [entry (and head (hash-ref JS-MEMBER-CONTRACTS head #f))])
+     (and entry
+          (let* ([member-name (string->symbol selector)]
+                 [raw-contract
+                  (hash-ref (hash-ref entry 'members) member-name #f)])
+            (and raw-contract
+                 (let ([bindings (make-hasheq)]
+                       [args (if (type-app? receiver-type)
+                                 (type-app-args receiver-type)
+                                 '())])
+                   (for ([var (in-list (hash-ref entry 'vars))]
+                         [arg (in-list args)])
+                     (hash-set! bindings var arg))
+                   (apply-type-bindings raw-contract bindings))))))))
 
 (define (jst-record-member-contract receiver-type selector)
   (record-field-type-for
@@ -7168,7 +7310,7 @@
 
 (define (infer-jst-call-contract raw-contract selector receiver-type args env e)
   (cond
-    [(type-foreign? raw-contract)
+    [(foreign-call-contract-v1? raw-contract)
      (define-values (argument-evidence argument-types)
        (infer-foreign-arguments args env))
      (foreign-call-v1 raw-contract argument-evidence argument-types)]
@@ -7775,7 +7917,7 @@
     (parameterize
         ([current-order-killing-consumer?
           (order-killing-collection-arg? fn-name i arg)])
-      (infer-expr arg env)))
+      (infer-expr-with-expected arg env expected-type)))
   (let ([ev (enum-member-violation expected-type arg)])
     (when ev
       (raise-diag 'type-mismatch
@@ -7913,6 +8055,8 @@
                    [current-enum-types ENUM-TYPES]
                    [current-parametric-members
                     (list->seteq (hash-keys PARAMETRIC-MEMBER-UNION))]
+                   [current-generator-definition-yield-types
+                    (program-generator-definition-yield-types prog)]
                    [current-nixos-schema nix-schema])
       (call-with-fresh-type-metas
        (lambda ()

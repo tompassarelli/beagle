@@ -31,6 +31,8 @@ runtime_root="$cache_base/$runtime_key"
 valid_runtime() {
   local candidate="$1"
   [[ -f "$candidate/node_modules/typescript/lib/typescript.js" ]] &&
+    [[ -f "$candidate/node_modules/@types/bun/index.d.ts" ]] &&
+    [[ -f "$candidate/node_modules/bun-types/index.d.ts" ]] &&
     cmp -s "$manifest" "$candidate/package.json" &&
     cmp -s "$lock" "$candidate/bun.lock"
 }

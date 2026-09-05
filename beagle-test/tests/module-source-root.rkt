@@ -184,7 +184,7 @@
        (list (module-source-input "app/entry.bjs" entry-path))
        '()
        #:foreign-module-resolver
-       (lambda (identity physical-importer)
+       (lambda (identity physical-importer _ambient-names)
          (set! resolutions
                (cons (cons identity physical-importer) resolutions))
          foreign-source)))
@@ -199,7 +199,7 @@
       (module-source-closure-foreign-module-resolutions closure)))
     (check-eq?
      (module-source-closure-resolve-foreign-module
-      closure exact-identity "app/entry.bjs")
+      closure exact-identity "app/entry.bjs" '())
      foreign-source)
     (define checked (check-module-source-closure closure #:emit? #f))
     (check-true
@@ -241,7 +241,7 @@
         (list (module-source-input "app/entry.bjs" entry-path))
         '()
         #:foreign-module-resolver
-        (lambda (identity physical-importer)
+        (lambda (identity physical-importer _ambient-names)
           (set! resolutions
                 (cons (cons identity physical-importer) resolutions))
           #f))))

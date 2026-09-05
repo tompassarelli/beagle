@@ -44,6 +44,12 @@
 
 (defn getenv [name] (System/getenv name))
 
+(defn foreign-interface-v1 [& _]
+  (throw
+    (ex-info
+      "ForeignInterfaceV1 ingestion is available only in the Bun-hosted self-host compiler"
+      {})))
+
 
 ;; --- JSON (string keys preserved — AST/datum values are string-keyed) ----------
 

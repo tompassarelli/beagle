@@ -585,7 +585,7 @@
   parsed))))
 
 (defn parse-scalar-predicate! [predicate]
-  (if (and (vector? predicate) (not (bracketed? predicate)) (= (count predicate) 2) (string? (nth predicate 0)) (contains? SCALAR-PREDICATE-OPS (nth predicate 0)) (number? (nth predicate 1))) {"op" (nth predicate 0) "value" (nth predicate 1)} (do
+  (if (and (vector? predicate) (not (bracketed? predicate)) (= (count predicate) 2) (string? (nth predicate 0)) (contains? SCALAR-PREDICATE-OPS (nth predicate 0)) (syntax/reader-number-datum? (nth predicate 1))) {"op" (nth predicate 0) "value" (syntax/reader-number-value (nth predicate 1))} (do
   (err! (str "defscalar :where predicate must be one complete (op numeric-literal) form, got: " (binding-datum->src predicate)))
   {"op" "=" "value" 0})))
 
@@ -1169,6 +1169,7 @@
 
 (defn datum->json [d]
   (cond
+  (syntax/reader-float-datum? d) (syntax/reader-number-value d)
   (and (vector? d) (= (count d) 2) (= (nth d 0) "#%string")) (nth d 1)
   (and (string? d) (keyword-sym? d)) {"type" "keyword" "value" (subs d 1)}
   (string? d) {"type" "symbol" "value" d}
@@ -1512,7 +1513,7 @@
   (= p "_") (make-pat-wildcard)
   (= p "nil") (make-pat-literal nil)
   (and (string? p) (keyword-sym? p)) (make-pat-literal (datum->json p))
-  (number? p) (make-pat-literal p)
+  (syntax/reader-number-datum? p) (make-pat-literal (syntax/reader-number-value p))
   (boolean? p) (make-pat-literal p)
   (string-datum? p) (make-pat-literal (extract-string p))
   (and (vector? p) (> (count p) 0) (= (nth p 0) MAP-TAG)) (parse-map-pattern! (subvec p 1))
@@ -2090,6 +2091,7 @@
   (cond
   (nil? d) NIL-LITERAL
   (boolean? d) (make-ref! (if d "true" "false"))
+  (syntax/reader-float-datum? d) (make-literal "float" (syntax/reader-number-value d))
   (and (number? d) (int? d)) (make-literal "number" d)
   (number? d) (make-literal "float" d)
   (and (vector? d) (= (count d) 2) (= (nth d 0) CHAR-TAG)) (make-literal "char" (nth d 1))

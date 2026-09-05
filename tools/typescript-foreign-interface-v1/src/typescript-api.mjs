@@ -453,9 +453,123 @@ export function createSourceContext({ projectRoot, sourceFile }) {
   };
 }
 
-export function createContext({ projectRoot, containingFile, moduleSpecifier, conditions }) {
+const hasExportModifier = (statement) => statement.modifiers?.some(
+  (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
+) ?? false;
+
+const declarationExportName = (statement) => {
+  if (!hasExportModifier(statement)) return null;
+  if (
+    ts.isClassDeclaration(statement)
+    || ts.isEnumDeclaration(statement)
+    || ts.isFunctionDeclaration(statement)
+    || ts.isInterfaceDeclaration(statement)
+    || ts.isTypeAliasDeclaration(statement)
+  ) {
+    return statement.name?.text ?? null;
+  }
+  return null;
+};
+
+function dependencyScopedModuleSource({
+  compilerOptions,
+  entryPath,
+  host,
+  reads,
+  requestedExports,
+}) {
+  const parsed = new Map();
+  const sourceFile = (path) => {
+    const canonical = canonicalPath(path);
+    let source = parsed.get(canonical);
+    if (source) return source;
+    const text = reads.readText(canonical);
+    if (text === undefined) throw new Error(`reachable declaration is unreadable: ${canonical}`);
+    source = ts.createSourceFile(canonical, text, compilerOptions.target, true, ts.ScriptKind.TS);
+    parsed.set(canonical, source);
+    return source;
+  };
+  const resolveExport = (fromPath, specifier) => {
+    const resolved = ts.resolveModuleName(
+      specifier,
+      fromPath,
+      compilerOptions,
+      host,
+    ).resolvedModule;
+    return resolved ? canonicalPath(resolved.resolvedFileName) : null;
+  };
+  const findRoute = (path, requestedName, seen) => {
+    const canonical = canonicalPath(path);
+    const key = `${canonical}\n${requestedName}`;
+    if (seen.has(key)) return null;
+    seen.add(key);
+    const source = sourceFile(canonical);
+
+    for (const statement of source.statements) {
+      if (declarationExportName(statement) === requestedName) {
+        return { importedName: requestedName, path: canonical };
+      }
+    }
+    for (const statement of source.statements) {
+      if (!ts.isExportDeclaration(statement) || !statement.exportClause) continue;
+      if (!ts.isNamedExports(statement.exportClause)) continue;
+      const exported = statement.exportClause.elements.find(
+        (element) => element.name.text === requestedName,
+      );
+      if (!exported) continue;
+      if (!statement.moduleSpecifier) {
+        return { importedName: requestedName, path: canonical };
+      }
+      const target = resolveExport(canonical, statement.moduleSpecifier.text);
+      if (!target) return null;
+      return { importedName: exported.propertyName?.text ?? exported.name.text, path: target };
+    }
+    for (const statement of source.statements) {
+      if (
+        !ts.isExportDeclaration(statement)
+        || statement.exportClause
+        || !statement.moduleSpecifier
+      ) continue;
+      const target = resolveExport(canonical, statement.moduleSpecifier.text);
+      if (!target) continue;
+      const route = findRoute(target, requestedName, seen);
+      if (route) return route;
+    }
+    return null;
+  };
+
+  const routes = requestedExports.map((requestedName) => {
+    const route = findRoute(entryPath, requestedName, new Set());
+    if (!route) {
+      throw new Error(`TypeScript module does not export requested name ${requestedName}`);
+    }
+    return { ...route, requestedName };
+  });
+  const identity = sha256Bytes(Buffer.from(JSON.stringify(routes)));
+  const path = resolve(dirname(entryPath), `.beagle-reachable-${identity}.d.ts`);
+  const relativeModule = (target) => {
+    let specifier = relative(dirname(path), target).split(sep).join("/")
+      .replace(/\.d\.ts$/, ".js");
+    if (!specifier.startsWith(".")) specifier = `./${specifier}`;
+    return specifier;
+  };
+  const text = `${routes.map(({ importedName, path: target, requestedName }) => (
+    `export { ${importedName}${importedName === requestedName ? "" : ` as ${requestedName}`} } from ${JSON.stringify(relativeModule(target))};`
+  )).join("\n")}\n`;
+  return { path, text };
+}
+
+export function createContext({
+  projectRoot,
+  containingFile,
+  moduleSpecifier,
+  ambientNames = [],
+  conditions,
+  requestedExports = [],
+}) {
   const canonicalProjectRoot = canonicalPath(projectRoot);
   const canonicalContainingFile = canonicalPath(containingFile);
+  const ambientProvider = ambientNames.length > 0;
   const compilerOptions = {
     customConditions: [...conditions].sort(),
     module: ts.ModuleKind.ESNext,
@@ -465,7 +579,20 @@ export function createContext({ projectRoot, containingFile, moduleSpecifier, co
     strict: true,
     target: ts.ScriptTarget.ESNext,
   };
-  if (BUILTIN_AMBIENT_MODULES.has(moduleSpecifier)) compilerOptions.types = [];
+  const projectTypeRoots = ts.getEffectiveTypeRoots(compilerOptions, {
+    getCurrentDirectory: () => canonicalProjectRoot,
+  }) ?? [];
+  compilerOptions.typeRoots = [...new Set([
+    ...projectTypeRoots,
+    resolve(TYPESCRIPT_RUNTIME_ROOT, "node_modules/@types"),
+  ])];
+  if (
+    BUILTIN_AMBIENT_MODULES.has(moduleSpecifier)
+    || ambientProvider
+    || requestedExports.length > 0
+  ) {
+    compilerOptions.types = [];
+  }
   logicalCanonical(canonicalProjectRoot, canonicalContainingFile, "containing file");
   const projectLocks = bindProjectLocks(canonicalProjectRoot);
   const reads = createReadLedger(canonicalProjectRoot);
@@ -474,23 +601,24 @@ export function createContext({ projectRoot, containingFile, moduleSpecifier, co
   const builtinPath = builtinAmbient
     ? resolve(canonicalProjectRoot, ".beagle-typescript-builtins", builtinAmbient.logicalPath)
     : null;
+  const virtualSources = new Map();
+  if (builtinPath) virtualSources.set(resolve(builtinPath), builtinAmbient.source);
   const host = ts.createCompilerHost(compilerOptions, true);
   host.getCurrentDirectory = () => canonicalProjectRoot;
   const fileExists = host.fileExists.bind(host);
-  host.fileExists = (path) => (
-    builtinPath && resolve(path) === builtinPath ? true : fileExists(path)
-  );
+  host.fileExists = (path) => virtualSources.has(resolve(path)) || fileExists(path);
   host.readFile = (path) => (
-    builtinPath && resolve(path) === builtinPath
-      ? builtinAmbient.source
+    virtualSources.has(resolve(path))
+      ? virtualSources.get(resolve(path))
       : reads.readText(path)
   );
   const getSourceFile = host.getSourceFile.bind(host);
   host.getSourceFile = (fileName, ...arguments_) => {
-    if (builtinPath && resolve(fileName) === builtinPath) {
+    const virtualSource = virtualSources.get(resolve(fileName));
+    if (virtualSource !== undefined) {
       return ts.createSourceFile(
-        builtinPath,
-        builtinAmbient.source,
+        fileName,
+        virtualSource,
         arguments_[0] ?? compilerOptions.target,
         true,
         ts.ScriptKind.TS,
@@ -504,26 +632,87 @@ export function createContext({ projectRoot, containingFile, moduleSpecifier, co
     }
     return sourceFile;
   };
-  const resolved = ts.resolveModuleName(
-    moduleSpecifier,
-    canonicalContainingFile,
-    compilerOptions,
-    host,
-  ).resolvedModule;
+  const typescriptLibraryMatch = ambientProvider
+    ? /^typescript:(lib\.[A-Za-z0-9.-]+)$/.exec(moduleSpecifier)
+    : null;
+  const typescriptLibraryPath = typescriptLibraryMatch
+    ? canonicalPath(resolve(
+      TYPESCRIPT_RUNTIME_ROOT,
+      "node_modules/typescript/lib",
+      `${typescriptLibraryMatch[1]}.d.ts`,
+    ))
+    : null;
+  const exactAmbientModule = (typeChecker) => typeChecker.getAmbientModules().find((symbol) => (
+    symbol.getName().replace(/^"|"$/g, "") === moduleSpecifier
+  ));
+  let resolved = typescriptLibraryPath
+    ? { resolvedFileName: typescriptLibraryPath }
+    : ts.resolveModuleName(
+      moduleSpecifier,
+      canonicalContainingFile,
+      compilerOptions,
+      host,
+    ).resolvedModule;
+  if (!resolved && ambientProvider && moduleSpecifier.startsWith("@types/")) {
+    const directiveName = moduleSpecifier.slice("@types/".length);
+    const directive = ts.resolveTypeReferenceDirective(
+      directiveName,
+      canonicalContainingFile,
+      compilerOptions,
+      host,
+    ).resolvedTypeReferenceDirective;
+    if (directive) resolved = { resolvedFileName: directive.resolvedFileName };
+  }
   let program;
   let checker;
   let source;
   let moduleSymbol;
   let packagePath;
+  const virtualInputs = [];
   if (resolved) {
     packagePath = enclosingPackage(resolved.resolvedFileName);
-    program = ts.createProgram([resolved.resolvedFileName], compilerOptions, host);
+    const scopedSource = requestedExports.length === 0
+      ? null
+      : dependencyScopedModuleSource({
+        compilerOptions,
+        entryPath: resolved.resolvedFileName,
+        host,
+        reads,
+        requestedExports,
+      });
+    if (scopedSource) {
+      virtualSources.set(resolve(scopedSource.path), scopedSource.text);
+      virtualInputs.push({
+        path: `adapter/reachable/${sha256Bytes(Buffer.from(scopedSource.text))}.d.ts`,
+        physicalPath: resolve(scopedSource.path),
+        sha256: sha256Bytes(Buffer.from(scopedSource.text)),
+      });
+    }
+    const programEntry = scopedSource?.path ?? resolved.resolvedFileName;
+    const rootNames = typescriptLibraryPath
+      ? [
+        canonicalPath(resolve(
+          TYPESCRIPT_RUNTIME_ROOT,
+          "node_modules/typescript/lib/lib.esnext.d.ts",
+        )),
+        programEntry,
+      ]
+      : [programEntry];
+    program = ts.createProgram(rootNames, compilerOptions, host);
     checker = program.getTypeChecker();
-    source = program.getSourceFile(resolved.resolvedFileName);
-    if (!source) throw new Error(`resolved declaration is absent from Program: ${resolved.resolvedFileName}`);
-    moduleSymbol = checker.getSymbolAtLocation(source);
-    if (!moduleSymbol) throw new Error(`resolved declaration has no module symbol: ${resolved.resolvedFileName}`);
+    const sourceEntry = ambientProvider ? resolved.resolvedFileName : programEntry;
+    source = program.getSourceFile(sourceEntry);
+    if (!source) throw new Error(`resolved declaration is absent from Program: ${sourceEntry}`);
+    moduleSymbol = ambientProvider
+      ? null
+      : checker.getSymbolAtLocation(source) ?? exactAmbientModule(checker);
+    if (!ambientProvider && !moduleSymbol) {
+      throw new Error(`resolved declaration has no module symbol: ${sourceEntry}`);
+    }
   } else {
+    if (ambientProvider) {
+      throw new Error(`cannot resolve TypeScript ambient provider ${moduleSpecifier} from ${containingFile}`);
+    }
     const typeDirectiveFiles = builtinPath
       ? [builtinPath]
       : ts.getAutomaticTypeDirectiveNames(compilerOptions, host)
@@ -537,9 +726,7 @@ export function createContext({ projectRoot, containingFile, moduleSpecifier, co
         .filter(Boolean);
     program = ts.createProgram(typeDirectiveFiles, compilerOptions, host);
     checker = program.getTypeChecker();
-    moduleSymbol = checker.getAmbientModules().find((symbol) => (
-      symbol.getName().replace(/^"|"$/g, "") === moduleSpecifier
-    ));
+    moduleSymbol = exactAmbientModule(checker);
     if (!moduleSymbol) {
       throw new Error(`cannot resolve physical or ambient TypeScript module ${moduleSpecifier} from ${containingFile}`);
     }
@@ -549,7 +736,11 @@ export function createContext({ projectRoot, containingFile, moduleSpecifier, co
       ? enclosingPackage(canonicalContainingFile)
       : enclosingPackage(source.fileName);
   }
-  logicalCanonical(canonicalProjectRoot, canonicalPath(packagePath), "resolved package");
+  const canonicalPackagePath = canonicalPath(packagePath);
+  if (!maybeLogicalCanonical(canonicalProjectRoot, canonicalPackagePath)
+      && !maybeLogicalCanonical(TYPESCRIPT_RUNTIME_ROOT, canonicalPackagePath)) {
+    throw new Error(`resolved package is outside project and TypeScript runtime authority roots: ${canonicalPackagePath}`);
+  }
   const packageSnapshot = reads.required(packagePath, "resolved package");
   const diagnostics = ts.getPreEmitDiagnostics(program);
   if (diagnostics.length) {
@@ -560,20 +751,32 @@ export function createContext({ projectRoot, containingFile, moduleSpecifier, co
     }));
   }
   const programInputs = program.getSourceFiles()
-    .filter((programSource) => !builtinPath || resolve(programSource.fileName) !== builtinPath)
+    .filter((programSource) => !virtualSources.has(resolve(programSource.fileName)))
     .map((programSource) => reads.record(
       programSource.fileName,
       "Program source input",
     ));
-  const virtualInputs = builtinPath
-    ? [{
+  if (builtinPath) {
+    virtualInputs.push({
       path: `adapter/${builtinAmbient.logicalPath}`,
       physicalPath: builtinPath,
       sha256: sha256Bytes(Buffer.from(builtinAmbient.source)),
-    }]
-    : [];
+    });
+  }
+  const ambientDeclarationAllowed = (symbol) => {
+    if (!ambientProvider || !symbol) return false;
+    return (symbol.declarations ?? []).some((node) => {
+      const declarationSource = node.getSourceFile?.();
+      if (!declarationSource) return false;
+      if (typescriptLibraryPath) {
+        return canonicalPath(declarationSource.fileName) === typescriptLibraryPath;
+      }
+      return !program.isSourceFileDefaultLibrary(declarationSource);
+    });
+  };
   return {
-    checker, compilerOptions, conditions: [...conditions].sort(), moduleSymbol,
+    ambientDeclarationAllowed, checker, compilerOptions,
+    conditions: [...conditions].sort(), moduleSpecifier, moduleSymbol,
     packagePath: packageSnapshot.path, program, programInputs, projectLocks,
     projectRoot: canonicalProjectRoot, reads, resolved, virtualInputs,
   };
@@ -688,16 +891,44 @@ export function createCompilerBridge({
     canonicalTypescriptRuntimeRoot,
     "node_modules/typescript",
   ));
+  const runtimeNodeModulesRoot = canonicalPath(resolve(
+    canonicalTypescriptRuntimeRoot,
+    "node_modules",
+  ));
   const compilerInputDigest = (context, snapshot) => {
-    const typescriptPath = maybeLogicalCanonical(typescriptRoot, snapshot.path);
-    if (typescriptPath) {
-      return { path: `adapter/node_modules/typescript/${typescriptPath}`, sha256: snapshot.sha256 };
+    const runtimeDependencyPath = maybeLogicalCanonical(runtimeNodeModulesRoot, snapshot.path);
+    if (runtimeDependencyPath) {
+      return { path: `adapter/node_modules/${runtimeDependencyPath}`, sha256: snapshot.sha256 };
     }
     const projectPath = maybeLogicalCanonical(context.projectRoot, snapshot.path);
     if (projectPath) return { path: `project/${projectPath}`, sha256: snapshot.sha256 };
     const adapterPath = maybeLogicalCanonical(root, snapshot.path);
     if (adapterPath) return { path: `adapter/${adapterPath}`, sha256: snapshot.sha256 };
     throw new Error(`compiler input is outside project and adapter authority roots: ${snapshot.path}`);
+  };
+  const typeParameterDeclarationOwner = (context, parameter) => {
+    const owners = new Map();
+    for (const declarationNode of parameter.symbol?.declarations ?? []) {
+      const owner = declarationNode.parent;
+      const source = owner?.getSourceFile?.();
+      if (!owner || !source?.fileName) continue;
+      const snapshot = context.reads.record(
+        source.fileName,
+        "Type parameter declaration owner identity",
+      );
+      const input = compilerInputDigest(context, snapshot);
+      const identity = `${input.path}#${canonicalNodeKind(owner)}@${owner.pos}:${owner.end}@sha256:${input.sha256}`;
+      owners.set(identity, owner);
+    }
+    if (owners.size === 0) {
+      throw new Error(
+        `TypeScript type parameter ${parameter.symbol?.getName?.() ?? "<anonymous>"} has no lexical declaration owner identity`,
+      );
+    }
+    const identities = [...owners.keys()].sort();
+    return identities.length === 1
+      ? identities[0]
+      : `typescript-merged-declaration-owner@sha256:${sha256Bytes(Buffer.from(JSON.stringify(identities)))}`;
   };
   const forcedCodes = new WeakMap();
   const brand = (context, type) => {
@@ -735,7 +966,10 @@ export function createCompilerBridge({
       const logical = maybeLogicalCanonical(typescriptRoot, canonicalPath(source.fileName));
       return Boolean(logical && /^lib\/lib\..+\.d\.ts$/.test(logical));
     };
-    return declarations.every(standardLibraryDeclaration) ? kind : null;
+    // A project @types package may augment a standard global declaration.
+    // The standard declaration anchors runtime identity; a module-local
+    // counterfeit is a different symbol and therefore has no such anchor.
+    return declarations.some(standardLibraryDeclaration) ? kind : null;
   };
   const signatureTypeParameterGroups = (signature) => {
     const declarationNode = signature.declaration;
@@ -796,6 +1030,12 @@ export function createCompilerBridge({
     }
     return { captured, local };
   };
+  const explicitTypeParameterPart = (type, part) => {
+    const declarations = type.symbol?.declarations ?? [];
+    return declarations.some((item) => (
+      ts.isTypeParameterDeclaration(item) && item[part]
+    ));
+  };
   const declarationTypeParameters = (type) => {
     // Alias arguments are use-site substitutions, not lexical declarations.
     // An uninstantiated generic alias is the one exception: the compiler
@@ -819,6 +1059,27 @@ export function createCompilerBridge({
       ? aliasArguments
       : [];
   };
+  const builtinAwaitedArgument = (context, type) => {
+    const symbol = type.aliasSymbol;
+    const arguments_ = type.aliasTypeArguments ?? [];
+    if (symbol?.getName() !== "Awaited" || arguments_.length !== 1) return null;
+    const declarations = symbol.declarations ?? [];
+    if (declarations.length !== 1 || !ts.isTypeAliasDeclaration(declarations[0])) return null;
+    const source = declarations[0].getSourceFile?.();
+    if (!source?.fileName) return null;
+    try {
+      const snapshot = context.reads.record(
+        source.fileName,
+        "Builtin Awaited alias identity",
+      );
+      const input = compilerInputDigest(context, snapshot);
+      return input.path === "adapter/node_modules/typescript/lib/lib.es5.d.ts"
+        ? arguments_[0]
+        : null;
+    } catch {
+      return null;
+    }
+  };
   const enumMemberValue = (context, type) => {
     const symbol = type.aliasSymbol ?? type.symbol;
     if (!symbol) return undefined;
@@ -836,6 +1097,7 @@ export function createCompilerBridge({
   };
   const typeKind = (context, type) => {
     if (forcedCodes.has(type)) return "unsupported";
+    if (builtinAwaitedArgument(context, type)) return "awaited";
     let kind;
     if (exactFlag(type, ts.TypeFlags.IndexedAccess)) kind = "indexed-access";
     else if (exactFlag(type, ts.TypeFlags.NonPrimitive)
@@ -878,16 +1140,20 @@ export function createCompilerBridge({
     return kind;
   };
   return {
-    ambientValues(context, names) {
+    ambientValues(context, names, required = false) {
       this.context = context;
-      return [...new Set(names)].sort()
-        .map((name) => context.checker.resolveName(
+      return [...new Set(names)].sort().map((name) => {
+        const symbol = context.checker.resolveName(
           name,
           undefined,
           ts.SymbolFlags.Value,
           false,
-        ))
-        .filter(Boolean);
+        );
+        if (required && (!symbol || !context.ambientDeclarationAllowed(symbol))) {
+          throw new Error(`TypeScript ambient provider ${context.moduleSpecifier} does not declare requested global value ${name}`);
+        }
+        return symbol;
+      }).filter(Boolean);
     },
     array: () => [],
     arrayElementType(type) { return this.context.checker.getElementTypeOfArrayType(type); },
@@ -955,7 +1221,21 @@ export function createCompilerBridge({
         ? type.intrinsicName === "true"
         : typeof type.value === "object" ? String(type.value.base10Value) : type.value;
     },
-    moduleExports(context) { this.context = context; return context.checker.getExportsOfModule(context.moduleSymbol); },
+    moduleExports(context, requestedExports = []) {
+      this.context = context;
+      const exports = context.checker.getExportsOfModule(context.moduleSymbol);
+      if (requestedExports.length === 0) return exports;
+      const requested = new Set(requestedExports);
+      const selected = exports.filter((symbol) => requested.has(symbol.getName()));
+      const selectedNames = new Set(selected.map((symbol) => symbol.getName()));
+      const missing = requestedExports.filter((name) => !selectedNames.has(name));
+      if (missing.length > 0) {
+        throw new Error(
+          `TypeScript module ${context.moduleSpecifier ?? "<unknown>"} does not export requested names: ${missing.join(", ")}`,
+        );
+      }
+      return selected;
+    },
     moduleMapping(mappings, specifier) { return mappings.get(specifier) ?? null; },
     relativeModuleNamespace(namespace, specifier) {
       if (!specifier.startsWith(".")) return null;
@@ -1001,7 +1281,12 @@ export function createCompilerBridge({
     },
     pad: (value, width) => String(value).padStart(width, "0"),
     parameterType(signature, parameter) { return this.context.checker.getTypeOfSymbolAtLocation(parameter, declaration(parameter) ?? signature.declaration); },
-    propertiesOfType(type) { return this.context.checker.getPropertiesOfType(type); },
+    propertiesOfType(type, requestedMemberNames = []) {
+      const properties = this.context.checker.getPropertiesOfType(type);
+      if (requestedMemberNames.length === 0) return properties;
+      const requested = new Set(requestedMemberNames);
+      return properties.filter((property) => requested.has(property.getName()));
+    },
     propertyType(owner, property) { return this.context.checker.getTypeOfSymbolAtLocation(property, declaration(property) ?? owner.symbol?.declarations?.[0]); },
     push: (values, value) => values.push(value),
     provenance(context, moduleSpecifier, conditions) {
@@ -1056,10 +1341,7 @@ export function createCompilerBridge({
         },
         moduleSpecifier,
         conditions: [...conditions].sort(),
-        package: {
-          path: `project/${logicalCanonical(context.projectRoot, packageSnapshot.path, "resolved package")}`,
-          sha256: packageSnapshot.sha256,
-        },
+        package: compilerInputDigest(context, packageSnapshot),
         lockfile: digestSnapshot(root, adapterLock, "adapter lockfile"),
         consultedFiles: files,
       };
@@ -1104,8 +1386,10 @@ export function createCompilerBridge({
     "tupleElementRest?": (element) => hasFlag(element.flag, ts.ElementFlags.Rest),
     tupleElementType: (element) => element.elementType,
     tupleElements(type) { return tupleElements(this.context, type); },
+    baseTypes: (type) => [...(type.getBaseTypes?.() ?? [])],
     templateLiteralTexts: (type) => [...type.texts],
     templateLiteralTypes: (type) => [...type.types],
+    awaitedArgument(type) { return builtinAwaitedArgument(this.context, type); },
     typeArguments(type) {
       const referenceArguments = this.context.checker.getTypeArguments?.(type) ?? [];
       return referenceArguments.length > 0
@@ -1145,14 +1429,21 @@ export function createCompilerBridge({
     typeKind(type) { return typeKind(this.context, type); },
     typeMembers: (type) => type.types,
     typeName: (type) => type.aliasSymbol?.getName() ?? type.symbol?.getName() ?? "anonymous",
-    typeParameterConstraint: (type) => type.getConstraint?.() ?? type.constraint ?? null,
+    typeParameterDeclarationOwner(type) {
+      return typeParameterDeclarationOwner(this.context, type);
+    },
+    typeParameterConstraint: (type) => explicitTypeParameterPart(type, "constraint")
+      ? type.getConstraint?.() ?? type.constraint ?? null
+      : null,
     typeParameterArrayElementType(type) {
       const constraint = type.getConstraint?.() ?? type.constraint ?? null;
       return constraint && this.context.checker.isArrayLikeType(constraint)
         ? this.context.checker.getIndexTypeOfType(constraint, ts.IndexKind.Number)
         : null;
     },
-    typeParameterDefault: (type) => type.getDefault?.() ?? type.default ?? null,
+    typeParameterDefault: (type) => explicitTypeParameterPart(type, "default")
+      ? type.getDefault?.() ?? type.default ?? null
+      : null,
     unsupportedCode,
     weakMap: () => new WeakMap(),
     sourceFile(context) { this.context = context; return context.source; },

@@ -24,7 +24,7 @@
 (define JS-UNARY-OP-SYMS (list->set (hash-keys JS-UNARY-OPS)))
 
 (define JS-CORE-CALL
-  (set 'str 'println 'print 'pr 'prn
+  (set 'str 'println 'print 'pr 'prn 'flush
        'nil? 'some? 'true? 'false? 'zero? 'pos? 'neg? 'even? 'odd?
        'count 'empty? 'first 'second 'last 'rest 'nth
        'conj 'cons 'assoc 'transient 'conj! 'persistent!
@@ -32,7 +32,7 @@
        'vec 'set 'contains? 'keys 'vals
        'map 'filter 'reduce 'reverse 'sort 'into 'concat
        'apply 'identity 'boolean
-       'string? 'number? 'keyword? 'symbol? 'fn? 'integer? 'boolean? 'any? 'list? 'infinite?
+       'string? 'number? 'keyword? 'symbol? 'fn? 'int? 'double? 'integer? 'boolean? 'any? 'list? 'infinite?
        'and 'or 'instance?
        'throw 'ex-info 'ex-message 'ex-data
        'name 'keyword 'subs 're-find 're-pattern 're-matches 're-seq 're-groups
@@ -88,6 +88,7 @@
    '/         "((_a, _b) => _a / _b)"
    'mod       "((_a, _b) => _a % _b)"
    'str       "((..._xs) => \"\".concat(..._xs))"
+   'flush     "(() => null)"
    'identity  "((_x) => _x)"
    'nil?      "((_x) => _x == null)"
    'some?     "((_x) => _x != null)"
@@ -101,6 +102,8 @@
    'not       "((_x) => !(_x !== false && _x != null))"
    'string?   "((_x) => typeof _x === 'string')"
    'number?   "((_x) => typeof _x === 'number')"
+   'int?      "((_x) => Number.isInteger(_x))"
+   'double?   "((_x) => typeof _x === 'number')"
    'keyword?  "((_x) => typeof _x === 'string')"
    'fn?       "((_x) => typeof _x === 'function')"
    'integer?  "((_x) => Number.isInteger(_x))"
@@ -125,6 +128,19 @@
    'quot      "((_a, _b) => Math.trunc(_a / _b))"
    'rem       "((_a, _b) => _a % _b)"
    'run!      "((_f, _c) => (_c.forEach(_f), null))"
+   'concat    "((..._xs) => [].concat(..._xs))"
+   'vector    "((..._xs) => _xs)"
+   'min       "((..._xs) => Math.min(..._xs))"
+   'keys      "$$bc$keys"
+   ;; Collection functions remain callable when passed through a higher-order
+   ;; position such as swap!. Direct calls still use emit-core-call's
+   ;; representation-specialized lowering.
+   'assoc     "((_m, _k, _v) => $$bc$assoc_value(_m, _k, _v))"
+   'conj      "((_c, ..._xs) => $$bc$conj_value(_c, ..._xs))"
+   'into      "((_to, _from) => $$bc$into_value(_to, _from))"
+   'assoc-in  "((_m, _path, _v) => $$bc$assoc_in(_m, _path, _v))"
+   'update    "((_m, _k, _f) => $$bc$assoc_value(_m, _k, _f($$bc$get(_m, _k))))"
+   'dissoc    "((_m, ..._ks) => $$bc$dissoc_value(_m, ..._ks))"
    ))
 
 (provide JS-TRANSLATED

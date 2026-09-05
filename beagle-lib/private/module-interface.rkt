@@ -24,6 +24,12 @@
 (define INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE? #t)
 (define ANY (type-prim 'Any))
 
+;; A retargeted compiler bootstrap keeps Beagle/clj's ordinary public
+;; definitions as the JavaScript module surface.  Authored Beagle/js remains
+;; explicit-by-default through js/export; only the staging caller enables this
+;; parameter for an exact retargeted source closure.
+(define current-js-implicit-public-exports? (make-parameter #f))
+
 (struct interface-constraint (expression synchronous? provider) #:transparent)
 (struct interface-binding
   (name kind type raises constraints synchronous?
@@ -199,11 +205,13 @@
          "require libspec must start with a namespace symbol or native ESM string, got: ~v"
          source)])]
     [(require-global)
-     (unless (plain-symbol? source)
-       (libspec-error
-        "require-global libspec must start with a global symbol, got: ~v"
-        source))
-     (module-identity 'global source)]
+     (cond
+       [(plain-symbol? source) (module-identity 'global source)]
+       [(string? source) (module-identity 'typescript-ambient source)]
+       [else
+        (libspec-error
+         "require-global libspec must start with a global symbol or TypeScript ambient-provider string, got: ~v"
+         source)])]
     [else
      (libspec-error "unknown libspec kind ~a" kind)]))
 
@@ -223,8 +231,14 @@
   (let loop ([rest (cdr items)])
     (cond
       [(null? rest)
-       (canonical-libspec
-        identity alias (validated-import-bindings refer rename ":rename"))]
+       (define bindings
+         (validated-import-bindings refer rename ":rename"))
+       (when (and (eq? (module-identity-kind identity) 'typescript-ambient)
+                  (null? bindings))
+         (libspec-error
+          "require-global TypeScript ambient provider ~v requires an explicit non-empty :refer"
+          (module-identity-value identity)))
+       (canonical-libspec identity alias bindings)]
       [(or (not (plain-symbol? (car rest)))
            (not (memq (car rest) '(:as :refer :rename))))
        (libspec-error
@@ -521,11 +535,13 @@
 ;; a missing namespace-object member. `js/export-default` publishes only the
 ;; module's `default` slot, never the definition's own name.
 (define (js-published? raw-form)
-  (let loop ([form raw-form])
-    (cond
-      [(jst-export? form) #t]
-      [(with-meta? form) (loop (with-meta-expr form))]
-      [else #f])))
+  (or
+   (current-js-implicit-public-exports?)
+   (let loop ([form raw-form])
+     (cond
+       [(jst-export? form) #t]
+       [(with-meta? form) (loop (with-meta-expr form))]
+       [else #f]))))
 
 (define (public-esm-exports-for prog ast-bindings bindings)
   (if (eq? (program-target prog) 'js)
@@ -2290,6 +2306,7 @@
 (provide
  INTERFACE-SCHEMA-VERSION
  INTERFACE-DIGEST-CONSUMER-PRUNING-SAFE?
+ current-js-implicit-public-exports?
  qualify-provider-local-type-references
  type->canonical-datum
  constraint->canonical-datum

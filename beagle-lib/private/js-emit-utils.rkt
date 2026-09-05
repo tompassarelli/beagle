@@ -61,13 +61,17 @@
      (string-replace
       (string-replace
        (string-replace
-        (string-replace s "-" "_")
-        "?" "_p")
-       "!" "_bang")
-      "=" "_eq")
-     ">" "_gt")
-    "<" "_lt")
-   "%" "_pct"))
+        (string-replace
+         (string-replace
+          (string-replace s "-" "_")
+          "?" "_p")
+         "!" "_bang")
+        "=" "_eq")
+       ">" "_gt")
+      "<" "_lt")
+     "%" "_pct")
+    "*" "_star")
+   "+" "_plus"))
 
 (define (mangle-chars s)
   (mangle-punctuation (string-replace s "_" "__")))

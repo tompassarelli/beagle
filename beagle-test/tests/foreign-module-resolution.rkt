@@ -10,6 +10,9 @@
 
 (define MODULE-SPECIFIER "@fixture/native")
 (define MODULE-IDENTITY (module-identity 'native-esm MODULE-SPECIFIER))
+(define AMBIENT-PROVIDER "typescript:fixture.dom")
+(define AMBIENT-IDENTITY
+  (module-identity 'typescript-ambient AMBIENT-PROVIDER))
 (define LOGICAL-IMPORTER "fixtures/native-esm-resolution/consumer.bjs")
 (define ZERO-SHA256 (make-string 64 #\0))
 
@@ -89,6 +92,119 @@
            'anyCount 0
            'generatedSourceCount 0)))))
 
+(define AMBIENT-SOURCE
+  (foreign-interface-v1->module-source
+   (validate-foreign-interface-v1
+    (hash
+     'kind FOREIGN-INTERFACE-KIND
+     'schemaVersion FOREIGN-INTERFACE-SCHEMA-VERSION
+     'frontend "typescript"
+     'moduleSpecifier AMBIENT-PROVIDER
+     'ambientValues (list (hash 'name "fetch" 'node "n:function"))
+     'exports '()
+     'nodes
+     (list
+      (hash 'id "n:function"
+            'kind "function"
+            'typeParameters '()
+            'overloads
+            (list
+             (hash 'typeParameters '()
+                   'parameters
+                   (list
+                    (hash 'name "input"
+                          'type "n:string"
+                          'optional #f
+                          'rest #f))
+                   'return "n:string")))
+      (hash 'id "n:string" 'kind "primitive" 'name "string"))
+     'obligations '()
+     'provenance
+     (hash
+      'adapter
+      (hash 'source "src/adapter.bjs"
+            'sourceSha256 ZERO-SHA256
+            'compiled (format "compiled/~a.mjs" ZERO-SHA256)
+            'compiledSha256 ZERO-SHA256
+            'version "1.0.0")
+      'typescript
+      (hash 'version "5.9.3"
+            'path "node_modules/typescript/lib/typescript.js"
+            'sha256 ZERO-SHA256)
+      'compilerOptions (hash)
+      'moduleSpecifier AMBIENT-PROVIDER
+      'conditions '()
+      'package (hash 'path "package.json" 'sha256 ZERO-SHA256)
+      'lockfile (hash 'path "bun.lock" 'sha256 ZERO-SHA256)
+      'consultedFiles '())
+     'stats
+     (hash 'nodeCount 2
+           'exportCount 0
+           'obligationCount 0
+           'anyCount 0
+           'generatedSourceCount 0)))
+   #:ambient-provider? #t))
+
+(test-case "typed ambient require-global requires an explicit non-empty refer"
+  (check-exn
+   #rx"requires an explicit non-empty :refer"
+   (lambda ()
+     (normalize-canonical-libspec
+      (list AMBIENT-PROVIDER)
+      #:kind 'require-global)))
+  (check-exn
+   #rx"requires an explicit non-empty :refer"
+   (lambda ()
+     (normalize-canonical-libspec
+      (list AMBIENT-PROVIDER ':refer '())
+      #:kind 'require-global))))
+
+(test-case "typed ambient provider resolves only explicitly referred names"
+  (define requests '())
+  (define prog
+    (parse-program
+     (syntax-forms
+      (list
+       '(define-target js)
+       (list
+        'ns
+        'foreign-module-resolution.ambient
+        (list
+         ':require-global
+         (br AMBIENT-PROVIDER ':refer (br 'fetch))))
+       '(defn answer [(input String)] String (fetch input))))
+     #:source-path LOGICAL-IMPORTER
+     #:foreign-module-resolver
+     (lambda (identity importer ambient-names)
+       (set! requests
+             (cons (list identity importer ambient-names) requests))
+       AMBIENT-SOURCE)))
+  (check-true (pair? requests))
+  (for ([request (in-list requests)])
+    (check-equal? (car request) AMBIENT-IDENTITY)
+    (check-equal? (cadr request) LOGICAL-IMPORTER)
+    (check-equal? (caddr request) '(fetch)))
+  (check-equal?
+   (map require-entry-identity (program-requires prog))
+   (list AMBIENT-IDENTITY))
+  (check-not-exn (lambda () (type-check! prog))))
+
+(test-case "typed ambient provider rejects a referred name absent from its graph"
+  (check-exn
+   #rx"does not export referred name missing-global"
+   (lambda ()
+     (parse-program
+      (syntax-forms
+       (list
+        '(define-target js)
+        (list
+         'require-global
+         (br AMBIENT-PROVIDER ':refer (br 'missing-global)))
+        '(def answer String missing-global)))
+      #:source-path LOGICAL-IMPORTER
+      #:foreign-module-resolver
+      (lambda (_identity _importer _ambient-names) AMBIENT-SOURCE)))))
+
 (test-case "native ESM import fails closed without a foreign resolver"
   (check-exn
    unresolved-native-esm?
@@ -125,7 +241,7 @@
          (parse-program/file
           importer
           #:foreign-module-resolver
-          (lambda (_identity _source-path)
+          (lambda (_identity _source-path _ambient-names)
             (set! resolver-called? #t)
             FOREIGN-SOURCE))))
       (check-false resolver-called?))
@@ -138,7 +254,7 @@
    unresolved-native-esm?
    (lambda ()
      (parse-native-with
-      (lambda (identity importer)
+      (lambda (identity importer _ambient-names)
         (set! requests (cons (cons identity importer) requests))
         #f))))
   (check-true (pair? requests))
@@ -151,7 +267,7 @@
    unresolved-native-esm?
    (lambda ()
      (parse-native-with
-      (lambda (_identity _importer)
+      (lambda (_identity _importer _ambient-names)
         (module-source
          (string->symbol MODULE-SPECIFIER)
          "foreign-interface:missing"
@@ -163,7 +279,7 @@
    unresolved-native-esm?
    (lambda ()
      (parse-native-with
-      (lambda (_identity _importer) #f)
+      (lambda (_identity _importer _ambient-names) #f)
       (list '(declare-extern value String))))))
 
 (test-case "exact native ESM identity resolves only through its foreign graph"
@@ -193,7 +309,7 @@
            (error 'foreign-module-resolution
                   "native ESM was routed through the Beagle namespace resolver"))
          #:foreign-module-resolver
-         (lambda (identity source-path)
+         (lambda (identity source-path _ambient-names)
            (set! requests (cons (cons identity source-path) requests))
            (and (equal? identity MODULE-IDENTITY) FOREIGN-SOURCE))))
       (check-true (pair? requests))
@@ -229,7 +345,7 @@
        '(def answer String host/value)))
      #:source-path LOGICAL-IMPORTER
      #:foreign-module-resolver
-     (lambda (_identity _importer)
+     (lambda (_identity _importer _ambient-names)
        (error 'foreign-module-resolution
               "require-global was routed through the foreign module resolver"))))
   (check-equal? (program-imported-module-interfaces prog) '())

@@ -100,10 +100,13 @@
         'rest rest))
 
 (define (type-parameter name node-id
+                        #:declaration-owner
+                        [declaration-owner (format "fixture:~a" node-id)]
                         #:constraint [constraint 'null]
                         #:default [default 'null])
   (hash 'name name
         'node node-id
+        'declarationOwner declaration-owner
         'constraint constraint
         'default default))
 
@@ -709,8 +712,8 @@
          (list (hash 'id "n:z" 'kind "primitive" 'name "number"))
          '())))))
 
-(reject "type-parameter nodes require a lexical declaration owner"
-        #rx"exactly one lexical declaration owner; got 0"
+(reject "type-parameter nodes require a declaration owner family"
+        #rx"exactly one declaration owner family; got 0"
         (type-fi "n:t" (list (type-parameter-node "n:t" "T"))))
 
 (test-case
@@ -781,13 +784,38 @@
           string<?
           #:key (lambda (node) (hash-ref node 'id))))))
 
+(test-case
+ "one type-parameter owner family may be projected through multiple graph paths"
+ (define declaration (type-parameter "T" "n:t"))
+ (define parent
+   (hash-set
+    (object-node #:type-parameters (list declaration))
+    'properties
+    (list (hash 'name "child"
+                'type "n:child"
+                'optional #f
+                'readonly #f))))
+ (define child
+   (hash-set*
+    (object-node #:type-parameters (list declaration))
+    'id "n:child"
+    'name "Child"))
+ (check-not-exn
+  (lambda ()
+    (type-fi
+     "n:object"
+     (list child parent (type-parameter-node "n:t" "T"))))))
+
 (reject
- "type-parameter nodes cannot be shared by declaration owners"
- #rx"exactly one lexical declaration owner; got 2"
- (let* ([declaration (type-parameter "T" "n:t")]
+ "type-parameter nodes cannot be shared by distinct declaration owner families"
+ #rx"exactly one declaration owner family; got 2"
+ (let* ([parent-declaration
+         (type-parameter "T" "n:t" #:declaration-owner "fixture:parent.T")]
+        [child-declaration
+         (type-parameter "T" "n:t" #:declaration-owner "fixture:child.T")]
         [parent
          (hash-set
-          (object-node #:type-parameters (list declaration))
+          (object-node #:type-parameters (list parent-declaration))
           'properties
           (list (hash 'name "child"
                       'type "n:child"
@@ -795,7 +823,7 @@
                       'readonly #f)))]
         [child
          (hash-set*
-          (object-node #:type-parameters (list declaration))
+          (object-node #:type-parameters (list child-declaration))
           'id "n:child"
           'name "Child")])
    (type-fi

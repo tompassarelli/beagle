@@ -96,7 +96,7 @@ mapfile -t compiled_adapters < <(
 bun "$adapter/src/run.mjs" \
     "${compiled_adapters[0]}" "$adapter" "$adapter" \
     "$root/beagle-lib/lib/beagle" \
-    "$project" "$consumer" "@fixture/foreign-interface-v1" beagle \
+    "$project" "$consumer" "@fixture/foreign-interface-v1" "[]" beagle \
     >"$scratch/foreign-interface.json"
 
 GRAPH_PATH="$scratch/foreign-interface.json" bun -e '

@@ -12,6 +12,7 @@
 (defrecord TypeParameterV1
   [name String
    nodeId String
+   declarationOwner String
    constraintNode (U String Nil)
    defaultNode (U String Nil)])
 
@@ -99,11 +100,15 @@
     [id String
      elements (Vec TupleElementV1)
      readonly Bool])
+  (AwaitedNode
+    [id String
+     argumentNode String])
   (ObjectNode
     [id String
      name (U String Nil)
      identity (U String Nil)
      typeParameters (Vec TypeParameterV1)
+     baseTypes (Vec String)
      properties (Vec PropertyV1)
      indexes (Vec IndexV1)
      callSignatures (Vec SignatureV1)
@@ -134,8 +139,9 @@
 
 (defrecord BuildStateV1
   [seen OpaqueCompilerValueV1
-   nodes (Atom (Vec ForeignNodeV1))
-   obligations (Atom (Vec ObligationV1))
+   nodes Any
+   obligations Any
+   requestedMemberNames (Vec String)
    ambientCandidateNames (Atom (Vec String))
    nodeCounter (Atom Int)
    obligationCounter (Atom Int)])
@@ -159,6 +165,15 @@
    values (Vec String)] (Vec String)
   (.sort bridge values))
 
+(defn distinct-strings [values (Vec String)] (Vec String)
+  (reduce
+    (fn
+      [result (Vec String)
+       value String] (Vec String)
+      (if (.includes result value) result (conj result value)))
+    []
+    values))
+
 (defn sorted-nodes
   [bridge OpaqueCompilerValueV1
    values (Vec ForeignNodeV1)] (Vec ForeignNodeV1)
@@ -179,11 +194,14 @@
    values (Vec ExportV1)] (Vec ExportV1)
   (.sort bridge values))
 
-(defn empty-build-state [bridge OpaqueCompilerValueV1] BuildStateV1
+(defn empty-build-state!
+  [bridge OpaqueCompilerValueV1
+   requested-member-names (Vec String)] BuildStateV1
   (->BuildStateV1
     (.weakMap bridge)
-    (atom [])
-    (atom [])
+    (transient [])
+    (transient [])
+    requested-member-names
     (atom [])
     (atom 1)
     (atom 1)))
@@ -224,6 +242,7 @@
   (->TypeParameterV1
     (.typeName bridge parameter)
     (node-for! bridge state parameter)
+    (.typeParameterDeclarationOwner bridge parameter)
     (optional-node-id! bridge state (.typeParameterConstraint bridge parameter))
     (optional-node-id! bridge state (.typeParameterDefault bridge parameter))))
 
@@ -301,9 +320,7 @@
           (str "TypeScript type requires a lazy foreign obligation: " display)
           (->ObligationSourceV1 display (.typeKind bridge type)))]
     (do
-      (reset!
-        (buildstatev1-obligations state)
-        (conj (deref (buildstatev1-obligations state)) obligation))
+      (conj! (buildstatev1-obligations state) obligation)
       (->UnsupportedNode id obligation-id display))))
 
 ;; Base traversal preserves nominal/reference identity in the shared cache;
@@ -313,7 +330,10 @@
    state BuildStateV1
    id String
    type OpaqueCompilerValueV1] ForeignNodeV1
-  (let [properties OpaqueCompilerValueV1 (sorted-opaque bridge (.propertiesOfType bridge type))]
+  (let [properties OpaqueCompilerValueV1 (sorted-opaque
+        bridge
+        (.propertiesOfType
+          bridge type (buildstatev1-requestedMemberNames state)))]
     (->ObjectNode
       id
       (.typeName bridge type)
@@ -322,6 +342,13 @@
         (fn [parameter OpaqueCompilerValueV1] TypeParameterV1
           (type-parameter! bridge state parameter))
         (.declarationTypeParameters bridge type))
+      (sorted-strings
+        bridge
+        (distinct-strings
+          (mapv
+            (fn [base-type OpaqueCompilerValueV1] String
+              (node-for! bridge state base-type))
+            (.baseTypes bridge type))))
       (mapv
         (fn [property OpaqueCompilerValueV1] PropertyV1
           (property-node! bridge state type property))
@@ -416,6 +443,11 @@
           (.tupleElements bridge type))
         (.readonlyArray? bridge type))
 
+      (.equal bridge kind "awaited")
+      (->AwaitedNode
+        id
+        (node-for! bridge state (.awaitedArgument bridge type)))
+
       (.equal bridge kind "type-parameter")
       (->TypeParameterNode
         id
@@ -470,9 +502,7 @@
           (.set seen type id)
           (let [node ForeignNodeV1 (node-shape! bridge state id type)]
             (do
-              (reset!
-                (buildstatev1-nodes state)
-                (conj (deref (buildstatev1-nodes state)) node))
+              (conj! (buildstatev1-nodes state) node)
               id)))))))
 
 (defn export-node!
@@ -491,9 +521,10 @@
   [bridge OpaqueCompilerValueV1
    state BuildStateV1
    symbol OpaqueCompilerValueV1] AmbientValueV1
-  (->AmbientValueV1
-    (.symbolName bridge symbol)
-    (node-for! bridge state (.exportType bridge symbol))))
+  (let [resolved OpaqueCompilerValueV1 (.resolveAlias bridge symbol)]
+    (->AmbientValueV1
+      (.symbolName bridge symbol)
+      (node-for! bridge state (.exportType bridge resolved)))))
 
 ;; Raw JavaScript object construction is intentionally confined to this
 ;; explicit projection boundary.  The wire keys stay visible and reviewable.
@@ -514,6 +545,7 @@
   (object
     [["name" (typeparameterv1-name value)]
      ["node" (typeparameterv1-nodeId value)]
+     ["declarationOwner" (typeparameterv1-declarationOwner value)]
      ["constraint" (typeparameterv1-constraintNode value)]
      ["default" (typeparameterv1-defaultNode value)]]))
 
@@ -631,9 +663,14 @@
          (mapv tuple-element->wire elements)]
         ["readonly" readonly]])]
 
+    [(AwaitedNode id argument-node)
+     (object [["id" id]
+              ["kind" "awaited"]
+              ["argument" argument-node]])]
+
     [(ObjectNode
-       id name identity type-parameters properties indexes call-signatures
-       construct-signatures)
+       id name identity type-parameters base-types properties indexes
+       call-signatures construct-signatures)
      (object-with-optional
        (if identity
          (conj
@@ -641,6 +678,7 @@
            ["kind" "object"]
            ["typeParameters"
             (mapv type-parameter->wire type-parameters)]
+           ["baseTypes" base-types]
            ["properties"
             (mapv property->wire properties)]
            ["indexes"
@@ -654,6 +692,7 @@
           ["kind" "object"]
           ["typeParameters"
            (mapv type-parameter->wire type-parameters)]
+          ["baseTypes" base-types]
           ["properties"
            (mapv property->wire properties)]
           ["indexes"
@@ -723,14 +762,24 @@
     [bridge OpaqueCompilerValueV1
      context OpaqueCompilerValueV1
      module-specifier String
-     conditions (Vec String)] WireValueV1
-    (let [state BuildStateV1 (empty-build-state bridge)
+     conditions (Vec String)
+     requested-ambient-names (Vec String)
+     requested-exports (Vec String)
+     requested-member-names (Vec String)] WireValueV1
+    (let [state BuildStateV1 (empty-build-state! bridge requested-member-names)
           exports (Vec ExportV1) (sorted-exports
             bridge
-            (mapv
-              (fn [exported-symbol OpaqueCompilerValueV1] ExportV1
-                (export-node! bridge state exported-symbol))
-              (sorted-opaque bridge (.moduleExports bridge context))))
+            (if (empty? requested-ambient-names)
+              (mapv
+                (fn [exported-symbol OpaqueCompilerValueV1] ExportV1
+                  (export-node! bridge state exported-symbol))
+                (sorted-opaque
+                  bridge
+                  (.moduleExports bridge context requested-exports)))
+              []))
+          ambient-candidate-names (Vec String) (if (empty? requested-ambient-names)
+            (deref (buildstatev1-ambientCandidateNames state))
+            requested-ambient-names)
           ambient-values (Vec AmbientValueV1) (mapv
             (fn [symbol OpaqueCompilerValueV1] AmbientValueV1
               (ambient-value-node! bridge state symbol))
@@ -739,9 +788,10 @@
               (.ambientValues
                 bridge
                 context
-                (deref (buildstatev1-ambientCandidateNames state)))))
-          nodes (Vec ForeignNodeV1) (sorted-nodes bridge (deref (buildstatev1-nodes state)))
-          obligations (Vec ObligationV1) (sorted-obligations bridge (deref (buildstatev1-obligations state)))
+                ambient-candidate-names
+                (not (empty? requested-ambient-names)))))
+          nodes (Vec ForeignNodeV1) (sorted-nodes bridge (persistent! (buildstatev1-nodes state)))
+          obligations (Vec ObligationV1) (sorted-obligations bridge (persistent! (buildstatev1-obligations state)))
           stats StatsV1 (->StatsV1
             (count nodes)
             (count exports)

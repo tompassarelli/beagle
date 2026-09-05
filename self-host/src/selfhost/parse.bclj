@@ -1093,8 +1093,9 @@
            (= (count predicate) 2)
            (string? (nth predicate 0))
            (contains? SCALAR-PREDICATE-OPS (nth predicate 0))
-           (number? (nth predicate 1)))
-    {"op" (nth predicate 0) "value" (nth predicate 1)}
+           (syntax/reader-number-datum? (nth predicate 1)))
+    {"op" (nth predicate 0)
+     "value" (syntax/reader-number-value (nth predicate 1))}
     (do
       (err! (str "defscalar :where predicate must be one complete (op numeric-literal) form, got: "
               (binding-datum->src predicate)))
@@ -2491,6 +2492,8 @@
 ;; stripped); reader strings ["#%string" s] collapse to plain JSON strings.
 (defn datum->json [d Any] Any
   (cond
+    (syntax/reader-float-datum? d)
+    (syntax/reader-number-value d)
     (and (vector? d) (= (count d) 2) (= (nth d 0) "#%string"))
     (nth d 1)
     (and (string? d) (keyword-sym? d))
@@ -3132,8 +3135,8 @@
     (make-pat-literal nil)
     (and (string? p) (keyword-sym? p))
     (make-pat-literal (datum->json p))
-    (number? p)
-    (make-pat-literal p)
+    (syntax/reader-number-datum? p)
+    (make-pat-literal (syntax/reader-number-value p))
     (boolean? p)
     (make-pat-literal p)
     (string-datum? p)
@@ -4344,6 +4347,8 @@
     NIL-LITERAL
     (boolean? d)
     (make-ref! (if d "true" "false"))
+    (syntax/reader-float-datum? d)
+    (make-literal "float" (syntax/reader-number-value d))
     (and (number? d) (int? d))
     (make-literal "number" d)
     (number? d)

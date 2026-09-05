@@ -31,6 +31,34 @@
 (def MAP-TAG String "#%map")
 (def SET-TAG String "#%set")
 
+;; JavaScript has one primitive Number representation, so an integer-valued
+;; authored Float such as 1.0 needs an explicit reader datum until parsing has
+;; installed the AST's `kind = float` distinction. This is compiler-internal
+;; datum structure, not a user-visible runtime number wrapper.
+(def READER-FLOAT-KIND String "beagle/reader-float-v1")
+
+(defn make-reader-float-datum
+  [value Number
+   source-text String] Any
+  {"kind" READER-FLOAT-KIND
+   "value" value
+   "sourceText" source-text})
+
+(defn reader-float-datum? [value Any] Bool
+  (and (map? value)
+       (= (get value "kind") READER-FLOAT-KIND)
+       (number? (get value "value"))
+       (string? (get value "sourceText"))))
+
+(defn reader-number-datum? [value Any] Bool
+  (or (number? value) (reader-float-datum? value)))
+
+(defn reader-number-value [value Any] Number
+  (cond
+    (reader-float-datum? value) (get value "value")
+    (number? value) value
+    :else 0))
+
 ;; --- tag utilities ---------------------------------------------------------------
 
 (defn bracketed? [d Any] Bool

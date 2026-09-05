@@ -5,6 +5,14 @@ const recordTypeValues = new WeakMap();
 const transientVectorStates = new WeakMap();
 const NOT_FOUND = Symbol("beagle/not-found");
 
+// Persistent collection implementations install these operations on their
+// values.  core.js can therefore dispatch representation-polymorphic updates
+// without importing hamt.js (hamt.js already imports this module for value
+// identity, so reversing that edge would create a cycle).
+export const persistent_assoc = Symbol("beagle/persistent-assoc");
+export const persistent_dissoc = Symbol("beagle/persistent-dissoc");
+export const persistent_conj = Symbol("beagle/persistent-conj");
+
 function protocolIdentity(kind, value) {
   if (typeof value !== "string" || value.length === 0) {
     throw new TypeError(`${kind} identity must be a non-empty string`);
@@ -824,7 +832,11 @@ export function empty_p(coll) {
 export function assoc_value(coll, key, value) {
   if (coll == null) coll = map_value();
   if (isHamt(coll)) {
-    throw new TypeError("assoc on a HAMT requires the emitter-selected HAMT operation");
+    const operation = coll[persistent_assoc];
+    if (typeof operation !== "function") {
+      throw new TypeError("HAMT value lacks persistent assoc dispatch");
+    }
+    return operation(coll, key, value);
   }
   if (Array.isArray(coll)) {
     if (listValues.has(coll) || eagerSeqValues.has(coll)) {
@@ -856,6 +868,13 @@ export function conj_value(coll, ...items) {
     }
     return result;
   }
+  if (isHamt(coll)) {
+    const operation = coll[persistent_conj];
+    if (typeof operation !== "function") {
+      throw new TypeError("HAMT value lacks persistent conj dispatch");
+    }
+    return items.reduce((result, item) => operation(result, item), coll);
+  }
   if (isPlainObject(coll)) {
     return items.reduce((result, entry) => {
       if (!Array.isArray(entry) || entry.length !== 2) {
@@ -864,10 +883,22 @@ export function conj_value(coll, ...items) {
       return assoc_value(result, entry[0], entry[1]);
     }, coll);
   }
-  if (isHamt(coll)) {
-    throw new TypeError("conj on a HAMT requires the emitter-selected HAMT operation");
-  }
   throw new TypeError("conj expects a collection");
+}
+
+export function dissoc_value(coll, ...keys) {
+  if (coll == null) return map_value();
+  if (isHamt(coll)) {
+    const operation = coll[persistent_dissoc];
+    if (typeof operation !== "function") {
+      throw new TypeError("HAMT value lacks persistent dissoc dispatch");
+    }
+    return keys.reduce((result, key) => operation(result, key), coll);
+  }
+  if (!isPlainObject(coll)) throw new TypeError("dissoc expects a map");
+  const result = { ...coll };
+  for (const key of keys) delete result[property_key(key)];
+  return result;
 }
 
 function transientVectorState(owner, operation) {

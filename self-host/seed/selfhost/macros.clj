@@ -120,7 +120,7 @@
   (selfhost.rt/eprint (str "beagle: duplicate macro definition: " name "\n"))))
   (if (and (not= kind "safe") (not= kind "defmacro")) (do
   (selfhost.rt/eprint (str "beagle: macro " name ": kind must be 'safe or 'defmacro (escape-hatch 'unsafe kind has been removed — all template macros are now type-checked end-to-end)\n"))
-  nil) (let [amp-pos (or (clojure.core/first (keep-indexed (fn [i ^String x] (if (= x "&") i nil)) params)) -1)
+  nil) (let [amp-pos (or (first (keep-indexed (fn [i ^String x] (if (= x "&") i nil)) params)) -1)
    fixed-params (if (> amp-pos -1) (subvec params 0 amp-pos) params)
    rest-param (if (> amp-pos -1) (nth params (+ amp-pos 1)) nil)]
   (swap! reg assoc name {"kind" kind "fixed-params" fixed-params "rest-param" rest-param "template" template "template-syntax" template-syntax "definition-span" (if (ast/beagle-syntax? template-syntax) (ast/beagle-syntax-span template-syntax) nil) "source-bytes" (syntax-source-bytes template-syntax)})
@@ -155,6 +155,7 @@
 (defn ^String macro-display [value]
   (let [datum (macro-datum value)]
   (cond
+  (ast/reader-float-datum? datum) (get datum "sourceText")
   (macro-string? datum) (nth datum 1)
   (string? datum) datum
   :else (str datum))))
@@ -275,7 +276,7 @@
   (if (nil? captures) (recur (subvec remaining 1)) (macro-eval! (get clause "body") (merge env captures))))))))))
 
 (defn macro-env-lookup! [env ^String name]
-  (if (clojure.core/contains? env name) (get env name) (macro-eval-fail! (str "unbound: " name))))
+  (if (contains? env name) (get env name) (macro-eval-fail! (str "unbound: " name))))
 
 (defn macro-builtin [^String name]
   {"kind" "builtin" "name" name})
@@ -427,19 +428,26 @@
   :else (recur (+ i 1) arg-i (str out ch)))) (recur (+ i 1) arg-i (str out ch))))))))
 
 (defn macro-number-fold! [^String name args]
-  (let [numbers (mapv macro-datum args)]
+  (let [datums (mapv macro-datum args)
+   numbers (mapv ast/reader-number-value datums)
+   float-result? (> (count (filterv ast/reader-float-datum? datums)) 0)
+   wrap (fn [value] (if float-result? (ast/make-reader-float-datum value (str value)) value))]
   (cond
-  (= name "+") (reduce + 0 numbers)
-  (= name "*") (reduce * 1 numbers)
+  (= name "+") (wrap (reduce + 0 numbers))
+  (= name "*") (wrap (reduce * 1 numbers))
   (= name "-") (cond
   (= (count numbers) 0) (macro-eval-fail! "- expected at least one argument")
   (= (count numbers) 1) (let [arg (nth numbers 0)]
-  (- 0 arg))
-  :else (reduce - (nth numbers 0) (subvec numbers 1)))
+  (wrap (- 0 arg)))
+  :else (wrap (reduce - (nth numbers 0) (subvec numbers 1))))
   :else (macro-eval-fail! (str "unknown numeric function: " name)))))
 
+(defn macro-int! [value ^String who]
+  (let [datum (macro-datum value)]
+  (if (and (number? datum) (int? datum)) datum (macro-eval-fail! (str who " expected an integer, got: " (macro-display datum))))))
+
 (defn ^Boolean macro-ordered? [^String name args]
-  (loop [items (mapv macro-datum args)]
+  (loop [items (mapv (fn [arg] (ast/reader-number-value (macro-datum arg))) args)]
   (if (< (count items) 2) true (let [a (nth items 0)
    b (nth items 1)
    ok (cond
@@ -591,10 +599,10 @@
   (or (= name "+") (= name "-") (= name "*")) (macro-number-fold! name args)
   (= name "quot") (do
   (macro-require-arity! name args 2)
-  (quot (macro-datum (nth args 0)) (macro-datum (nth args 1))))
+  (quot (macro-int! (nth args 0) name) (macro-int! (nth args 1) name)))
   (= name "mod") (do
   (macro-require-arity! name args 2)
-  (mod (macro-datum (nth args 0)) (macro-datum (nth args 1))))
+  (mod (macro-int! (nth args 0) name) (macro-int! (nth args 1) name)))
   (= name "syntax-name") (do
   (macro-require-arity! name args 1)
   (macro-syntax-name! (nth args 0)))

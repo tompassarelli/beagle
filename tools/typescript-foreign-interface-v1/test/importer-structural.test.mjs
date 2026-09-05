@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   bindCompiledAdapter,
   bindProducerInputs,
@@ -16,6 +17,11 @@ const runtimeRoot = resolve(repositoryRoot, "beagle-lib/lib/beagle");
 const fixture = resolve(adapterRoot, "fixture/structural-intersection.ts");
 const classLoopFixture = resolve(adapterRoot, "fixture/class-loop-operators.ts");
 const objectLiteralFixture = resolve(adapterRoot, "fixture/object-literal-spreads.ts");
+const asyncGeneratorFixture = resolve(adapterRoot, "fixture/async-generator-method.ts");
+const asyncGeneratorSemanticsFixture = resolve(
+  adapterRoot,
+  "fixture/async-generator-semantics.bjs",
+);
 const temporary = mkdtempSync(join(tmpdir(), "beagle-ts-structural-import-"));
 const compiled = resolve(temporary, "importer.mjs");
 
@@ -136,7 +142,6 @@ test("classes, local constructors, bounded loops, and exact JS operators lower t
   });
   expect(checked.exitCode, checked.stderr.toString()).toBe(0);
 });
-
 test("object aliases, spreads, computed keys, and record returns preserve their fields", async () => {
   const result = await importFixture(
     objectLiteralFixture,
@@ -175,4 +180,75 @@ test("object aliases, spreads, computed keys, and record returns preserve their 
     stdout: "pipe",
   });
   expect(checked.exitCode, checked.stderr.toString()).toBe(0);
+});
+
+test("async generator methods preserve yield, for-await, return, and finally", async () => {
+  const result = await importFixture(
+    asyncGeneratorFixture,
+    "beagle.typescript.async-generator-method",
+  );
+
+  expect(result.diagnostics).toEqual([]);
+  expect(result.source.match(/\(js\/async-generator/g)).toHaveLength(2);
+  expect(result.source).toContain("(AsyncIterable String)");
+  expect(result.source).toContain("(js/for-await [value String values]");
+  expect(result.source).toContain("(js/yield value)");
+  expect(result.source).toContain("(js/generator-return)");
+  expect(result.source).toContain("(finally");
+  expect(result.source).not.toContain("__typescript_import_unsupported__");
+
+  const attemptStart = result.source.indexOf(
+    "(js/async-generator (defn asyncgeneratorowner-attempt!",
+  );
+  const attemptEnd = result.source.indexOf(
+    "(js/async-generator (defn asyncgeneratorowner-session!",
+  );
+  expect(attemptStart).toBeGreaterThan(-1);
+  expect(attemptEnd).toBeGreaterThan(attemptStart);
+  const attemptSource = result.source.slice(attemptStart, attemptEnd);
+  expect(attemptSource).toContain("launch preflight did not settle");
+  expect(attemptSource).toContain("(js/for-await [value String values]");
+  expect(attemptSource).toContain("(js/yield value)");
+  expect(attemptSource).toContain("(js/generator-return)");
+
+  const imported = resolve(temporary, "async-generator-method.bjs");
+  writeFileSync(imported, result.source);
+  const checked = Bun.spawnSync([
+    resolve(repositoryRoot, "bin/beagle-check"),
+    imported,
+  ], {
+    cwd: repositoryRoot,
+    stderr: "pipe",
+    stdout: "pipe",
+  });
+  expect(checked.exitCode, checked.stderr.toString()).toBe(0);
+
+  const semanticOutput = resolve(temporary, "async-generator-semantics.mjs");
+  const built = Bun.spawnSync([
+    resolve(repositoryRoot, "bin/beagle-build"),
+    asyncGeneratorSemanticsFixture,
+    semanticOutput,
+  ], {
+    cwd: repositoryRoot,
+    stderr: "pipe",
+    stdout: "pipe",
+  });
+  expect(built.exitCode, built.stderr.toString()).toBe(0);
+
+  const module = await import(`${pathToFileURL(semanticOutput).href}?v=${Date.now()}`);
+  async function* input() {
+    yield "first";
+    yield "second";
+  }
+  const closed = [];
+  const generator = module.stream(input(), closed);
+  expect(await generator.next()).toEqual({ value: "first", done: false });
+  await generator.return();
+  expect(closed).toEqual([true]);
+
+  const attemptClosed = [];
+  const attempt = module["attempt!"](attemptClosed);
+  expect(await attempt.next()).toEqual({ value: "attempt", done: false });
+  expect(await attempt.next()).toEqual({ value: undefined, done: true });
+  expect(attemptClosed).toEqual([true]);
 });

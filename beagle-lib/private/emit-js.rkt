@@ -55,11 +55,17 @@
   (define source-table (current-js-source-map-src-table))
   (define location (and markers source-table (hash-ref source-table node #f)))
   (if (and location (loc-blamable? location))
-      (let ([marker-id (hash-count markers)])
-        (hash-set! markers marker-id location)
-        (string-append (string #\nul) "beagle-src:" (number->string marker-id)
-                       (string #\nul)
-                       (render)))
+      (let ([rendered (render)])
+        ;; An erased form has no generated position to map. A marker-only
+        ;; string would make module assembly retain a form/newline that the
+        ;; ordinary emitter removed, violating annotation byte transparency.
+        (if (string=? rendered "")
+            ""
+            (let ([marker-id (hash-count markers)])
+              (hash-set! markers marker-id location)
+              (string-append (string #\nul) "beagle-src:" (number->string marker-id)
+                             (string #\nul)
+                             rendered))))
       (render)))
 
 (define (js-defn-signature form #:async? async? #:name name #:params params)
@@ -85,6 +91,18 @@
 (define constrained-binding-counter (make-parameter (box 0)))
 (define (next-constrained-binding-id!)
   (define b (constrained-binding-counter))
+  (define n (unbox b))
+  (set-box! b (add1 n))
+  n)
+
+;; JavaScript declarations shadow across their entire lexical block, while a
+;; Beagle let binder enters scope only after its initializer. Give every local
+;; that shadows an already-bound source name a module-unique emitted name so
+;; `let [target (target ...)]` keeps calling the outer `target` rather than
+;; falling into the new declaration's temporal dead zone.
+(define lexical-shadow-counter (make-parameter (box 0)))
+(define (next-lexical-shadow-id!)
+  (define b (lexical-shadow-counter))
   (define n (unbox b))
   (set-box! b (add1 n))
   n)
@@ -215,6 +233,7 @@
     [(print) (format "process.stdout.write(~a)" (runtime-call "print_str" args))]
     [(pr) (format "process.stdout.write(~a)" (runtime-call "pr_str" args))]
     [(prn) (format "console.log(~a)" (runtime-call "pr_str" args))]
+    [(flush) (if (= n 0) "null" #f)]
     [(nil?) (if (= n 1) (format "(~a == null)" (emit-expr (car args))) #f)]
     [(some?) (if (= n 1) (format "(~a != null)" (emit-expr (car args))) #f)]
     [(true?) (if (= n 1) (format "(~a === true)" (emit-expr (car args))) #f)]
@@ -373,6 +392,10 @@
     [(boolean) (if (= n 1) (emit-truthy-expr (car args)) #f)]
     [(string?) (if (= n 1) (format "(typeof ~a === 'string')" (emit-expr (car args))) #f)]
     [(number?) (if (= n 1) (format "(typeof ~a === 'number')" (emit-expr (car args))) #f)]
+    [(int?) (if (= n 1) (format "Number.isInteger(~a)" (emit-expr (car args))) #f)]
+    ;; JavaScript Number has no runtime Int/Double class split. Source numeric
+    ;; kind is retained independently by the self-host reader until AST parse.
+    [(double?) (if (= n 1) (format "(typeof ~a === 'number')" (emit-expr (car args))) #f)]
     [(keyword?) (if (= n 1) (runtime-call "keyword_p" args) #f)]
     [(fn?) (if (= n 1) (format "(typeof ~a === 'function')" (emit-expr (car args))) #f)]
     [(and) (emit-logical-expr 'and args)]
@@ -441,24 +464,29 @@
                                               (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args))))]
                [(or (= n 2) (= n 3)) (runtime-call "get" args)]
                [else #f]))]
-    [(update) (if (= n 3)
+    [(update) (if (>= n 3)
                   (begin
+                    (mark-needs-v-if-hamtish! (car args))
                     (use-runtime!)
-                    (format "(() => { const _m = ~a, _k = $$bc$property_key(~a); return { ..._m, [_k]: ~a(_m[_k]) }; })()"
+                    (format "(() => { const _m = ~a, _k = ~a; return $$bc$assoc_value(_m, _k, ~a($$bc$get(_m, _k)~a)); })()"
                             (emit-expr (car args))
                             (emit-expr (cadr args))
-                            (emit-expr (caddr args))))
+                            (emit-expr (caddr args))
+                            (if (> n 3)
+                                (string-append ", " (string-join (map emit-expr (cdddr args)) ", "))
+                                "")))
                   #f)]
     [(merge) (if (>= n 1)
               (format "Object.assign({}, ~a)" (string-join (map emit-expr args) ", "))
               #f)]
     [(dissoc) (cond
-                [(not (= n 2)) #f]
+                [(< n 1) #f]
                 [(eq? (classify-rep (car args)) 'hmap)
-                 (hamt-call "hamtMapDissoc" (emit-expr (car args)) (emit-expr (cadr args)))]
-                [else (format "(() => { const _r = {...~a}; delete _r[~a]; return _r; })()"
-                              (emit-expr (car args))
-                              (emit-property-key (cadr args)))])]
+                 (for/fold ([acc (emit-expr (car args))]) ([key (in-list (cdr args))])
+                   (hamt-call "hamtMapDissoc" acc (emit-expr key)))]
+                [else
+                 (mark-needs-v-if-hamtish! (car args))
+                 (runtime-call "dissoc_value" args)])]
     [(subvec) (cond
                 [(= n 2) (format "~a.slice(~a)" (emit-expr (car args)) (emit-expr (cadr args)))]
                 [(= n 3) (format "~a.slice(~a, ~a)" (emit-expr (car args)) (emit-expr (cadr args)) (emit-expr (caddr args)))]
@@ -883,13 +911,16 @@
 ;; `iife`/loop output, so this never over-awaits an inline-await call like
 ;; `f(await g())` (which does not start with `(async () => `).
 (define (await-async-iife s)
-  (if (string-prefix? (js-render-shape s) "(async () => ")
+  (if (and (current-js-async?)
+           (string-prefix? (js-render-shape s) "(async () => "))
     (string-append "await " s)
     s))
 
 ;; --- context tracking ------------------------------------------------------
 
 (define current-js-context (make-parameter 'stmt))
+(define current-js-generator? (make-parameter #f))
+(define current-js-async? (make-parameter #f))
 (define current-js-inline-scope (make-parameter (set)))
 (define current-js-record-fields (make-parameter (hasheq)))
 (define current-js-union-members (make-parameter (hasheq)))
@@ -899,6 +930,7 @@
 (define current-js-declared-externs (make-parameter (set)))
 (define current-js-scalar-fns (make-parameter (set)))
 (define current-js-symbol-ns (make-parameter (hasheq)))
+(define current-js-ambient-global-runtime-names (make-parameter (hash)))
 (define current-js-namespace (make-parameter 'beagle.user))
 (define current-js-module-bindings (make-parameter (hasheq)))
 (define current-js-public-esm-members (make-parameter (hasheq)))
@@ -941,9 +973,15 @@
                 #f)))
 
 (define (emit-qualified-reference ref #:constructor? [constructor? #f])
+  (define ambient-name
+    (hash-ref
+     (current-js-ambient-global-runtime-names)
+     (cons (qualified-ref-qualifier ref) (qualified-ref-name ref))
+     #f))
   (define member
     (mangle-str (qualified-runtime-member ref constructor?)))
   (cond
+    [ambient-name (mangle-name ambient-name)]
     [(eq? (qualified-ref-qualifier ref) 'js) member]
     [(qualified-module-binding ref)
      => (lambda (binding)
@@ -1423,16 +1461,12 @@
 (define (js-bound? sym)
   (set-member? (current-js-bound) sym))
 
-;; A `let`/return-position-let with a repeated (shadowed) binding name — legal,
-;; idiomatic Clojure (`(let [x 1 x (+ x 1)] x)`) — lowers each binding to a flat
-;; `const`/`let` statement in ONE JS block; declaring the same identifier twice
-;; in one block is a JS SyntaxError even though the source type-checks clean.
-;; `current-rename-env` maps a shadowed source symbol to the freshened JS
-;; identifier actually declared for its latest binding (see
-;; `emit-let-bindings`), and every var-ref / binding-target site resolves a
-;; name through it before falling back to the ordinary `mangle-name`. Mirrors
-;; `loop`'s `_recur_N` freshening for the same reason: distinct JS identifiers
-;; per rebinding, one flat block.
+;; A Beagle let binder enters scope after its initializer; JavaScript const/let
+;; instead shadows across the whole lexical block. Repeated bindings in one
+;; sequence also lower to declarations in one JS block. `current-rename-env`
+;; therefore maps each source binder that would collide to the compiler-owned
+;; identifier actually declared for it, and every var-ref / binding-target site
+;; resolves through that environment before falling back to `mangle-name`.
 (define current-rename-env (make-parameter (hash)))
 (define current-binder-types (make-parameter #f))
 
@@ -2023,6 +2057,7 @@
                  [match-counter (box 0)]
                  [logical-counter (box 0)]
                  [constrained-binding-counter (box 0)]
+                 [lexical-shadow-counter (box 0)]
                  [catch-counter (box 0)]
                  [loop-try-counter (box 0)]
                  [current-js-record-fields (build-record-field-table prog)]
@@ -2036,6 +2071,8 @@
                   (list->set (hash-keys (program-declared-externs prog)))]
                  [current-js-scalar-fns (build-scalar-fns prog)]
                  [current-js-symbol-ns (program-imported-symbol-ns prog)]
+                 [current-js-ambient-global-runtime-names
+                  (program-ambient-global-runtime-names prog)]
                  [current-js-namespace (program-namespace prog)]
                  [current-js-module-bindings
                   (build-js-module-binding-table prog)]
@@ -2370,12 +2407,16 @@
     (filter
      (lambda (s) (not (string=? s "")))
      (for/list ([r (in-list rs)])
-       (define bindings (require-entry-bindings r))
-       (define module-import (require-module-import prog r))
-       (define module-path-literal
-         (js-string-lit (require-module-path importer-ns r)))
-       (if (pair? bindings)
-         (let ()
+       (if (eq? (module-identity-kind (require-entry-identity r))
+                'typescript-ambient)
+           ""
+           (let ()
+             (define bindings (require-entry-bindings r))
+             (define module-import (require-module-import prog r))
+             (define module-path-literal
+               (js-string-lit (require-module-path importer-ns r)))
+             (if (pair? bindings)
+               (let ()
            (define runtime-imports
              (normalize-js-runtime-imports!
               r
@@ -2412,10 +2453,10 @@
                         (runtime-import-spec r runtime-import))
                       ", ")
                      module-path-literal)))
-         (let ([alias (require-prefix r)])
-           (format "import * as ~a from ~a;"
-                   (js-module-binding-name alias)
-                   module-path-literal))))))
+               (let ([alias (require-prefix r)])
+                 (format "import * as ~a from ~a;"
+                         (js-module-binding-name alias)
+                         module-path-literal))))))))
   (if (null? lines)
     ""
     (string-append (string-join lines "\n") "\n")))
@@ -2471,7 +2512,11 @@
         (with-param-envs
          (arity-clause-params a)
          (lambda ()
-           (parameterize ([current-rename-env arity-rename-env])
+           (parameterize ([current-rename-env arity-rename-env]
+                          [current-js-async? async?]
+                          [current-js-inline-scope
+                           (set-union (current-js-inline-scope)
+                                      (list->set arity-bound))])
              (with-bindings arity-bound
                (lambda ()
                  (emit-body-return (arity-clause-body a) "    ")))))
@@ -2489,7 +2534,8 @@
           (if name (format " ~a" name) "")
           (string-join branches "\n")))
 
-(define (emit-js-defn f #:force-async? [force-async? #f])
+(define (emit-js-defn f #:force-async? [force-async? #f]
+                      #:generator? [generator? #f])
   (define params (emit-js-params (defn-form-params f) (defn-form-rest-param f)))
   (define param-rename-env
     (callable-param-rename-env
@@ -2510,9 +2556,17 @@
   (define emitted-body
     (with-param-envs (defn-form-params f)
       (lambda ()
-        (parameterize ([current-rename-env param-rename-env])
+        (parameterize ([current-rename-env param-rename-env]
+                       [current-js-generator? generator?]
+                       [current-js-async? async?]
+                       [current-js-inline-scope
+                        (set-union (current-js-inline-scope)
+                                   (list->set bound))])
           (with-bindings bound
-            (lambda () (emit-body-return (defn-form-body f) "  ")))))
+            (lambda ()
+              (if generator?
+                  (emit-body-stmts (defn-form-body f) "  ")
+                  (emit-body-return (defn-form-body f) "  "))))))
       (defn-form-rest-param f)))
   (define inner
     (string-join (append setup (list emitted-body)) "\n  "))
@@ -2520,10 +2574,13 @@
           (if (exported-binding? (defn-form-name f) (defn-form-private? f))
               "export "
               "")
-          (js-defn-signature f
-                             #:async? async?
-                             #:name (mangle-name (defn-form-name f))
-                             #:params params)
+          (if generator?
+              (format "async function* ~a(~a)"
+                      (mangle-name (defn-form-name f)) params)
+              (js-defn-signature f
+                                 #:async? async?
+                                 #:name (mangle-name (defn-form-name f))
+                                 #:params params))
           inner))
 
 (define (emit-js-async-callable f)
@@ -2574,6 +2631,12 @@
 
     [(async-callable? f)
      (emit-js-async-callable (async-callable-form f))]
+
+    [(jst-async-generator? f)
+     (define callable (jst-async-generator-form f))
+     (unless (defn-form? callable)
+       (error 'beagle-js "js/async-generator requires a defn"))
+     (emit-js-defn callable #:force-async? #t #:generator? #t)]
 
     [(record-form? f)
      (emit-record f)]
@@ -2635,6 +2698,10 @@
          (jst-declare-type? f)
          (jst-declare-export? f)) ""]
 
+    ;; Clojure forward declarations have no runtime work. JavaScript function
+    ;; declarations are hoisted, so an authored `(declare f ...)` erases.
+    [(and (call-form? f) (eq? (call-form-fn f) 'declare)) ""]
+
     ;; Top-level effect-position forms: route ctrl-flow (if/cond/when/let/do)
     ;; through the statement lowering; emit-stmt-inline falls back to
     ;; emit-expr-stmt for plain expressions, so non-ctrl-flow output is unchanged.
@@ -2646,12 +2713,74 @@
   (with-js-source-map-marker
    e
    (lambda ()
-     (parameterize ([current-js-context 'expr])
+     (parameterize ([current-js-context 'expr]
+                    [current-js-generator?
+                     (if (fn-form? e) #f (current-js-generator?))])
        (emit-expr-core e)))))
 
 (define (emit-expr-stmt e)
   (define s (await-async-iife (emit-expr-core e)))
   (if (string-suffix? s ";") s (string-append s ";")))
+
+(define (emit-letfn-content e emit-executable-body indent)
+  (define fns (letfn-form-fns e))
+  (define body (letfn-form-body e))
+  (define fn-names (map letfn-fn-name fns))
+  (define letfn-rename-env
+    (for/fold ([env (current-rename-env)])
+              ([fn (in-list fns)] [fn-name (in-list fn-names)])
+      (rename-env-set-binder
+       env fn fn-name (mangle-name (binder-output-symbol fn fn-name)))))
+  (parameterize ([current-rename-env letfn-rename-env])
+    (with-bindings fn-names
+      (lambda ()
+        (define fn-strs
+          (for/list ([f (in-list fns)])
+            (define name (resolved-binder-name f (letfn-fn-name f)))
+            (define params
+              (emit-js-params
+               (letfn-fn-params f) (letfn-fn-rest-param f)))
+            (define param-rename-env
+              (callable-param-rename-env
+               (letfn-fn-params f) (letfn-fn-rest-param f)))
+            (define setup
+              (emit-js-param-setup
+               (letfn-fn-params f)
+               (letfn-fn-rest-param f)
+               param-rename-env))
+            (define fn-body (letfn-fn-body f))
+            (define fn-async?
+              (or (params-have-constraint-await?
+                   (letfn-fn-params f) (letfn-fn-rest-param f))
+                  (contains-await? fn-body)))
+            (define prefix (if fn-async? "async " ""))
+            (define fn-bound
+              (binding-names-from-params
+               (letfn-fn-params f) (letfn-fn-rest-param f)))
+            (with-param-envs
+             (letfn-fn-params f)
+             (lambda ()
+               ;; A letfn callable is an ordinary nested function boundary. It
+               ;; never inherits async-generator statement authority from the
+               ;; surrounding function.
+               (parameterize ([current-rename-env param-rename-env]
+                              [current-js-generator? #f]
+                              [current-js-async? fn-async?]
+                              [current-js-inline-scope
+                               (set-union (current-js-inline-scope)
+                                          (list->set fn-bound))])
+                 (with-bindings fn-bound
+                   (lambda ()
+                     (format "~afunction ~a(~a) { ~a }"
+                             prefix name params
+                             (string-join
+                              (append setup
+                                      (list (emit-body-return fn-body "")))
+                              " "))))))
+             (letfn-fn-rest-param f))))
+        (format "~a ~a"
+                (string-join fn-strs " ")
+                (emit-executable-body body indent))))))
 
 (define (emit-expr-core e)
   (cond
@@ -2670,6 +2799,8 @@
      (cond
        [(eq? e 'nil) "null"]
        [(keyword-symbol? e) (runtime-call "keyword" (list (kw->prop e)))]
+       [(hash-ref (current-js-ambient-global-runtime-names) e #f)
+        => mangle-name]
        [(js-bound? e) (resolved-name e)]
        [(hash-ref JS-VALUE-WRAPPERS e #f) => values]
        [else (mangle-name e)])]
@@ -2868,7 +2999,10 @@
      (with-bindings let-names
        (lambda ()
          (parameterize ([current-rep-env rep-env-out] [current-type-env type-env-out]
-                        [current-rename-env rename-env-out])
+                        [current-rename-env rename-env-out]
+                        [current-js-inline-scope
+                         (set-union (current-js-inline-scope)
+                                    (list->set let-names))])
            (iife (format "~a ~a" (string-join bind-strs " ") (emit-body-return body ""))
                   #:async? has-await))))]
 
@@ -3053,14 +3187,20 @@
            (define body-str
              (emit-loop-body-sequence
               body bind-names
-              (lambda (value-str) (format "return ~a;" value-str))))
+              (lambda (value-str)
+                (if (current-js-generator?)
+                    (format "~a; break;" value-str)
+                    (format "return ~a;" value-str)))))
            (define prefix (if has-await "async " ""))
-           (format "(~a() => { ~a while (true) {\n    ~a~a~a\n  } })()"
-                   prefix
-                   (string-join bind-strs " ")
-                   (string-join iteration-setup-strs " ")
-                   (if (null? iteration-setup-strs) "" "\n    ")
-                   body-str))))]
+           (define loop-source
+             (format "~a while (true) {\n    ~a~a~a\n  }"
+                     (string-join bind-strs " ")
+                     (string-join iteration-setup-strs " ")
+                     (if (null? iteration-setup-strs) "" "\n    ")
+                     body-str))
+           (if (current-js-generator?)
+               (format "{ ~a }" loop-source)
+               (format "(~a() => { ~a })()" prefix loop-source)))))]
 
     [(recur-form? e)
      (error 'beagle-js
@@ -3087,7 +3227,11 @@
      (with-param-envs
       (fn-form-params e)
       (lambda ()
-       (parameterize ([current-rename-env param-rename-env])
+       (parameterize ([current-rename-env param-rename-env]
+                      [current-js-async? async?]
+                      [current-js-inline-scope
+                       (set-union (current-js-inline-scope)
+                                  (list->set bound))])
          (with-bindings bound
            (lambda ()
              (if (and (null? setup)
@@ -3112,57 +3256,13 @@
      (emit-js-multi-arity-function (fn-multi-arities e))]
 
     [(letfn-form? e)
-     (define fns (letfn-form-fns e))
      (define body (letfn-form-body e))
-     (define fn-names (map letfn-fn-name fns))
-     (define letfn-rename-env
-       (for/fold ([env (current-rename-env)])
-                 ([fn (in-list fns)] [fn-name (in-list fn-names)])
-         (rename-env-set-binder
-          env fn fn-name (mangle-name (binder-output-symbol fn fn-name)))))
      ;; Nested functions own their async status. Their bodies must not make
      ;; the surrounding letfn IIFE async: declaring an async local while the
      ;; letfn body returns a plain value must still return that value directly.
      (define has-await (contains-await? body))
-     (parameterize ([current-rename-env letfn-rename-env])
-       (with-bindings fn-names
-        (lambda ()
-         (define fn-strs
-           (for/list ([f (in-list fns)])
-             (define name (resolved-binder-name f (letfn-fn-name f)))
-             (define params
-               (emit-js-params
-                (letfn-fn-params f) (letfn-fn-rest-param f)))
-             (define param-rename-env
-               (callable-param-rename-env
-                (letfn-fn-params f) (letfn-fn-rest-param f)))
-             (define setup
-               (emit-js-param-setup
-                (letfn-fn-params f)
-                (letfn-fn-rest-param f)
-                param-rename-env))
-             (define fn-body (letfn-fn-body f))
-             (define fn-async?
-               (or (params-have-constraint-await?
-                    (letfn-fn-params f) (letfn-fn-rest-param f))
-                   (contains-await? fn-body)))
-             (define prefix (if fn-async? "async " ""))
-             (define fn-bound (binding-names-from-params (letfn-fn-params f) (letfn-fn-rest-param f)))
-             (with-param-envs
-              (letfn-fn-params f)
-              (lambda ()
-                (parameterize ([current-rename-env param-rename-env])
-                  (with-bindings fn-bound
-                    (lambda ()
-                      (format "~afunction ~a(~a) { ~a }"
-                              prefix name params
-                              (string-join
-                               (append setup
-                                       (list (emit-body-return fn-body "")))
-                               " "))))))
-              (letfn-fn-rest-param f))))
-         (iife (format "~a ~a" (string-join fn-strs " ") (emit-body-return body ""))
-                #:async? has-await))))]
+     (iife (emit-letfn-content e emit-body-return "")
+           #:async? has-await)]
 
     [(static-call? e)
      (define ref (static-call-class+method e))
@@ -3460,6 +3560,11 @@
         (define qualified
           (let ([mod-prefix (hash-ref (current-js-symbol-ns) fn-sym #f)])
             (cond
+              [(hash-ref
+                (current-js-ambient-global-runtime-names)
+                fn-sym
+                #f)
+               => mangle-name]
               [(js-bound? fn-sym) mangled]
               [mod-prefix
                (string-append (js-module-binding-name mod-prefix) "." mangled)]
@@ -4062,6 +4167,36 @@
 
 ;; --- doseq → forEach -------------------------------------------------------
 
+(define (emit-js-for-await e)
+  (define binding (jst-for-await-binding e))
+  (define pre-bound (current-js-bound))
+  (define pre-rename-env (current-rename-env))
+  (define-values (post-bound post-rename-env)
+    (extend-js-binding-context
+     binding "js-for-await" 0 pre-bound pre-rename-env))
+  (define-values (arg setup)
+    (emit-js-binding-parameter
+     binding "$beagle$item"
+     #:constraint-bound pre-bound
+     #:constraint-rename-env pre-rename-env
+     #:install-bound post-bound
+     #:install-rename-env post-rename-env))
+  (define collection-str
+    (parameterize ([current-js-bound pre-bound]
+                   [current-rename-env pre-rename-env])
+      (emit-expr (for-binding-expr binding))))
+  (define body-str
+    (parameterize ([current-js-bound post-bound]
+                   [current-rename-env post-rename-env])
+      (emit-body-stmts (jst-for-await-body e) "  ")))
+  (define setup-str (string-join setup "\n  "))
+  (define inner-body
+    (if (null? setup)
+        body-str
+        (string-append setup-str "\n  " body-str)))
+  (format "for await (const ~a of ~a) {\n  ~a\n}"
+          arg collection-str inner-body))
+
 (define (emit-doseq e)
   (define clauses (doseq-form-clauses e))
   (define body (doseq-form-body e))
@@ -4086,7 +4221,7 @@
      (define collection-str
        (parameterize ([current-js-bound pre-bound]
                       [current-rename-env pre-rename-env])
-         (emit-expr expr)))
+         (runtime-render-call "eager_seq" (list (emit-expr expr)))))
      (define setup-str (string-join setup "\n  "))
      (define inner-body
        (if (null? setup)
@@ -4429,6 +4564,18 @@
                #:when (param-constraint p))
            (walk (param-constraint p)))
          (for-each walk (arity-clause-body a)))]
+      [(letfn-form? e)
+       ;; Local functions may close over and reassign bindings owned by the
+       ;; surrounding let. Their parameter constraints and bodies therefore
+       ;; participate in the same mutable-binding inventory as fn literals.
+       (for ([f (in-list (letfn-form-fns e))])
+         (for ([p (in-list
+                   (param-bindings
+                    (letfn-fn-params f) (letfn-fn-rest-param f)))]
+               #:when (param-constraint p))
+           (walk (param-constraint p)))
+         (for-each walk (letfn-fn-body f)))
+       (for-each walk (letfn-form-body e))]
       [(cond-form? e) (for ([c (in-list (cond-form-clauses e))])
                         (walk (cond-clause-test c)) (for-each walk (cond-clause-body c)))]
       [(for-form? e) (for ([c (in-list (for-form-clauses e))])
@@ -4544,13 +4691,12 @@
   ;; declaration is constrained, hidden authored slots prevent a same-named
   ;; outer predicate from being captured by the new JS local's TDZ.
   (define constrained-sequence? (bindings-have-constraints? bindings))
-  (define-values (strs _bound rep-env type-env rename-env _seen)
+  (define-values (strs _bound rep-env type-env rename-env)
     (for/fold ([strs '()]
                [bound (current-js-bound)]
                [rep-env (current-rep-env)]
                [type-env (current-type-env)]
-               [rename-env (current-rename-env)]
-               [seen (hash)])
+               [rename-env (current-rename-env)])
               ([b (in-list bindings)]
                [i (in-naturals)])
       (define val-str (await-async-iife
@@ -4562,27 +4708,25 @@
       (define constrained-id
         (and constrained-sequence? (next-constrained-binding-id!)))
       (define new-names (names-from-binding-target (let-binding-name b)))
-      ;; Freshen any name this SAME let-sequence already declared: 1st
-      ;; occurrence keeps its plain mangled name (also overrides any stale
-      ;; mapping inherited from an outer scope's rename-env — a fresh nested
-      ;; `let` binding the same source name is a fresh JS scope, not a clash),
-      ;; every later occurrence gets a `_shadowN` suffix so the block declares
-      ;; distinct identifiers.
-      (define-values (rename-env* seen*)
-        (for/fold ([re rename-env] [sn seen]) ([nm (in-list new-names)])
-          (define n (hash-ref sn nm 0))
+      ;; A Beagle binder is absent from its own initializer. JavaScript's const
+      ;; is instead in the temporal dead zone for the whole block, so any name
+      ;; already present in the pre-binding environment must be freshened. This
+      ;; also covers repeated bindings in the same sequential let because
+      ;; `bound` grows after each declaration.
+      (define rename-env*
+        (for/fold ([re rename-env]) ([nm (in-list new-names)])
           (define js-name
             (cond
               [constrained-sequence?
                (format "$beagle$constrained$binding$~a$~a"
                        constrained-id (mangle-name nm))]
-              [(zero? n)
+              [(not (set-member? bound nm))
                (mangle-name (binder-output-symbol b nm))]
               [else
-               (format "~a_shadow~a"
-                       (mangle-name (binder-output-symbol b nm)) n)]))
-          (values (rename-env-set-binder re b nm js-name)
-                  (hash-set sn nm (add1 n)))))
+               (format "$beagle$shadow$~a$~a"
+                       (next-lexical-shadow-id!)
+                       (mangle-name (binder-output-symbol b nm)))]))
+          (rename-env-set-binder re b nm js-name)))
       (define mutable? (for/or ([nm (in-list new-names)]) (and (memq nm mutated-syms) #t)))
       (define stmts (parameterize ([current-rename-env rename-env*])
                       (emit-let-binding-stmts
@@ -4610,8 +4754,7 @@
                   (hash-set projected-rep-env name rep)
                   projected-rep-env)
               (if bty (hash-set projected-type-env name bty) projected-type-env)
-              rename-env*
-              seen*)))
+              rename-env*)))
   (values strs rep-env type-env rename-env))
 
 ;; Render try/catch/finally as statements while letting the caller choose how
@@ -4628,7 +4771,7 @@
                 (lambda (c)
                   (define exception-type (catch-clause-exception-type c))
                   (cond
-                    [(eq? exception-type ':default) "$$bd$default_catch"]
+                    [(memq exception-type '(Any :default)) "$$bd$default_catch"]
                     [(eq? exception-type 'ExceptionInfo) "$$be$ExceptionInfo"]
                     [(and (symbol? exception-type)
                           (string-prefix? (symbol->string exception-type) "js/"))
@@ -4839,7 +4982,9 @@
                  (cdr forms) bind-names emit-value))))]
     [else
      (format "~a ~a"
-             (emit-expr-stmt (car forms))
+             (if (current-js-generator?)
+                 (emit-stmt-inline (car forms) "")
+                 (emit-expr-stmt (car forms)))
              (emit-loop-body-sequence
               (cdr forms) bind-names emit-value))]))
 
@@ -5003,6 +5148,7 @@
 ;; Inlines let/do/when/when-let/if-let/if to avoid unnecessary IIFEs.
 (define (emit-return-position e indent)
   (cond
+    [(jst-generator-return? e) "return;"]
     [(let-form? e)
      (define bindings (let-form-bindings e))
      (define body (let-form-body e))
@@ -5143,6 +5289,20 @@
 ;; Emit a non-final expression as a statement (no return), inlining where possible.
 (define (emit-stmt-inline e indent)
   (cond
+    [(jst-yield? e)
+     (format "yield ~a;" (emit-expr (jst-yield-expr e)))]
+    [(jst-generator-return? e) "return;"]
+    [(jst-for-await? e) (emit-js-for-await e)]
+    [(and (current-js-generator?) (try-form? e))
+     (emit-js-try-statement e emit-body-stmts)]
+    [(and (current-js-generator?) (letfn-form? e))
+     ;; Keep the executable letfn body in the generator itself. The lexical
+     ;; block scopes its local functions without moving yield into an IIFE.
+     (define inner (string-append indent "  "))
+     (format "{\n~a~a\n~a}"
+             inner
+             (emit-letfn-content e emit-body-stmts inner)
+             indent)]
     [(let-form? e)
      (define bindings (let-form-bindings e))
      (define body (let-form-body e))
@@ -5150,8 +5310,7 @@
        (map (lambda (b) (names-from-binding-target (let-binding-name b))) bindings)))
      (define shadows? (for/or ([n (in-list let-names)])
                         (set-member? (current-js-inline-scope) n)))
-     (if shadows?
-       (emit-expr-stmt e)
+     (define (emit-inline-body body-indent)
        (let ()
          (define mutated-syms (collect-let-set!-target-syms bindings body))
          (define-values (bind-strs rep-env-out type-env-out rename-env-out)
@@ -5164,9 +5323,19 @@
                             [current-type-env type-env-out]
                             [current-rename-env rename-env-out])
                (string-append
-                (string-join bind-strs (string-append "\n" indent))
-                "\n" indent
-                (emit-body-stmts body indent)))))))]
+                (string-join bind-strs (string-append "\n" body-indent))
+                "\n" body-indent
+                (emit-body-stmts body body-indent)))))))
+     (cond
+       [(and shadows? (current-js-generator?))
+        ;; A nested authored let that shadows an already-inlined binding needs
+        ;; a real JavaScript lexical block. An IIFE is not an equivalent escape
+        ;; inside an async generator: yield belongs to the generator function
+        ;; itself and is a syntax error inside an ordinary async callback.
+       (define inner (string-append indent "  "))
+       (format "{\n~a~a\n~a}" inner (emit-inline-body inner) indent)]
+      [shadows? (emit-expr-stmt e)]
+      [else (emit-inline-body indent)])]
     [(do-form? e)
      (emit-body-stmts (do-form-body e) indent)]
     [(when-form? e)
