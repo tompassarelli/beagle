@@ -102,6 +102,7 @@
              "lint.rkt"
              "license-metadata.rkt"       ; root license files and package metadata stay in sync
              "lsp-effective-signatures.rkt" ; finalized inferred signatures on the public LSP surface
+             "lsp-content-length-utf8.rkt" ; regression test for the LSP
              "macro-hygiene.rkt"
              "scope-resolve-spike.rkt"
              "parse.rkt"
