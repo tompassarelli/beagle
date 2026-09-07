@@ -43,3 +43,15 @@ do not maintain foreign declarations and Beagle mirrors by hand. For importer
 commands, deeper design notes, or pinned Racket bootstrap, resolve
 `agents path beagle-authoring-reference`. Read the pinned procedure before
 using Racket. Graph-adopted files use the separate code-as-facts authoring path.
+
+## Worked contrasts
+
+- Bad: introducing a generic combinator or macro the moment a pattern repeats
+  twice, "since it'll probably come up again." Good: count the actual
+  repeated sites and their cost first; only abstract once that comparison
+  shows a real reduction, and report the measured number, not a guess.
+- Bad: routing around a missing compiler/importer capability with a cast,
+  generated patch, or host-glue shim so the immediate task can proceed. Good:
+  file the smallest upstream repair (or transfer it with an exact resume
+  condition) and continue other work while it lands — a workaround here
+  becomes the next consumer's inherited debt.

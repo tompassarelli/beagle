@@ -23,3 +23,15 @@ For affected incremental behavior, compare clean and warm results and plans
 for the same world, then verify only dependents invalidate. Use
 `verification-distilled` for the check. For identity and effect design detail,
 use `agents path beagle-system-design-reference`.
+
+## Worked contrasts
+
+- Bad: adding a memoization layer or cache in front of a slow or
+  repeated-looking lookup without naming the missing decision, authoritative
+  fact, or semantic owner behind it. Good: name that boundary first; add the
+  cache only once it's provably a pure optimization over a settled semantic,
+  not a stand-in for one that's still undecided.
+- Bad: introducing a new wrapper type or opaque schema to sidestep an
+  unresolved equality or authorization question. Good: settle the equality
+  contract and authorization boundary explicitly, then represent it in the
+  existing typed Beagle / canonical Store Triples rather than a new shape.
