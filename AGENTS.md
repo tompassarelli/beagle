@@ -122,3 +122,21 @@ compiler.
 - Do not build a runtime operative or fexpr evaluator. Every backend,
   including Nix, implements semantics from typed IR without runtime `eval` or
   reified environments.
+
+## Project-owned skills
+
+Use the project's skills from this checkout when their trigger applies. These
+paths also resolve a skill reference when it is absent from the global catalog;
+read full notes only for the specific detail the distilled guide cannot answer.
+
+- Authoring: `beagle:integrations/north/skills/beagle-authoring-distilled/SKILL.md`;
+  full notes: `beagle:integrations/north/skills/beagle-authoring-reference/SKILL.md`.
+- Compiler, Store, incremental, or effect design:
+  `beagle:integrations/north/skills/beagle-system-design-distilled/SKILL.md`;
+  full notes: `beagle:integrations/north/skills/beagle-system-design-reference/SKILL.md`.
+- Graph-owned source: `beagle:store/integrations/north/skills/code-as-facts-distilled/SKILL.md`;
+  full notes: `beagle:store/integrations/north/skills/code-as-facts-reference/SKILL.md`.
+- Fact modeling: `beagle:store/integrations/north/skills/fact-modeling-distilled/SKILL.md`;
+  full notes: `beagle:store/integrations/north/skills/fact-modeling-reference/SKILL.md`.
+- Store modeling: `beagle:store/integrations/north/skills/store-modeling-distilled/SKILL.md`;
+  full notes: `beagle:store/integrations/north/skills/store-modeling-reference/SKILL.md`.
