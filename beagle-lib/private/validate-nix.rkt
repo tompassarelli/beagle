@@ -874,7 +874,10 @@
 ;; myConfig introspective validation — declarations are the schema
 ;; ============================================================================
 
-(define (collect-myconfig-declarations all-file-keys)
+;; A module may declare its options in a source language this validator cannot
+;; parse, so the .bnix batch alone under-reports what is declared. The evaluated
+;; schema carries the module system's own view of every declaration that exists.
+(define (collect-myconfig-declarations all-file-keys [schema #f])
   (define declared (mutable-set))
   (for ([fk-pair (in-list all-file-keys)])
     (define keys (cdr fk-pair))
@@ -883,6 +886,10 @@
       (when (string-prefix? path-str "options.myConfig.")
         (define config-path (substring path-str 8))
         (set-add! declared config-path))))
+  (when schema
+    (for ([key (in-hash-keys (nixos-schema-table schema))])
+      (when (string-prefix? key "myConfig.")
+        (set-add! declared key))))
   declared)
 
 (define (myconfig-find-similar declared path-str)
@@ -1101,7 +1108,7 @@
             ;; These collection checks must run once over the complete parsed
             ;; input, never once per file.
             (define myconfig-declared
-              (collect-myconfig-declarations all-file-keys))
+              (collect-myconfig-declarations all-file-keys schema))
             (unless (set-empty? myconfig-declared)
               (set!
                all-errors
