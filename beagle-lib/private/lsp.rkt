@@ -34,8 +34,9 @@
   (define len (hash-ref headers "Content-Length" #f))
   (unless len (error 'lsp "missing Content-Length header"))
   (define n (string->number len))
-  (define body (read-string n in))
-  (when (eof-object? body) (exit 0))
+  (define body-bytes (read-bytes n in))
+  (when (eof-object? body-bytes) (exit 0))
+  (define body (bytes->string/utf-8 body-bytes))
   (string->jsexpr body))
 
 (define (read-headers in)
