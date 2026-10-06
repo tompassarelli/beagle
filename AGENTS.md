@@ -127,16 +127,16 @@ compiler.
 
 Use the project's skills from this checkout when their trigger applies. These
 paths also resolve a skill reference when it is absent from the global catalog;
-read full notes only for the specific detail the distilled guide cannot answer.
+read full notes only for the specific detail `SKILL.md` cannot answer.
 
-- Authoring: `beagle:integrations/north/skills/beagle-authoring-distilled/SKILL.md`;
-  full notes: `beagle:integrations/north/skills/beagle-authoring-reference/SKILL.md`.
+- Authoring: `beagle:integrations/north/skills/beagle-authoring/SKILL.md`;
+  full notes: `beagle:integrations/north/skills/beagle-authoring/references/notes.md`.
 - Compiler, Store, incremental, or effect design:
-  `beagle:integrations/north/skills/beagle-system-design-distilled/SKILL.md`;
-  full notes: `beagle:integrations/north/skills/beagle-system-design-reference/SKILL.md`.
-- Graph-owned source: `beagle:store/integrations/north/skills/code-as-facts-distilled/SKILL.md`;
-  full notes: `beagle:store/integrations/north/skills/code-as-facts-reference/SKILL.md`.
-- Fact modeling: `beagle:store/integrations/north/skills/fact-modeling-distilled/SKILL.md`;
-  full notes: `beagle:store/integrations/north/skills/fact-modeling-reference/SKILL.md`.
-- Store modeling: `beagle:store/integrations/north/skills/store-modeling-distilled/SKILL.md`;
-  full notes: `beagle:store/integrations/north/skills/store-modeling-reference/SKILL.md`.
+  `beagle:integrations/north/skills/beagle-system-design/SKILL.md`;
+  full notes: `beagle:integrations/north/skills/beagle-system-design/references/notes.md`.
+- Graph-owned source: `beagle:store/integrations/north/skills/code-as-facts/SKILL.md`;
+  full notes: `beagle:store/integrations/north/skills/code-as-facts/references/notes.md`.
+- Fact modeling: `beagle:store/integrations/north/skills/fact-modeling/SKILL.md`;
+  full notes: `beagle:store/integrations/north/skills/fact-modeling/references/notes.md`.
+- Store modeling: `beagle:store/integrations/north/skills/store-modeling/SKILL.md`;
+  full notes: `beagle:store/integrations/north/skills/store-modeling/references/notes.md`.
